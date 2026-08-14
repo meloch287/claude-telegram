@@ -274,3 +274,13 @@ const { saveTelegramFile } = await import("../src/bot/attachments.js");
 test("вложения: модуль экспортирует сохранение файла", () => {
   assert.equal(typeof saveTelegramFile, "function");
 });
+
+// ── Репозитории ─────────────────────────────────────────────────────────────
+
+const { hideToken } = await import("../src/bot/repos.js");
+
+test("токен из адреса репозитория не утекает в сообщение об ошибке", () => {
+  const masked = hideToken("fatal: не удалось https://ghp_SECRET123@github.com/user/repo");
+  assert.ok(!masked.includes("ghp_SECRET123"));
+  assert.ok(masked.includes("github.com/user/repo"));
+});

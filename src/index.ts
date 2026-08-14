@@ -47,6 +47,7 @@ import { checkAchievements, renderUnlocked, unlockedIds } from "./achievements.j
 import { ACHIEVEMENTS, CAT_LEVELS, catForTokens, formatTokens, nextCat } from "./cats.js";
 import { esc, formatUsd } from "./agent/render.js";
 import { saveTelegramFile } from "./bot/attachments.js";
+import { cloneRepository } from "./bot/repos.js";
 import { startMiniAppServer } from "./miniapp/server.js";
 import {
   activeChannel,
@@ -222,6 +223,52 @@ async function showScreen(ctx: CommandContext<Context>, id: ScreenId): Promise<v
 bot.command("menu", async (ctx) => showScreen(ctx, "menu"));
 bot.command("mode", async (ctx) => showScreen(ctx, "mode"));
 bot.command("model", async (ctx) => showScreen(ctx, "model"));
+
+/**
+ * Забрать репозиторий в рабочую папку проекта.
+ *
+ * Без этого агент сидит в пустом каталоге и любая задача про «наш код»
+ * упирается в то, что смотреть не на что.
+ */
+bot.command("clone", async (ctx) => {
+  const userId = ctx.from!.id;
+  const url = ctx.match?.toString().trim() ?? "";
+  if (!url) {
+    await ctx.reply(
+      "Укажи адрес репозитория:\n<code>/clone https://github.com/user/repo</code>\n\n" +
+        "Приватные — с токеном в адресе:\n<code>/clone https://ТОКЕН@github.com/user/repo</code>",
+      { parse_mode: "HTML" },
+    );
+    return;
+  }
+  if (!/^https:\/\/[\w.@:-]+\/[\w./-]+$/.test(url)) {
+    await ctx.reply("Похоже, это не https-адрес репозитория.");
+    return;
+  }
+
+  const chatRow = getChat(ctx.chat.id);
+  const project = chatRow?.project ?? "default";
+  const cwd = workspaceFor(userId, project);
+
+  const note = await ctx.reply("⏳ Забираю репозиторий…");
+  try {
+    const target = await cloneRepository(url, cwd);
+    await ctx.api.editMessageText(
+      ctx.chat.id,
+      note.message_id,
+      `📦 Забрал в проект <code>${esc(project)}</code>: <code>${esc(target)}</code>\n\nТеперь можно ставить задачи по этому коду.`,
+      { parse_mode: "HTML" },
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await ctx.api.editMessageText(
+      ctx.chat.id,
+      note.message_id,
+      `⚠️ Не получилось: <code>${esc(message.slice(0, 500))}</code>`,
+      { parse_mode: "HTML" },
+    );
+  }
+});
 
 bot.command("project", async (ctx) => {
   const userId = ctx.from!.id;
@@ -602,6 +649,7 @@ await bot.api.setMyCommands([
   { command: "stop", description: "остановить агента" },
   { command: "mode", description: "режим разрешений" },
   { command: "model", description: "сменить модель" },
+  { command: "clone", description: "забрать репозиторий" },
   { command: "project", description: "переключить проект" },
   { command: "stats", description: "расход и мой кот" },
   { command: "cats", description: "коты и достижения" },
