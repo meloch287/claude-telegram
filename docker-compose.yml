@@ -1,16 +1,25 @@
 services:
+  # Свой выход наружу: xray с германскими серверами из подписки.
+  # Каждый локальный порт ведёт в отдельный сервер, переключение между ними
+  # делает сам бот — так в /status видно, какой именно канал сейчас активный,
+  # и почему выбран он.
+  proxy:
+    image: ghcr.io/xtls/xray-core:latest
+    container_name: claude-proxy
+    restart: unless-stopped
+    command: ["run", "-c", "/etc/xray/config.json"]
+    volumes:
+      - ./proxy/xray.json:/etc/xray/config.json:ro
+    networks:
+      - claude
+
   bot:
     build: .
     container_name: claude-telegram
     restart: unless-stopped
+    depends_on:
+      - proxy
     env_file: .env
-    environment:
-      # На этом сервере api.anthropic.com напрямую отдаёт 403 — обязателен
-      # выход через egress-proxy, тот же, которым ходят соседние проекты.
-      HTTPS_PROXY: http://egress-proxy:1080
-      HTTP_PROXY: http://egress-proxy:1080
-      # Telegram и локальные адреса — мимо прокси.
-      NO_PROXY: localhost,127.0.0.1,egress-proxy
     volumes:
       # База и рабочие папки переживают пересборку образа.
       - ./data:/app/data
@@ -19,10 +28,8 @@ services:
       # Только на петлю: наружу мини-апп отдаёт Caddy, он же держит TLS.
       - "127.0.0.1:8788:8788"
     networks:
-      - egress
+      - claude
 
 networks:
-  egress:
-    # Сеть чужого проекта, в ней живёт egress-proxy. Создаётся не нами.
-    name: telegram-archive_egress
-    external: true
+  claude:
+    name: claude-telegram

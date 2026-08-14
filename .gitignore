@@ -5,3 +5,4 @@ workspaces/
 .env
 *.log
 .DS_Store
+proxy/
