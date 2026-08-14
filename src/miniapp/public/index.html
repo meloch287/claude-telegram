@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Мой Claude-кот</title>
+    <link rel="stylesheet" href="/style.css" />
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Перейти к основному содержимому</a>
+
+    <div id="app" hidden>
+      <header class="page-header">
+        <h1>Мой Claude-кот</h1>
+        <p class="plan" id="plan-line"></p>
+      </header>
+
+      <!--
+        tabindex="-1" обязателен: без него активация skip-ссылки в части
+        WebView проскроллит страницу, но не переставит фокус, и следующий Tab
+        продолжит с прежнего места.
+      -->
+      <main id="main" tabindex="-1">
+        <section class="hero" aria-labelledby="hero-name">
+          <div class="hero-art">
+            <div id="hero-cat" class="cat-art cat-art--large"></div>
+          </div>
+
+          <p class="hero-level" id="hero-level"></p>
+          <!-- Имя кота — настоящий заголовок: по нему работает навигация по H. -->
+          <h2 class="hero-name" id="hero-name"></h2>
+          <p class="hero-title" id="hero-title"></p>
+          <blockquote class="hero-quote" id="hero-quote"></blockquote>
+
+          <div class="progress">
+            <div class="progress-labels">
+              <span id="progress-label"></span>
+              <span id="progress-percent" class="progress-percent"></span>
+            </div>
+            <div
+              class="progress-track"
+              role="progressbar"
+              id="progress-bar"
+              aria-valuemin="0"
+              aria-valuemax="100"
+              aria-valuenow="0"
+              aria-labelledby="progress-label"
+            >
+              <div class="progress-fill" id="progress-fill"></div>
+            </div>
+            <p class="progress-caption" id="progress-caption"></p>
+          </div>
+        </section>
+
+        <section aria-labelledby="stats-heading">
+          <h2 id="stats-heading">Статистика</h2>
+          <ul class="stats" id="stats" role="list"></ul>
+        </section>
+
+        <section aria-labelledby="cats-heading">
+          <h2 id="cats-heading">Коты</h2>
+          <p class="section-note" id="cats-note"></p>
+          <ul class="cat-grid" id="cat-grid" role="list"></ul>
+        </section>
+
+        <section aria-labelledby="ach-heading">
+          <h2 id="ach-heading">Достижения</h2>
+          <p class="section-note" id="ach-note"></p>
+          <ul class="achievements" id="achievements" role="list"></ul>
+        </section>
+
+        <p class="share-row">
+          <button id="share-fallback" class="button" type="button" hidden>
+            Поделиться результатом
+          </button>
+        </p>
+      </main>
+    </div>
+
+    <p id="loading" class="state" role="status">Загружаю профиль…</p>
+    <p id="error" class="state state--error" role="alert" hidden></p>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

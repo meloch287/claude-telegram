@@ -1,0 +1,275 @@
+{
+  "tier": {
+    "id": "max",
+    "title": "Max",
+    "emoji": "🚀",
+    "model": "claude-opus-5"
+  },
+  "totals": {
+    "tokens": 420000,
+    "costUsd": 12.4831,
+    "messages": 187,
+    "sessions": 23,
+    "toolsAllowed": 312,
+    "toolsDenied": 19,
+    "streakDays": 9
+  },
+  "today": {
+    "tokens": 84210,
+    "limit": 10000000
+  },
+  "cat": {
+    "level": 4,
+    "id": "refactor",
+    "name": "Кот-рефакторщик",
+    "title": "Удалил больше строк, чем написал",
+    "quote": "Этой абстракции здесь быть не должно.",
+    "palette": [
+      "#D6B489",
+      "#A07F53",
+      "#141413"
+    ],
+    "accessory": "ножницы",
+    "progress": 0.26666666666666666,
+    "nextThreshold": 750000,
+    "nextName": "Кот-дебагер"
+  },
+  "cats": [
+    {
+      "level": 1,
+      "id": "intern",
+      "name": "Котёнок-стажёр",
+      "threshold": 0,
+      "title": "Только что открыл первый файл",
+      "palette": [
+        "#D97757",
+        "#A84F32",
+        "#141413"
+      ],
+      "accessory": "клубок",
+      "quote": "Мяу. А где тут README?",
+      "unlocked": true
+    },
+    {
+      "level": 2,
+      "id": "reader",
+      "name": "Кот-читатель",
+      "threshold": 25000,
+      "title": "Читает быстрее, чем ты скроллишь",
+      "palette": [
+        "#8A8781",
+        "#5E5B56",
+        "#141413"
+      ],
+      "accessory": "очки",
+      "quote": "Я прочитал всё. Даже комментарии.",
+      "unlocked": true
+    },
+    {
+      "level": 3,
+      "id": "greper",
+      "name": "Кот-грепер",
+      "threshold": 100000,
+      "title": "Находит нужную строку с первого раза",
+      "palette": [
+        "#55534E",
+        "#332F2B",
+        "#141413"
+      ],
+      "accessory": "лупа",
+      "quote": "Оно в utils. Всегда в utils.",
+      "unlocked": true
+    },
+    {
+      "level": 4,
+      "id": "refactor",
+      "name": "Кот-рефакторщик",
+      "threshold": 300000,
+      "title": "Удалил больше строк, чем написал",
+      "palette": [
+        "#D6B489",
+        "#A07F53",
+        "#141413"
+      ],
+      "accessory": "ножницы",
+      "quote": "Этой абстракции здесь быть не должно.",
+      "unlocked": true
+    },
+    {
+      "level": 5,
+      "id": "debugger",
+      "name": "Кот-дебагер",
+      "threshold": 750000,
+      "title": "Видит баг сквозь стек-трейс",
+      "palette": [
+        "#C4633E",
+        "#8E4227",
+        "#141413"
+      ],
+      "accessory": "фонарик",
+      "quote": "Воспроизводится. Дальше дело техники.",
+      "unlocked": false
+    },
+    {
+      "level": 6,
+      "id": "architect",
+      "name": "Кот-архитектор",
+      "threshold": 1500000,
+      "title": "Рисует схемы, которые потом сбываются",
+      "palette": [
+        "#6A9BCC",
+        "#3F6A96",
+        "#141413"
+      ],
+      "accessory": "чертёж",
+      "quote": "Разложим на модули — и станет скучно. В хорошем смысле.",
+      "unlocked": false
+    },
+    {
+      "level": 7,
+      "id": "reviewer",
+      "name": "Кот-ревьюер",
+      "threshold": 3000000,
+      "title": "Оставляет комментарии, с которыми не поспоришь",
+      "palette": [
+        "#7E9166",
+        "#556042",
+        "#141413"
+      ],
+      "accessory": "красная ручка",
+      "quote": "Здесь гонка. Вот сценарий.",
+      "unlocked": false
+    },
+    {
+      "level": 8,
+      "id": "orchestrator",
+      "name": "Кот-оркестратор",
+      "threshold": 6000000,
+      "title": "Запускает субагентов и не путается",
+      "palette": [
+        "#6B4E9B",
+        "#46316B",
+        "#141413"
+      ],
+      "accessory": "дирижёрская палочка",
+      "quote": "Ты, ты и ты — по файлу каждому.",
+      "unlocked": false
+    },
+    {
+      "level": 9,
+      "id": "opus",
+      "name": "Кот-опус",
+      "threshold": 12000000,
+      "title": "Работает всю ночь, к утру всё зелёное",
+      "palette": [
+        "#A85236",
+        "#743520",
+        "#141413"
+      ],
+      "accessory": "кружка",
+      "quote": "Тесты прошли. Все. Проверил дважды.",
+      "unlocked": false
+    },
+    {
+      "level": 10,
+      "id": "quantum",
+      "name": "Квантовый кот",
+      "threshold": 25000000,
+      "title": "Одновременно исправил и не трогал",
+      "palette": [
+        "#E0A93B",
+        "#A2731F",
+        "#141413"
+      ],
+      "accessory": "коробка",
+      "quote": "Пока ты не открыл PR, баг и есть, и нет.",
+      "unlocked": false
+    }
+  ],
+  "achievements": [
+    {
+      "id": "first_blood",
+      "name": "Первое слово",
+      "description": "Отправить боту первое сообщение",
+      "icon": "👋",
+      "unlocked": true
+    },
+    {
+      "id": "first_tool",
+      "name": "Первый инструмент",
+      "description": "Разрешить агенту первый вызов инструмента",
+      "icon": "🔧",
+      "unlocked": true
+    },
+    {
+      "id": "first_edit",
+      "name": "Правка пошла",
+      "description": "Одобрить первое изменение файла",
+      "icon": "✏️",
+      "unlocked": true
+    },
+    {
+      "id": "first_bash",
+      "name": "Терминал открыт",
+      "description": "Разрешить первую команду в Bash",
+      "icon": "🖥️",
+      "unlocked": true
+    },
+    {
+      "id": "first_deny",
+      "name": "Нет — тоже ответ",
+      "description": "Отклонить вызов инструмента",
+      "icon": "🛑",
+      "unlocked": true
+    },
+    {
+      "id": "night_owl",
+      "name": "Ночная смена",
+      "description": "Написать боту между 02:00 и 05:00",
+      "icon": "🌙",
+      "unlocked": true
+    },
+    {
+      "id": "streak_7",
+      "name": "Неделя подряд",
+      "description": "Пользоваться ботом 7 дней подряд",
+      "icon": "🔥",
+      "unlocked": false
+    },
+    {
+      "id": "hundred_msgs",
+      "name": "Сотня",
+      "description": "Отправить 100 сообщений",
+      "icon": "💬",
+      "unlocked": false
+    },
+    {
+      "id": "million",
+      "name": "Миллион",
+      "description": "Потратить 1 000 000 токенов",
+      "icon": "🎯",
+      "unlocked": false
+    },
+    {
+      "id": "interrupter",
+      "name": "Стоп-кран",
+      "description": "Прервать агента на полпути",
+      "icon": "⏹️",
+      "unlocked": false
+    },
+    {
+      "id": "polyglot",
+      "name": "Многостаночник",
+      "description": "Поработать в трёх разных проектах",
+      "icon": "🗂️",
+      "unlocked": false
+    },
+    {
+      "id": "max_cat",
+      "name": "Предел",
+      "description": "Дорасти до Квантового кота",
+      "icon": "🐈‍⬛",
+      "unlocked": false
+    }
+  ]
+}

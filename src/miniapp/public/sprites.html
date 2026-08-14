@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <title>Спрайты котов — предпросмотр</title>
+    <style>
+      body { background: #FAF9F5; color: #141413; font: 14px system-ui; margin: 0; padding: 24px; }
+      h1 { font: 600 20px Georgia, serif; }
+      .grid { display: flex; flex-wrap: wrap; gap: 20px; }
+      figure { margin: 0; text-align: center; }
+      figure img, figure div { display: block; }
+      .big { border: 1px solid #E2D8C8; border-radius: 10px; background: #fff; padding: 8px; }
+      figcaption { margin-top: 6px; font-size: 12px; max-width: 160px; }
+      .dark { background: #141413; }
+    </style>
+  </head>
+  <body>
+    <h1>Спрайты котов — предпросмотр</h1>
+    <div class="grid" id="grid"></div>
+    <h1>На тёмном</h1>
+    <div class="grid" id="grid-dark"></div>
+    <h1>Звезда Claude</h1>
+    <div id="star"></div>
+    <script type="module">
+      import { catSvg, claudeStar } from "./cat-art.js";
+      const profile = await (await fetch("/demo-profile.json")).json();
+      for (const [id, cls] of [["grid", "big"], ["grid-dark", "big dark"]]) {
+        const box = document.getElementById(id);
+        for (const cat of profile.cats) {
+          const fig = document.createElement("figure");
+          const art = document.createElement("div");
+          art.className = cls;
+          art.innerHTML = catSvg(cat, 160);
+          const cap = document.createElement("figcaption");
+          cap.textContent = `${cat.level}. ${cat.name}`;
+          if (cls.includes("dark")) cap.style.color = "#8a8578";
+          fig.append(art, cap);
+          box.append(fig);
+        }
+      }
+      document.getElementById("star").innerHTML = claudeStar(96);
+    </script>
+  </body>
+</html>
