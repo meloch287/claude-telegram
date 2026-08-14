@@ -182,8 +182,8 @@ function drawTail(grid, level, fur) {
   }
   // поднят трубой; с восьмого уровня загибается наружу
   rect(grid, X1 + 1, BODY_BOTTOM - 3, X1 + 2, BODY_BOTTOM - 1, fur);
-  rect(grid, X1 + 2, EYE_ROW + 2, X1 + 3, BODY_BOTTOM - 2, fur);
-  if (level >= 8) rect(grid, X1 + 3, EYE_ROW + 1, X1 + 4, EYE_ROW + 2, fur);
+  rect(grid, X1 + 2, EYE_ROW + 3, X1 + 3, BODY_BOTTOM - 2, fur);
+  if (level >= 8) rect(grid, X1 + 3, EYE_ROW + 2, X1 + 4, EYE_ROW + 3, fur);
 }
 
 /** Искры вокруг — только у двух верхних уровней, как знак предела. */
@@ -206,9 +206,16 @@ function drawEyes(grid, level, row) {
   rect(grid, X0 + 5, row, X0 + 5, row + 1, "w");
 }
 
-/** Усы торчат влево, в сторону морды. Справа их нет — кот стоит в профиль. */
+/**
+ * Усы по обе стороны морды. Пар всего две, а не три: справа ниже начинается
+ * хвост, и третья пара попала бы прямо под него — хвост рисуется поверх и
+ * съел бы её.
+ */
 function drawWhiskers(grid, row) {
-  for (const dy of [0, 2, 4]) rect(grid, X0 - 3, row + dy, X0 - 1, row + dy, "e");
+  for (const dy of [0, 2]) {
+    rect(grid, X0 - 3, row + dy, X0 - 1, row + dy, "e");
+    rect(grid, X1 + 1, row + dy, X1 + 3, row + dy, "e");
+  }
 }
 
 function buildGrid(cat) {
