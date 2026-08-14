@@ -7,6 +7,7 @@ import {
   getCredential,
   getOrCreateUser,
   getUsageToday,
+  listRateLimits,
   recordMessage,
   saveChat,
   setModel,
@@ -46,6 +47,13 @@ import { checkAchievements, renderUnlocked, unlockedIds } from "./achievements.j
 import { ACHIEVEMENTS, CAT_LEVELS, catForTokens, formatTokens, nextCat } from "./cats.js";
 import { esc, formatUsd } from "./agent/render.js";
 import { startMiniAppServer } from "./miniapp/server.js";
+import {
+  activeChannel,
+  chooseChannel,
+  describeChannel,
+  parsePool,
+  setActiveChannel,
+} from "./proxy.js";
 
 const bot = new Bot(config.botToken);
 
@@ -288,6 +296,33 @@ bot.command("cats", async (ctx) => {
   );
 });
 
+bot.command("status", async (ctx) => {
+  const channel = activeChannel();
+  const lines = [
+    "<b>Канал выхода</b>",
+    channel
+      ? `✅ ${esc(describeChannel(channel))}`
+      : "❌ рабочего канала нет — Anthropic недоступен ни напрямую, ни через прокси",
+  ];
+
+  const limits = listRateLimits(ctx.from!.id);
+  lines.push("", "<b>Лимиты подписки</b>");
+  if (limits.length === 0) {
+    lines.push("данных пока нет — они приходят по ходу работы агента");
+  } else {
+    for (const limit of limits) {
+      const percent = limit.utilization === null ? "?" : `${Math.round(limit.utilization)}%`;
+      const seen = new Date(limit.seen_at).toLocaleString("ru-RU", {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      lines.push(`${esc(limit.limit_type)}: ${percent} · данные на ${seen}`);
+    }
+  }
+
+  await ctx.reply(lines.join("\n"), { parse_mode: "HTML" });
+});
+
 // ── Инлайн-кнопки ────────────────────────────────────────────────────────────
 
 bot.callbackQuery(/^m:(.+)$/, async (ctx) => {
@@ -483,9 +518,27 @@ await bot.api.setMyCommands([
   { command: "project", description: "переключить проект" },
   { command: "stats", description: "расход и мой кот" },
   { command: "cats", description: "коты и достижения" },
+  { command: "status", description: "канал выхода и лимиты" },
   { command: "logout", description: "удалить доступ" },
   { command: "help", description: "справка" },
 ]);
+
+// Канал выхода выбирается до старта: если Anthropic недоступен, лучше узнать
+// об этом в логе сразу, а не на первой задаче пользователя.
+const choice = await chooseChannel(parsePool(config.proxyPool), {
+  requireCountry: config.proxyRequireCountry || undefined,
+});
+setActiveChannel(choice.active);
+for (const status of choice.checked) {
+  const mark = status.reachable ? "✅" : "❌";
+  const code = status.httpStatus === null ? status.error ?? "нет ответа" : `HTTP ${status.httpStatus}`;
+  console.log(`${mark} ${status.candidate.label}: ${code}${status.country ? ` · ${status.country}` : ""}`);
+}
+if (choice.active) {
+  console.log(`🌍 Выход: ${describeChannel(choice.active)}`);
+} else {
+  console.warn("⚠️  Рабочего канала до Anthropic нет. Агент не сможет работать.");
+}
 
 startMiniAppServer();
 

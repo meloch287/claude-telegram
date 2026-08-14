@@ -214,3 +214,33 @@ test("обрезка сообщает, сколько символов скры�
   assert.ok(result.startsWith("а".repeat(10)));
   assert.ok(result.includes("90"));
 });
+
+// ── Выбор канала выхода ─────────────────────────────────────────────────────
+
+const { parsePool, hideCredentials } = await import("../src/proxy.js");
+
+test("пул: пустая строка и пустое окружение дают пустой список", () => {
+  assert.deepEqual(parsePool("", {}), []);
+});
+
+test("пул: порядок в строке задаёт приоритет", () => {
+  const pool = parsePool("http://a:1,http://b:2", {});
+  assert.deepEqual(pool.map((c) => c.url), ["http://a:1", "http://b:2"]);
+});
+
+test("пул: прокси из окружения попадает в конец, а не теряется", () => {
+  const pool = parsePool("http://a:1", { HTTPS_PROXY: "http://env:9" });
+  assert.deepEqual(pool.map((c) => c.url), ["http://a:1", "http://env:9"]);
+});
+
+test("пул: прокси из окружения не дублируется, если уже в списке", () => {
+  const pool = parsePool("http://same:1", { HTTPS_PROXY: "http://same:1" });
+  assert.equal(pool.length, 1);
+});
+
+test("пароль прокси не утекает в логи", () => {
+  const masked = hideCredentials("http://user:s3cret@de1.example:8080");
+  assert.ok(!masked.includes("s3cret"));
+  assert.ok(!masked.includes("user"));
+  assert.ok(masked.includes("de1.example:8080"));
+});

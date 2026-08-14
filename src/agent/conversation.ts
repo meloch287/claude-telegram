@@ -3,6 +3,7 @@ import { MessageQueue } from "./queue.js";
 import { createPermissionBridge, flushChat, type PermissionBridgeHooks } from "./permissions.js";
 import { describeToolShort, chunk, formatUsd, formatDuration, esc } from "./render.js";
 import { credentialEnv, type Credential } from "../auth.js";
+import { activeProxyUrl } from "../proxy.js";
 
 export interface ConversationOutput {
   /** Отправить сообщение, вернуть его message_id. */
@@ -35,6 +36,15 @@ export interface ConversationDeps {
   onUsage(usage: ConversationUsage): void;
   onSessionId(sessionId: string): void;
   onToolDecision(toolName: string, allowed: boolean): void;
+  /** Лимиты подписки. Приходят событием по ходу работы, а не по запросу. */
+  onRateLimit(limit: RateLimitUpdate): void;
+}
+
+export interface RateLimitUpdate {
+  limitType: string;
+  status: "allowed" | "allowed_warning" | "rejected";
+  utilization?: number;
+  resetsAt?: number;
 }
 
 /**
@@ -56,6 +66,15 @@ function buildEnv(credential: Credential): Record<string, string> {
   for (const [key, value] of Object.entries(credentialEnv(credential))) {
     if (value === undefined) delete env[key];
     else env[key] = value;
+  }
+
+  // Канал выхода выбран на старте пробой. Пустая строка — идти напрямую;
+  // тогда унаследованные переменные прокси нужно снять, иначе подпроцесс
+  // всё равно уйдёт в них.
+  const proxy = activeProxyUrl();
+  for (const key of ["HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"]) {
+    if (proxy) env[key] = proxy;
+    else delete env[key];
   }
   return env;
 }
@@ -238,6 +257,21 @@ export class Conversation {
             );
             await this.#renderActivity();
           }
+        }
+        return;
+      }
+
+      case "rate_limit_event": {
+        const info = message.rate_limit_info;
+        // Тип окна может не прийти — тогда записывать нечего: без него
+        // непонятно, к чему относится процент.
+        if (info.rateLimitType) {
+          this.#deps.onRateLimit({
+            limitType: info.rateLimitType,
+            status: info.status,
+            utilization: info.utilization,
+            resetsAt: info.resetsAt,
+          });
         }
         return;
       }

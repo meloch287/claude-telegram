@@ -69,6 +69,10 @@ export const config = {
   miniappPort: Number(optional("MINIAPP_PORT", "8788")),
   miniappUrl: optional("MINIAPP_URL", ""),
   permissionTimeoutMs: Number(optional("PERMISSION_TIMEOUT_MIN", "30")) * 60_000,
+  /** Пул прокси через запятую. Порядок задаёт приоритет. */
+  proxyPool: optional("PROXY_POOL", ""),
+  /** Код страны, которую ожидаем от выхода: DE и т.п. Пусто — не проверять. */
+  proxyRequireCountry: optional("PROXY_REQUIRE_COUNTRY", ""),
 } as const;
 
 if (config.authMode === "owner" && !config.ownerApiKey) {

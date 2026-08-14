@@ -55,6 +55,16 @@ CREATE TABLE IF NOT EXISTS achievements (
   PRIMARY KEY (user_id, achievement)
 );
 
+CREATE TABLE IF NOT EXISTS rate_limits (
+  user_id     INTEGER NOT NULL,
+  limit_type  TEXT    NOT NULL,
+  status      TEXT    NOT NULL,
+  utilization REAL,
+  resets_at   INTEGER,
+  seen_at     INTEGER NOT NULL,
+  PRIMARY KEY (user_id, limit_type)
+);
+
 CREATE TABLE IF NOT EXISTS projects_seen (
   user_id INTEGER NOT NULL,
   project TEXT    NOT NULL,
@@ -142,6 +152,17 @@ const stmts = {
     "INSERT OR IGNORE INTO achievements (user_id, achievement, unlocked_at) VALUES (?, ?, ?)",
   ),
   listAchievements: db.prepare("SELECT achievement, unlocked_at FROM achievements WHERE user_id = ?"),
+
+  upsertLimit: db.prepare(`
+    INSERT INTO rate_limits (user_id, limit_type, status, utilization, resets_at, seen_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(user_id, limit_type) DO UPDATE SET
+      status = excluded.status,
+      utilization = excluded.utilization,
+      resets_at = excluded.resets_at,
+      seen_at = excluded.seen_at
+  `),
+  listLimits: db.prepare("SELECT * FROM rate_limits WHERE user_id = ? ORDER BY limit_type"),
 
   seeProject: db.prepare("INSERT OR IGNORE INTO projects_seen (user_id, project) VALUES (?, ?)"),
   countProjects: db.prepare("SELECT COUNT(*) AS n FROM projects_seen WHERE user_id = ?"),
@@ -251,6 +272,38 @@ export function listAchievements(userId: number): { achievement: string; unlocke
     achievement: string;
     unlocked_at: number;
   }[];
+}
+
+export interface RateLimitRow {
+  user_id: number;
+  limit_type: string;
+  status: string;
+  utilization: number | null;
+  resets_at: number | null;
+  seen_at: number;
+}
+
+/**
+ * Лимиты приходят событием во время работы, а не по запросу. Поэтому храним
+ * последнее известное значение на каждый тип окна и время, когда его видели, —
+ * без отметки времени показывать такие данные нельзя, они устаревают молча.
+ */
+export function recordRateLimit(
+  userId: number,
+  limit: { limitType: string; status: string; utilization?: number; resetsAt?: number },
+): void {
+  stmts.upsertLimit.run(
+    userId,
+    limit.limitType,
+    limit.status,
+    limit.utilization ?? null,
+    limit.resetsAt ?? null,
+    Date.now(),
+  );
+}
+
+export function listRateLimits(userId: number): RateLimitRow[] {
+  return stmts.listLimits.all(userId) as unknown as RateLimitRow[];
 }
 
 export function seeProject(userId: number, project: string): number {
