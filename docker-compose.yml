@@ -10,6 +10,10 @@ services:
     command: ["run", "-c", "/etc/xray/config.json"]
     volumes:
       - ./proxy/xray.json:/etc/xray/config.json:ro
+    ports:
+      # На петлю хоста: нужно сборке образа — внутри неё имя claude-proxy
+      # не резолвится, своей сети у сборки нет.
+      - "127.0.0.1:10801:10801"
     networks:
       - claude
 

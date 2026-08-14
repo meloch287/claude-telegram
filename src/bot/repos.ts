@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import { activeProxyUrl } from "../proxy.js";
+import { config } from "../config.js";
 
 const run = promisify(execFile);
 
@@ -34,7 +35,20 @@ export async function cloneRepository(url: string, cwd: string): Promise<string>
 
   // Прокси нужен и git: до GitHub с этого сервера дорога та же, что до Anthropic.
   const proxy = activeProxyUrl();
-  const env = { ...process.env, ...(proxy ? { HTTPS_PROXY: proxy, HTTP_PROXY: proxy } : {}) };
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    ...(proxy ? { HTTPS_PROXY: proxy, HTTP_PROXY: proxy } : {}),
+  };
+
+  // Сохранённый токен подставляется сам: вставлять его в адрес руками — значит
+  // оставить секрет в истории чата.
+  if (config.githubToken) {
+    env.GITHUB_TOKEN = config.githubToken;
+    env.GIT_CONFIG_COUNT = "1";
+    env.GIT_CONFIG_KEY_0 = "credential.https://github.com.helper";
+    env.GIT_CONFIG_VALUE_0 =
+      '!f() { echo username=x-access-token; echo password=$GITHUB_TOKEN; }; f';
+  }
 
   try {
     if (existsSync(join(target, ".git"))) {

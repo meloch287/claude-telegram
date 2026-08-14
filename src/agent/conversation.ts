@@ -4,6 +4,7 @@ import { createPermissionBridge, flushChat, type PermissionBridgeHooks } from ".
 import { describeToolShort, chunk, formatUsd, formatDuration, esc, TELEGRAM_LIMIT } from "./render.js";
 import { credentialEnv, type Credential } from "../auth.js";
 import { activeProxyUrl } from "../proxy.js";
+import { config } from "../config.js";
 
 export interface ConversationOutput {
   /** Отправить сообщение, вернуть его message_id. */
@@ -82,6 +83,19 @@ function buildEnv(credential: Credential): Record<string, string> {
   // Канал выхода выбран на старте пробой. Пустая строка — идти напрямую;
   // тогда унаследованные переменные прокси нужно снять, иначе подпроцесс
   // всё равно уйдёт в них.
+  // gh читает GH_TOKEN, git — свой credential helper (см. ниже). Оба берут
+  // токен из окружения, поэтому в файлы конфигурации он не попадает.
+  if (config.githubToken) {
+    env.GITHUB_TOKEN = config.githubToken;
+    env.GH_TOKEN = config.githubToken;
+    // Helper отдаёт логин и пароль на stdout и читает токен из окружения:
+    // так секрет не оседает в ~/.gitconfig внутри тома.
+    env.GIT_CONFIG_COUNT = "1";
+    env.GIT_CONFIG_KEY_0 = "credential.https://github.com.helper";
+    env.GIT_CONFIG_VALUE_0 =
+      '!f() { echo username=x-access-token; echo password=$GITHUB_TOKEN; }; f';
+  }
+
   const proxy = activeProxyUrl();
   for (const key of ["HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"]) {
     if (proxy) env[key] = proxy;

@@ -73,6 +73,8 @@ export const config = {
   proxyPool: optional("PROXY_POOL", ""),
   /** Код страны, которую ожидаем от выхода: DE и т.п. Пусто — не проверять. */
   proxyRequireCountry: optional("PROXY_REQUIRE_COUNTRY", ""),
+  /** Токен GitHub: им клонируются приватные репозитории и работает gh. */
+  githubToken: optional("GITHUB_TOKEN", ""),
 } as const;
 
 if (config.authMode === "owner" && !config.ownerApiKey) {
