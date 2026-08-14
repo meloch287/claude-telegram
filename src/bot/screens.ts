@@ -108,7 +108,13 @@ const SCREENS: Record<ScreenId, Screen> = {
         keyboard.text(`${label}${id === current ? " ✓" : ""}`, `m:${id}`).row();
       }
       keyboard.text(BACK, "nav:settings");
-      return { text: "Как спрашивать разрешения?", keyboard };
+      return {
+        text:
+          "Как спрашивать разрешения?\n\n" +
+          "<b>⚡ Без вопросов вообще</b> — агент сам правит файлы и запускает команды, " +
+          "включая удаление. Ничего не спросит и остановить можно только командой /stop.",
+        keyboard,
+      };
     },
   },
 
@@ -130,6 +136,7 @@ export const MODE_LABELS: Record<string, string> = {
   default: "🛡️ Спрашивать каждый раз",
   acceptEdits: "✏️ Править файлы молча",
   plan: "🗺️ Только план, без правок",
+  bypassPermissions: "⚡ Без вопросов вообще",
 };
 
 export function isScreenId(value: string): value is ScreenId {

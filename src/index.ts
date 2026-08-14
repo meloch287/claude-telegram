@@ -341,10 +341,19 @@ bot.callbackQuery(/^m:(.+)$/, async (ctx) => {
     sessionId: chatRow?.session_id ?? null,
     permissionMode: mode,
   });
+  // allowDangerouslySkipPermissions задаётся при создании сессии, на лету его
+  // не включить. Поэтому при переходе в режим без вопросов живую сессию
+  // закрываем — следующая реплика поднимет её уже с нужным флагом.
   const session = getSession(chatId);
-  if (session) await session.conversation.setPermissionMode(mode);
+  if (mode === "bypassPermissions") {
+    await resetSession(chatId, ctx.from.id);
+  } else if (session) {
+    await session.conversation.setPermissionMode(mode);
+  }
 
-  await ctx.answerCallbackQuery("Режим изменён");
+  await ctx.answerCallbackQuery(
+    mode === "bypassPermissions" ? "Режим без вопросов включён" : "Режим изменён",
+  );
   const view = renderScreen("mode", { userId: ctx.from.id, chatId });
   await ctx.editMessageReplyMarkup({ reply_markup: view.keyboard }).catch(() => undefined);
 });

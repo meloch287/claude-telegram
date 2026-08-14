@@ -23,6 +23,7 @@ export class TelegramOutput implements ConversationOutput {
   #streamMessageId: number | null = null;
   #streamShown = "";
   #lastStreamEdit = 0;
+  #typingTimer: NodeJS.Timeout | null = null;
 
   constructor(api: Api, chatId: number) {
     this.#api = api;
@@ -144,6 +145,27 @@ export class TelegramOutput implements ConversationOutput {
     } catch {
       // Индикатор набора — украшение, ошибку глотаем.
     }
+  }
+
+  /**
+   * «Печатает…» на всё время работы.
+   *
+   * По документации Telegram статус держится «5 секунд или меньше», а любое
+   * сообщение бота его сбрасывает. Поэтому одного вызова мало — нужен пульс
+   * чаще этого срока, иначе индикатор гаснет на первой же долгой задаче.
+   */
+  startTyping(): void {
+    if (this.#typingTimer) return;
+    void this.typing();
+    this.#typingTimer = setInterval(() => void this.typing(), 4000);
+    // Висящий таймер не должен удерживать процесс при выключении.
+    this.#typingTimer.unref?.();
+  }
+
+  stopTyping(): void {
+    if (!this.#typingTimer) return;
+    clearInterval(this.#typingTimer);
+    this.#typingTimer = null;
   }
 
   get permissionHooks(): PermissionBridgeHooks {

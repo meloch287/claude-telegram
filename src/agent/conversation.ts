@@ -17,6 +17,9 @@ export interface ConversationOutput {
   /** Ответ закончен: следующий пойдёт в новое сообщение. */
   endStream(): Promise<void>;
   typing(): Promise<void>;
+  /** «Печатает…» на всё время работы: статус живёт 5 секунд и требует пульса. */
+  startTyping(): void;
+  stopTyping(): void;
   permissionHooks: PermissionBridgeHooks;
 }
 
@@ -155,7 +158,7 @@ export class Conversation {
       session_id: this.#sessionId ?? "",
     } as SDKUserMessage);
 
-    await this.#deps.output.typing();
+    this.#deps.output.startTyping();
     // Первый инструмент может появиться через десяток секунд, а до тех пор
     // чат выглядит мёртвым. Строку состояния показываем сразу.
     await this.#deps.output.status("принял, думаю…");
@@ -187,6 +190,7 @@ export class Conversation {
   async close(): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
+    this.#deps.output.stopTyping();
     flushChat(this.chatId, { kind: "deny", message: "Сессия закрыта" });
     if (!this.#queue.closed) this.#queue.close();
     try {
@@ -215,6 +219,10 @@ export class Conversation {
         // Набор инструментов не урезаем: это обычный Claude Code, просто в чате.
         allowedTools: AUTO_APPROVED,
         permissionMode,
+        // Без этого флага SDK не пускает в bypassPermissions вовсе.
+        ...(permissionMode === "bypassPermissions"
+          ? { allowDangerouslySkipPermissions: true }
+          : {}),
         canUseTool,
         ...(resumeSessionId ? { resume: resumeSessionId } : {}),
         systemPrompt: { type: "preset", preset: "claude_code", append: SYSTEM_APPEND },
@@ -242,6 +250,7 @@ export class Conversation {
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);
       this.#busy = false;
+      this.#deps.output.stopTyping();
       flushChat(this.chatId, { kind: "deny", message: "Сессия упала" });
       this.#query = null;
       this.#queue = new MessageQueue<SDKUserMessage>();
@@ -332,6 +341,7 @@ export class Conversation {
 
       case "result": {
         this.#busy = false;
+        this.#deps.output.stopTyping();
         const tokens = totalTokens(message);
         const cost = message.total_cost_usd ?? 0;
 
