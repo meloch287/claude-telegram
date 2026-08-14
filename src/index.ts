@@ -540,6 +540,25 @@ if (choice.active) {
   console.warn("⚠️  Рабочего канала до Anthropic нет. Агент не сможет работать.");
 }
 
+/**
+ * Мини-апп вешается на кнопку меню Telegram — ту, что рядом с полем ввода.
+ * Инлайн-кнопка внутри сообщения уезжает вверх с историей и теряется, а эта
+ * висит всегда. Без chat_id значение становится умолчанием для всех чатов.
+ */
+if (config.miniappUrl) {
+  await bot.api.setChatMenuButton({
+    menu_button: {
+      type: "web_app",
+      text: "🐱 Кот",
+      web_app: { url: config.miniappUrl },
+    },
+  });
+  console.log(`🐱 Кнопка мини-аппа повешена на меню: ${config.miniappUrl}`);
+} else {
+  // Иначе осталась бы кнопка от прошлого запуска, ведущая в никуда.
+  await bot.api.setChatMenuButton({ menu_button: { type: "commands" } });
+}
+
 startMiniAppServer();
 
 console.log("🤖 Бот запущен");

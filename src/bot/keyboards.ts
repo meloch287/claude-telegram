@@ -42,7 +42,8 @@ export function questionKeyboard(pending: PendingQuestion): InlineKeyboard {
 
 export const MODELS: [string, string][] = [
   ["", "По умолчанию"],
-  ["claude-opus-5", "Opus 5 — самая сильная"],
+  ["claude-fable-5", "Fable 5 — самая умная"],
+  ["claude-opus-5", "Opus 5 — сильная"],
   ["claude-sonnet-5", "Sonnet 5 — баланс"],
   ["claude-haiku-4-5", "Haiku 4.5 — быстрая"],
 ];

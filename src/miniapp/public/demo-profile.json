@@ -271,5 +271,28 @@
       "icon": "🐈‍⬛",
       "unlocked": false
     }
+  ],
+  "limits": [
+    {
+      "type": "five_hour",
+      "status": "allowed_warning",
+      "utilization": 88,
+      "resetsAt": 1786740321481,
+      "seenAt": 1786731201481
+    },
+    {
+      "type": "seven_day_opus",
+      "status": "allowed",
+      "utilization": 31,
+      "resetsAt": 1786991481481,
+      "seenAt": 1786731201481
+    },
+    {
+      "type": "seven_day_sonnet",
+      "status": "rejected",
+      "utilization": 100,
+      "resetsAt": 1787077881481,
+      "seenAt": 1786726581481
+    }
   ]
 }

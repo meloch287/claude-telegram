@@ -47,6 +47,8 @@ function render(profile) {
       `Потрачено ${nf.format(totals.tokens)} из ${nf.format(cat.nextThreshold)} токенов. Осталось ${nf.format(left)}.`;
   }
 
+  renderLimits(profile.limits ?? []);
+
   // Статистика
   const stats = [
     [nf.format(totals.tokens), "токенов всего"],
@@ -149,6 +151,134 @@ function render(profile) {
   }
 
   setupShare(profile);
+}
+
+const LIMIT_NAMES = {
+  five_hour: "Пятичасовое окно",
+  seven_day: "Недельный лимит",
+  seven_day_opus: "Недельный лимит Opus",
+  seven_day_sonnet: "Недельный лимит Sonnet",
+  seven_day_overage_included: "Недельный лимит с перерасходом",
+  overage: "Перерасход",
+};
+
+const LIMIT_STATUSES = {
+  allowed: { icon: "✓", word: "Норма" },
+  allowed_warning: { icon: "⚠️", word: "На исходе" },
+  rejected: { icon: "🚫", word: "Исчерпан" },
+};
+
+const timeFormat = new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit" });
+
+/** «через 2 ч 14 мин» — относительное время понятнее абсолютного для короткого окна. */
+function untilReset(resetsAt) {
+  const left = resetsAt - Date.now();
+  if (left <= 0) return "уже обнулился";
+  const minutes = Math.round(left / 60000);
+  if (minutes < 60) return `через ${minutes} мин`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `через ${hours} ч ${minutes % 60} мин`;
+  return `через ${Math.round(hours / 24)} дн`;
+}
+
+/**
+ * Лимиты подписки.
+ *
+ * Данные приходят агенту событием по ходу работы, а мини-апп читает снимок из
+ * базы при открытии. Значит они всегда чуть устаревшие — и отметка возраста
+ * стоит у каждой строки отдельно: окна обновляются в разное время, и одна
+ * метка на всю секцию соврала бы про то, что обновилось раньше.
+ */
+function renderLimits(limits) {
+  const list = el("limits");
+  const note = el("limits-note");
+
+  if (limits.length === 0) {
+    note.textContent = "Данных пока нет — они приходят по ходу работы агента.";
+    note.hidden = false;
+    list.hidden = true;
+    list.replaceChildren();
+    return;
+  }
+
+  note.hidden = true;
+  list.hidden = false;
+  list.replaceChildren();
+
+  for (const limit of limits) {
+    // Ключ берём из типа окна, а не из индекса: число строк меняется, и на
+    // индексах id разъехались бы между отрисовками.
+    const key = limit.type;
+    const name = LIMIT_NAMES[limit.type] ?? limit.type;
+    const status = LIMIT_STATUSES[limit.status] ?? LIMIT_STATUSES.allowed;
+    // utilization и resetsAt приходят не всегда — считать их обязательными нельзя.
+    const percent = limit.utilization === null ? null : Math.round(limit.utilization);
+    const seen = timeFormat.format(new Date(limit.seenAt));
+
+    const li = document.createElement("li");
+    li.className = "limit";
+
+    const head = document.createElement("div");
+    head.className = "limit-head";
+    const nameEl = document.createElement("span");
+    nameEl.className = "limit-name";
+    nameEl.id = `limit-name-${key}`;
+    nameEl.append(text(name));
+    const percentEl = document.createElement("span");
+    percentEl.className = "limit-percent";
+    percentEl.append(text(percent === null ? "—" : `${percent}%`));
+    head.append(nameEl, percentEl);
+
+    const track = document.createElement("div");
+    track.className = "progress-track";
+    track.id = `limit-bar-${key}`;
+    track.setAttribute("role", "progressbar");
+    track.setAttribute("aria-valuemin", "0");
+    track.setAttribute("aria-valuemax", "100");
+    track.setAttribute("aria-valuenow", String(percent ?? 0));
+    track.setAttribute("aria-labelledby", nameEl.id);
+    track.setAttribute("aria-describedby", `limit-seen-${key}`);
+    // Статус дублируется в valuetext: попав сразу на полосу мимо подписи,
+    // пользователь всё равно узнает состояние, не полагаясь на цвет.
+    const reset = limit.resetsAt === null ? "" : `, сброс ${untilReset(limit.resetsAt)}`;
+    track.setAttribute(
+      "aria-valuetext",
+      percent === null
+        ? `${status.word}${reset}`
+        : `${percent} процентов, ${status.word.toLowerCase()}${reset}`,
+    );
+
+    const fill = document.createElement("div");
+    fill.className = `progress-fill progress-fill--${limit.status}`;
+    fill.style.width = `${percent ?? 0}%`;
+    track.append(fill);
+
+    const foot = document.createElement("p");
+    foot.className = "limit-foot";
+
+    const badge = document.createElement("span");
+    badge.className = `badge badge--${limit.status}`;
+    const badgeIcon = document.createElement("span");
+    badgeIcon.setAttribute("aria-hidden", "true");
+    badgeIcon.append(text(status.icon));
+    badge.append(badgeIcon, text(` ${status.word}`));
+
+    const when = document.createElement("span");
+    if (limit.resetsAt !== null) {
+      const time = document.createElement("time");
+      time.dateTime = new Date(limit.resetsAt).toISOString();
+      time.append(text(untilReset(limit.resetsAt)));
+      when.append(text("Сброс "), time);
+    }
+
+    const seenEl = document.createElement("span");
+    seenEl.id = `limit-seen-${key}`;
+    seenEl.append(text(`данные на ${seen}`));
+
+    foot.append(badge, when, seenEl);
+    li.append(head, track, foot);
+    list.append(li);
+  }
 }
 
 function setupShare(profile) {

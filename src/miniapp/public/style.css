@@ -281,6 +281,112 @@ h2 {
   color: var(--ink-muted);
 }
 
+/* ── Лимиты подписки ───────────────────────────────────────────────────── */
+
+/*
+  Статусы окрашены тремя парами токенов. Текст бейджа — 12px/600, это не
+  «крупный текст» по WCAG, поэтому нужны полные 4.5:1, а не облегчённые 3:1.
+  Заливка полосы — графика, ей достаточно 3:1 к подложке.
+
+  Зелёный и малиновый плохо различимы при дальтонизме, поэтому цвет здесь
+  вторичен: смысл несут слово и три разных по силуэту значка ✓ ⚠️ 🚫.
+*/
+:root {
+  --ok-soft: #daf1e6;
+  --warn: #8a5a00;
+  --warn-soft: #f4ebd7;
+  --danger: #981b30;
+  --danger-soft: #f5dbe0;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ok-soft: #22352b;
+    --warn: #e8b339;
+    --warn-soft: #393222;
+    --danger: #fb6a82;
+    --danger-soft: #3e2327;
+  }
+}
+
+.limits {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.limit {
+  padding: 14px;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.limit-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.limit-name {
+  font-weight: 600;
+  font-size: 0.9375rem;
+}
+
+.limit-percent {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.limit .progress-track {
+  margin-top: 8px;
+}
+
+.progress-fill--allowed {
+  background: var(--ok);
+}
+
+.progress-fill--allowed_warning {
+  background: var(--warn);
+}
+
+.progress-fill--rejected {
+  background: var(--danger);
+}
+
+.limit-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 0;
+  font-size: 0.875rem;
+  color: var(--ink-muted);
+}
+
+.badge--allowed {
+  background: var(--ok-soft);
+  color: var(--ok);
+  border: 1px solid currentColor;
+}
+
+.badge--allowed_warning {
+  background: var(--warn-soft);
+  color: var(--warn);
+  border: 1px solid currentColor;
+}
+
+.badge--rejected {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border: 1px solid currentColor;
+}
+
 /* ── Статистика ────────────────────────────────────────────────────────── */
 
 .stats {

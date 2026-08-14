@@ -53,6 +53,16 @@
           </div>
         </section>
 
+        <!--
+          Лимиты идут сразу после героя: это единственная секция, статус которой
+          бывает «горит». Прятать её за котами и достижениями неправильно.
+        -->
+        <section aria-labelledby="limits-heading">
+          <h2 id="limits-heading">Лимиты подписки</h2>
+          <p class="section-note" id="limits-note"></p>
+          <ul class="limits" id="limits" role="list" hidden></ul>
+        </section>
+
         <section aria-labelledby="stats-heading">
           <h2 id="stats-heading">Статистика</h2>
           <ul class="stats" id="stats" role="list"></ul>
