@@ -7,15 +7,23 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends git ripgrep ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
+# Работаем не от root: Claude Code отказывается запускаться без запроса
+# разрешений под root — «--dangerously-skip-permissions cannot be used with
+# root/sudo privileges for security reasons». Под обычным пользователем режим
+# «без вопросов» доступен, и заодно агент не хозяйничает в контейнере от root.
+RUN useradd --create-home --uid 10001 claude
+
 WORKDIR /app
+RUN chown claude:claude /app
+USER claude
 
 # Отдельным слоем, чтобы правка исходников не переустанавливала зависимости.
-COPY package.json package-lock.json ./
+COPY --chown=claude:claude package.json package-lock.json ./
 # --include=optional обязателен: нативный бинарь Claude Code приезжает
 # опциональной зависимостью, без него SDK не найдёт исполняемый файл.
 RUN npm ci --include=optional
 
-COPY . .
+COPY --chown=claude:claude . .
 
 ENV NODE_ENV=production
 CMD ["npx", "tsx", "src/index.ts"]

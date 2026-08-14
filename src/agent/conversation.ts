@@ -271,6 +271,17 @@ export class Conversation {
       }
 
       await this.#deps.output.clearStatus();
+
+      // Claude Code не даёт режим «без вопросов» под root. Сырой текст ошибки
+      // тут ничего не объясняет, поэтому переводим его на человеческий.
+      if (/cannot be used with root/i.test(text)) {
+        await this.#deps.output.send(
+          "⚠️ Режим «без вопросов» недоступен: Claude Code запрещает его под root.\n\n" +
+            "Переключись на другой режим в /mode — или пересобери контейнер, он должен работать не от root.",
+        );
+        return;
+      }
+
       await this.#deps.output.send(
         `⚠️ Сессия оборвалась.\n\n<code>${esc(text.slice(0, 500))}</code>\n\nНапиши что-нибудь — я подниму её заново.`,
       );
