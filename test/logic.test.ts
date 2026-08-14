@@ -266,3 +266,11 @@ test("мусор не распознаётся никак", () => {
   assert.equal(detectKind("просто текст"), null);
   assert.equal(detectKind("sk-ant-"), null);
 });
+
+// ── Имена вложений ──────────────────────────────────────────────────────────
+
+const { saveTelegramFile } = await import("../src/bot/attachments.js");
+
+test("вложения: модуль экспортирует сохранение файла", () => {
+  assert.equal(typeof saveTelegramFile, "function");
+});

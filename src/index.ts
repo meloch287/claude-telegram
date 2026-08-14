@@ -46,6 +46,7 @@ import { isScreenId, renderScreen, type ScreenId } from "./bot/screens.js";
 import { checkAchievements, renderUnlocked, unlockedIds } from "./achievements.js";
 import { ACHIEVEMENTS, CAT_LEVELS, catForTokens, formatTokens, nextCat } from "./cats.js";
 import { esc, formatUsd } from "./agent/render.js";
+import { saveTelegramFile } from "./bot/attachments.js";
 import { startMiniAppServer } from "./miniapp/server.js";
 import {
   activeChannel,
@@ -440,6 +441,62 @@ bot.callbackQuery(/^q:([^:]+):(\d+)$/, async (ctx) => {
 });
 
 // ── Обычные сообщения ────────────────────────────────────────────────────────
+
+/**
+ * Фото и документы. Файл кладём в папку проекта, агенту передаём путь и подпись:
+ * «вот скриншот, объясняю» работает как обычная задача, только с картинкой.
+ */
+bot.on(["message:photo", "message:document"], async (ctx) => {
+  const userId = ctx.from.id;
+  const chatId = ctx.chat.id;
+
+  if (!getCredential(userId)) {
+    await sendStart(ctx);
+    return;
+  }
+
+  const chatRow = getChat(chatId);
+  const project = chatRow?.project ?? "default";
+  const cwd = workspaceFor(userId, project);
+
+  // У фото несколько размеров; последний — самый крупный.
+  const photo = ctx.message.photo?.at(-1);
+  const document = ctx.message.document;
+  const fileId = photo?.file_id ?? document?.file_id;
+  if (!fileId) return;
+
+  const suggested = document?.file_name ?? `фото-${Date.now()}.jpg`;
+
+  let saved;
+  try {
+    saved = await saveTelegramFile(ctx.api, fileId, cwd, suggested);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await ctx.reply(`⚠️ Не смог принять файл: ${esc(message)}`, { parse_mode: "HTML" });
+    return;
+  }
+
+  const caption = ctx.message.caption?.trim();
+  await ctx.reply(`📎 Принял <code>${esc(saved.name)}</code>`, { parse_mode: "HTML" });
+
+  const prompt = caption
+    ? `${caption}\n\nФайл лежит здесь: ${saved.path}`
+    : `Пользователь прислал файл: ${saved.path}. Посмотри на него и скажи, что видишь.`;
+
+  recordMessage(userId);
+  try {
+    const session = ensureSession({
+      api: ctx.api,
+      chatId,
+      userId,
+      notify: (html) => ctx.reply(html, { parse_mode: "HTML" }),
+    });
+    await session.conversation.send(prompt);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await ctx.reply(`⚠️ Не смог запустить агента: ${esc(message)}`, { parse_mode: "HTML" });
+  }
+});
 
 bot.on("message:text", async (ctx) => {
   const userId = ctx.from.id;

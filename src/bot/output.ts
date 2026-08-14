@@ -20,7 +20,7 @@ export class TelegramOutput implements ConversationOutput {
   #api: Api;
   #chatId: number;
   #statusMessageId: number | null = null;
-  #streamMessageId: number | null = null;
+  #draftId: number | null = null;
   #streamShown = "";
   #lastStreamEdit = 0;
   #typingTimer: NodeJS.Timeout | null = null;
@@ -51,49 +51,57 @@ export class TelegramOutput implements ConversationOutput {
   }
 
   /**
-   * Живой ответ: одно сообщение, в которое дописывается текст по мере того,
-   * как модель его выдаёт.
+   * Живой ответ через sendMessageDraft — штатный способ Telegram показывать
+   * текст, пока он генерируется. Правки черновика с одним и тем же draft_id
+   * клиент анимирует сам, поэтому текст проявляется плавно, а не рывками, как
+   * при редактировании обычного сообщения.
    *
-   * Telegram душит частые правки, поэтому редактируем не чаще раза в полторы
-   * секунды и только если текст действительно изменился — иначе API отвечает
-   * «message is not modified» на каждый второй вызов.
+   * Черновик эфемерный: живёт тридцать секунд и в историю не попадает. Готовый
+   * ответ обязательно досылается отдельным sendMessage — иначе он просто
+   * исчезнет.
    */
   async stream(text: string, force = false): Promise<void> {
     const trimmed = text.trimEnd();
     if (!trimmed) return;
 
     const now = Date.now();
-    if (!force && now - this.#lastStreamEdit < 1500) return;
+    // Чаще раза в секунду смысла нет: анимацию рисует клиент, а лимиты общие.
+    if (!force && now - this.#lastStreamEdit < 1000) return;
     if (trimmed === this.#streamShown) return;
-
-    // В одно сообщение Telegram пускает 4096 символов. Упёрлись — закрываем
-    // текущее и продолжаем в новом, иначе правка просто перестанет проходить.
-    if (trimmed.length > TELEGRAM_LIMIT) {
-      await this.endStream();
-      return;
-    }
 
     this.#lastStreamEdit = now;
     this.#streamShown = trimmed;
-    const body = esc(trimmed);
+    await this.#draft(trimmed.slice(-TELEGRAM_LIMIT));
+  }
 
-    if (this.#streamMessageId === null) {
-      this.#streamMessageId = (await this.send(body)) ?? null;
-      return;
-    }
+  /** Пустой черновик — встроенная заглушка «Thinking…» у клиента. */
+  async startDraft(): Promise<void> {
+    this.#streamShown = "";
+    this.#lastStreamEdit = 0;
+    await this.#draft("");
+  }
+
+  async #draft(text: string): Promise<void> {
+    // draft_id должен быть ненулевым и одинаковым на весь ответ: по нему
+    // клиент и понимает, что это продолжение того же черновика.
+    if (this.#draftId === null) this.#draftId = (Date.now() % 2_000_000_000) + 1;
     try {
-      await this.#api.editMessageText(this.#chatId, this.#streamMessageId, body, {
-        parse_mode: "HTML",
-        link_preview_options: { is_disabled: true },
+      await this.#api.raw.sendMessageDraft({
+        chat_id: this.#chatId,
+        draft_id: this.#draftId,
+        text,
       });
     } catch (error) {
-      if (!isBenignEditError(error)) console.error(`[output:${this.#chatId}] stream:`, error);
+      // Старые клиенты и старые версии Bot API черновиков не знают — тогда
+      // просто ничего не показываем, вместо того чтобы валить сессию.
+      if (error instanceof GrammyError) return;
+      console.error(`[output:${this.#chatId}] draft:`, error);
     }
   }
 
-  /** Ответ дописан: следующий пойдёт в новое сообщение. */
+  /** Ответ дописан: следующий пойдёт новым черновиком. */
   async endStream(): Promise<void> {
-    this.#streamMessageId = null;
+    this.#draftId = null;
     this.#streamShown = "";
     this.#lastStreamEdit = 0;
   }

@@ -14,8 +14,10 @@ export interface ConversationOutput {
   clearStatus(finalHtml?: string): Promise<void>;
   /** Дописать живой ответ. force — отрисовать немедленно, минуя троттлинг. */
   stream(text: string, force?: boolean): Promise<void>;
-  /** Ответ закончен: следующий пойдёт в новое сообщение. */
+  /** Ответ закончен: следующий пойдёт новым черновиком. */
   endStream(): Promise<void>;
+  /** Пустой черновик: у клиента появляется встроенная заглушка «Thinking…». */
+  startDraft(): Promise<void>;
   typing(): Promise<void>;
   /** «Печатает…» на всё время работы: статус живёт 5 секунд и требует пульса. */
   startTyping(): void;
@@ -159,9 +161,9 @@ export class Conversation {
     } as SDKUserMessage);
 
     this.#deps.output.startTyping();
-    // Первый инструмент может появиться через десяток секунд, а до тех пор
-    // чат выглядит мёртвым. Строку состояния показываем сразу.
-    await this.#deps.output.status("принял, думаю…");
+    // Пустой черновик рисует у клиента встроенную заглушку «Thinking…»,
+    // а дальше в него же плавно проявляется текст ответа.
+    await this.#deps.output.startDraft();
   }
 
   async interrupt(): Promise<void> {
@@ -304,16 +306,11 @@ export class Conversation {
         for (const block of message.message.content) {
           if (block.type === "text" && block.text.trim()) {
             const full = block.text.trim();
-            // Дорисовываем начисто: в потоке могли пропасть куски из-за
-            // троттлинга, а это окончательный текст блока.
-            if (full.length <= TELEGRAM_LIMIT) {
-              await output.stream(full, true);
-            } else {
-              await output.endStream();
-              for (const part of chunk(esc(full))) await output.send(part);
-            }
-            this.#liveText = "";
+            // Черновик живёт тридцать секунд и в историю не попадает, поэтому
+            // готовый ответ обязательно досылаем обычным сообщением.
             await output.endStream();
+            for (const part of chunk(esc(full))) await output.send(part);
+            this.#liveText = "";
           } else if (block.type === "tool_use") {
             this.#activity.push(
               describeToolShort(block.name, (block.input ?? {}) as Record<string, unknown>),
