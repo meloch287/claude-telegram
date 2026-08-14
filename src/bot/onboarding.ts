@@ -1,8 +1,9 @@
-import { InlineKeyboard, type Context } from "grammy";
+import type { Context } from "grammy";
 import { config } from "../config.js";
 import { getOrCreateUser, setCredential, setTier } from "../db.js";
 import { detectKind, describeKind, maskSecret, type AuthKind } from "../auth.js";
 import { mainMenuKeyboard } from "./keyboards.js";
+import { renderScreen } from "./screens.js";
 
 /** Пользователи, от которых сейчас ждём токен или ключ. */
 const awaiting = new Map<number, AuthKind>();
@@ -19,39 +20,17 @@ export function stopAwaiting(userId: number): void {
   awaiting.delete(userId);
 }
 
-const START = `
-<b>Claude Code в Telegram</b>
-
-Тот же агент, что в терминале: читает и правит файлы, ищет по проекту, запускает команды. Разница одна — каждое действие приходит карточкой с кнопками, и решаешь ты.
-`.trim();
-
+/** Стартовый экран — то же меню, что и по /menu, плюс предупреждение о доступе. */
 export async function sendStart(ctx: Context): Promise<void> {
-  const user = getOrCreateUser(ctx.from!.id);
+  const view = renderScreen("menu", { userId: ctx.from!.id, chatId: ctx.chat!.id });
   const openAccess =
     config.allowedUserIds.length === 0
       ? `\n\n⚠️ Бот открыт всем. Твой id: <code>${ctx.from?.id}</code> — впиши в <code>ALLOWED_USER_IDS</code>.`
       : "";
-
-  const kb = new InlineKeyboard().text(user.auth_kind ? "Продолжить" : "Войти", "auth:menu");
-  await ctx.reply(`${START}${openAccess}`, { parse_mode: "HTML", reply_markup: kb });
-}
-
-const AUTH_MENU = `
-Как заходим?
-
-<b>Подписка Claude</b> — работа идёт по лимитам твоей подписки, как в обычном Claude Code.
-<b>API-ключ</b> — оплата по токенам.
-`.trim();
-
-export function authKeyboard(): InlineKeyboard {
-  return new InlineKeyboard()
-    .text("🎫 Подписка Claude", "auth:subscription")
-    .row()
-    .text("🔌 API-ключ", "auth:api");
-}
-
-export async function sendAuthMenu(ctx: Context): Promise<void> {
-  await ctx.reply(AUTH_MENU, { parse_mode: "HTML", reply_markup: authKeyboard() });
+  await ctx.reply(`${view.text}${openAccess}`, {
+    parse_mode: "HTML",
+    reply_markup: view.keyboard,
+  });
 }
 
 const SUBSCRIPTION_PROMPT = `
@@ -100,20 +79,21 @@ export async function finishLogin(ctx: Context, userId: number, secret: string):
  * Принимает присланный секрет. Возвращает false, если он не похож ни на токен
  * подписки, ни на ключ API, — тогда пользователю показывается подсказка.
  */
-export function acceptCredential(userId: number, text: string, expected: AuthKind): boolean {
+export function acceptCredential(userId: number, text: string): boolean {
   const value = text.trim();
-  const detected = detectKind(value);
-  if (detected === null) return false;
-  // Верим тому, что распознали по формату: пользователь мог нажать не ту кнопку.
-  const kind = detected ?? expected;
+  // Верим формату, а не нажатой кнопке: промахнуться кнопкой легко, а секрет
+  // однозначно опознаётся по виду.
+  const kind = detectKind(value);
+  if (kind === null) return false;
   setCredential(userId, { kind, secret: value });
-  setTier(userId, "max"); // тарифов больше нет, но поле помечает пройденный вход
+  setTier(userId, "max"); // тарифов больше нет, поле лишь помечает пройденный вход
   return true;
 }
 
 export const HELP = `
 <b>Команды</b>
 
+/menu — главное меню
 /resume — прошлые чаты списком, вернуться кнопкой
 /new — начать с чистого листа
 /stop — прервать агента

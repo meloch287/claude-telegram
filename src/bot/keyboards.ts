@@ -7,6 +7,7 @@ import { config } from "../config.js";
  *   auth:<kind>   — выбор способа входа
  *   p:<id>:<act>  — решение по разрешению (a allow, w always, d deny, c comment, s stop)
  *   q:<id>:<i>    — ответ на вопрос агента
+ *   nav:<экран>   — переход между экранами
  *   m:<mode>      — режим разрешений
  *   md:<model>    — модель
  *   rs:<uuid>     — вернуться в сессию (uuid 36 символов, влезает)
@@ -39,34 +40,12 @@ export function questionKeyboard(pending: PendingQuestion): InlineKeyboard {
   return kb;
 }
 
-export function modeKeyboard(current: string): InlineKeyboard {
-  const modes: [string, string][] = [
-    ["default", "🛡️ Спрашивать каждый раз"],
-    ["acceptEdits", "✏️ Править файлы молча"],
-    ["plan", "🗺️ Только план, без правок"],
-  ];
-  const kb = new InlineKeyboard();
-  for (const [id, label] of modes) {
-    kb.text(`${label}${id === current ? " ✓" : ""}`, `m:${id}`).row();
-  }
-  return kb;
-}
-
 export const MODELS: [string, string][] = [
   ["", "По умолчанию"],
   ["claude-opus-5", "Opus 5 — самая сильная"],
   ["claude-sonnet-5", "Sonnet 5 — баланс"],
   ["claude-haiku-4-5", "Haiku 4.5 — быстрая"],
 ];
-
-export function modelKeyboard(current: string | null): InlineKeyboard {
-  const kb = new InlineKeyboard();
-  for (const [id, label] of MODELS) {
-    const active = (current ?? "") === id;
-    kb.text(`${label}${active ? " ✓" : ""}`, `md:${id || "default"}`).row();
-  }
-  return kb;
-}
 
 export function mainMenuKeyboard(): InlineKeyboard {
   const kb = new InlineKeyboard();

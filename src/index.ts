@@ -1,4 +1,4 @@
-import { Bot, GrammyError, HttpError, InlineKeyboard } from "grammy";
+import { Bot, GrammyError, HttpError, InlineKeyboard, type CommandContext, type Context } from "grammy";
 import { listSessions, type PermissionMode } from "@anthropic-ai/claude-agent-sdk";
 import { config } from "./config.js";
 import {
@@ -36,12 +36,12 @@ import {
   askForCredential,
   awaitingKindFor,
   finishLogin,
-  sendAuthMenu,
   sendStart,
   startAwaiting,
   stopAwaiting,
 } from "./bot/onboarding.js";
-import { MODELS, mainMenuKeyboard, modeKeyboard, modelKeyboard } from "./bot/keyboards.js";
+import { MODELS, mainMenuKeyboard } from "./bot/keyboards.js";
+import { isScreenId, renderScreen, type ScreenId } from "./bot/screens.js";
 import { checkAchievements, renderUnlocked, unlockedIds } from "./achievements.js";
 import { ACHIEVEMENTS, CAT_LEVELS, catForTokens, formatTokens, nextCat } from "./cats.js";
 import { esc, formatUsd } from "./agent/render.js";
@@ -78,9 +78,32 @@ bot.command("logout", async (ctx) => {
   await ctx.reply("Доступ удалён из базы. Войти заново — /start");
 });
 
-bot.callbackQuery("auth:menu", async (ctx) => {
+/**
+ * Переходы между экранами. Сообщение перерисовывается на месте, а не шлётся
+ * новым: иначе после трёх нажатий чат забит одинаковыми меню.
+ */
+bot.callbackQuery(/^nav:(.+)$/, async (ctx) => {
+  const id = ctx.match[1] ?? "";
+  if (!isScreenId(id)) {
+    await ctx.answerCallbackQuery("Неизвестный экран");
+    return;
+  }
+  const view = renderScreen(id as ScreenId, { userId: ctx.from.id, chatId: ctx.chat!.id });
   await ctx.answerCallbackQuery();
-  await sendAuthMenu(ctx);
+  await ctx
+    .editMessageText(view.text, { parse_mode: "HTML", reply_markup: view.keyboard })
+    .catch(() => ctx.reply(view.text, { parse_mode: "HTML", reply_markup: view.keyboard }));
+});
+
+bot.callbackQuery("auth:logout", async (ctx) => {
+  const userId = ctx.from.id;
+  clearCredential(userId);
+  stopAwaiting(userId);
+  await resetSession(ctx.chat!.id, userId);
+  await ctx.answerCallbackQuery("Доступ удалён");
+  const view = renderScreen("auth", { userId, chatId: ctx.chat!.id });
+  await ctx.editMessageText(view.text, { parse_mode: "HTML", reply_markup: view.keyboard })
+    .catch(() => undefined);
 });
 
 bot.callbackQuery(/^auth:(subscription|api)$/, async (ctx) => {
@@ -181,18 +204,14 @@ bot.callbackQuery(/^rs:(.+)$/, async (ctx) => {
 
 // ── Настройки ────────────────────────────────────────────────────────────────
 
-bot.command("mode", async (ctx) => {
-  const current = getChat(ctx.chat.id)?.permission_mode ?? "default";
-  await ctx.reply("Как спрашивать разрешения?", {
-    parse_mode: "HTML",
-    reply_markup: modeKeyboard(current),
-  });
-});
+async function showScreen(ctx: CommandContext<Context>, id: ScreenId): Promise<void> {
+  const view = renderScreen(id, { userId: ctx.from!.id, chatId: ctx.chat.id });
+  await ctx.reply(view.text, { parse_mode: "HTML", reply_markup: view.keyboard });
+}
 
-bot.command("model", async (ctx) => {
-  const user = getOrCreateUser(ctx.from!.id);
-  await ctx.reply("Какой моделью работать?", { reply_markup: modelKeyboard(user.model) });
-});
+bot.command("menu", async (ctx) => showScreen(ctx, "menu"));
+bot.command("mode", async (ctx) => showScreen(ctx, "mode"));
+bot.command("model", async (ctx) => showScreen(ctx, "model"));
 
 bot.command("project", async (ctx) => {
   const userId = ctx.from!.id;
@@ -286,7 +305,8 @@ bot.callbackQuery(/^m:(.+)$/, async (ctx) => {
   if (session) await session.conversation.setPermissionMode(mode);
 
   await ctx.answerCallbackQuery("Режим изменён");
-  await ctx.editMessageReplyMarkup({ reply_markup: modeKeyboard(mode) }).catch(() => undefined);
+  const view = renderScreen("mode", { userId: ctx.from.id, chatId });
+  await ctx.editMessageReplyMarkup({ reply_markup: view.keyboard }).catch(() => undefined);
 });
 
 bot.callbackQuery(/^md:(.+)$/, async (ctx) => {
@@ -299,7 +319,8 @@ bot.callbackQuery(/^md:(.+)$/, async (ctx) => {
   if (session && model) await session.conversation.setModel(model);
 
   await ctx.answerCallbackQuery("Модель изменена");
-  await ctx.editMessageReplyMarkup({ reply_markup: modelKeyboard(model) }).catch(() => undefined);
+  const view = renderScreen("model", { userId, chatId: ctx.chat!.id });
+  await ctx.editMessageReplyMarkup({ reply_markup: view.keyboard }).catch(() => undefined);
 });
 
 bot.callbackQuery(/^p:([^:]+):(.+)$/, async (ctx) => {
@@ -377,9 +398,8 @@ bot.on("message:text", async (ctx) => {
   const text = ctx.message.text;
 
   // 1. Ждём токен подписки или ключ API.
-  const awaitingKind = awaitingKindFor(userId);
-  if (awaitingKind) {
-    if (!acceptCredential(userId, text, awaitingKind)) {
+  if (awaitingKindFor(userId)) {
+    if (!acceptCredential(userId, text)) {
       await ctx.reply(
         "Не похоже ни на токен подписки, ни на ключ API.\n\n" +
           "Токен даёт <code>claude setup-token</code>, ключ начинается с <code>sk-ant-</code>.",
@@ -454,6 +474,7 @@ process.once("SIGINT", () => void shutdown("SIGINT"));
 process.once("SIGTERM", () => void shutdown("SIGTERM"));
 
 await bot.api.setMyCommands([
+  { command: "menu", description: "главное меню" },
   { command: "resume", description: "прошлые чаты" },
   { command: "new", description: "начать заново" },
   { command: "stop", description: "остановить агента" },
