@@ -244,3 +244,25 @@ test("пароль прокси не утекает в логи", () => {
   assert.ok(!masked.includes("user"));
   assert.ok(masked.includes("de1.example:8080"));
 });
+
+// ── Распознавание секретов ──────────────────────────────────────────────────
+
+const { detectKind, looksLikeOauthToken, looksLikeApiKey } = await import("../src/auth.js");
+
+test("токен подписки не принимается за ключ API", () => {
+  // Ровно эта путаница ломала бота: шаблон ключа шире и накрывает токен.
+  const token = "sk-ant-oat01-" + "a".repeat(40);
+  assert.equal(detectKind(token), "subscription");
+  assert.equal(looksLikeApiKey(token), false);
+});
+
+test("ключ API распознаётся как ключ", () => {
+  const key = "sk-ant-api03-" + "b".repeat(40);
+  assert.equal(detectKind(key), "api");
+  assert.equal(looksLikeOauthToken(key), false);
+});
+
+test("мусор не распознаётся никак", () => {
+  assert.equal(detectKind("просто текст"), null);
+  assert.equal(detectKind("sk-ant-"), null);
+});

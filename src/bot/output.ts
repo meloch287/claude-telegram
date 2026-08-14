@@ -3,7 +3,7 @@ import { GrammyError } from "grammy";
 import type { ConversationOutput } from "../agent/conversation.js";
 import type { PendingPermission, PendingQuestion, PermissionBridgeHooks } from "../agent/permissions.js";
 import { permissionKeyboard, questionKeyboard } from "./keyboards.js";
-import { describeToolDetailed, esc, toolIcon } from "../agent/render.js";
+import { describeToolDetailed, esc, toolIcon, TELEGRAM_LIMIT } from "../agent/render.js";
 
 /** Игнорируем ошибки, которые ничего не значат для пользователя. */
 function isBenignEditError(error: unknown): boolean {
@@ -20,6 +20,9 @@ export class TelegramOutput implements ConversationOutput {
   #api: Api;
   #chatId: number;
   #statusMessageId: number | null = null;
+  #streamMessageId: number | null = null;
+  #streamShown = "";
+  #lastStreamEdit = 0;
 
   constructor(api: Api, chatId: number) {
     this.#api = api;
@@ -44,6 +47,54 @@ export class TelegramOutput implements ConversationOutput {
       console.error(`[output:${this.#chatId}] send failed:`, error);
       return undefined;
     }
+  }
+
+  /**
+   * Живой ответ: одно сообщение, в которое дописывается текст по мере того,
+   * как модель его выдаёт.
+   *
+   * Telegram душит частые правки, поэтому редактируем не чаще раза в полторы
+   * секунды и только если текст действительно изменился — иначе API отвечает
+   * «message is not modified» на каждый второй вызов.
+   */
+  async stream(text: string, force = false): Promise<void> {
+    const trimmed = text.trimEnd();
+    if (!trimmed) return;
+
+    const now = Date.now();
+    if (!force && now - this.#lastStreamEdit < 1500) return;
+    if (trimmed === this.#streamShown) return;
+
+    // В одно сообщение Telegram пускает 4096 символов. Упёрлись — закрываем
+    // текущее и продолжаем в новом, иначе правка просто перестанет проходить.
+    if (trimmed.length > TELEGRAM_LIMIT) {
+      await this.endStream();
+      return;
+    }
+
+    this.#lastStreamEdit = now;
+    this.#streamShown = trimmed;
+    const body = esc(trimmed);
+
+    if (this.#streamMessageId === null) {
+      this.#streamMessageId = (await this.send(body)) ?? null;
+      return;
+    }
+    try {
+      await this.#api.editMessageText(this.#chatId, this.#streamMessageId, body, {
+        parse_mode: "HTML",
+        link_preview_options: { is_disabled: true },
+      });
+    } catch (error) {
+      if (!isBenignEditError(error)) console.error(`[output:${this.#chatId}] stream:`, error);
+    }
+  }
+
+  /** Ответ дописан: следующий пойдёт в новое сообщение. */
+  async endStream(): Promise<void> {
+    this.#streamMessageId = null;
+    this.#streamShown = "";
+    this.#lastStreamEdit = 0;
   }
 
   async status(html: string): Promise<void> {

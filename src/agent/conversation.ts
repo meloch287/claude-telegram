@@ -1,7 +1,7 @@
 import { query, type Query, type SDKMessage, type SDKUserMessage, type PermissionMode } from "@anthropic-ai/claude-agent-sdk";
 import { MessageQueue } from "./queue.js";
 import { createPermissionBridge, flushChat, type PermissionBridgeHooks } from "./permissions.js";
-import { describeToolShort, chunk, formatUsd, formatDuration, esc } from "./render.js";
+import { describeToolShort, chunk, formatUsd, formatDuration, esc, TELEGRAM_LIMIT } from "./render.js";
 import { credentialEnv, type Credential } from "../auth.js";
 import { activeProxyUrl } from "../proxy.js";
 
@@ -12,6 +12,10 @@ export interface ConversationOutput {
   status(html: string): Promise<void>;
   /** Убрать строку состояния (работа закончена). */
   clearStatus(finalHtml?: string): Promise<void>;
+  /** Дописать живой ответ. force — отрисовать немедленно, минуя троттлинг. */
+  stream(text: string, force?: boolean): Promise<void>;
+  /** Ответ закончен: следующий пойдёт в новое сообщение. */
+  endStream(): Promise<void>;
   typing(): Promise<void>;
   permissionHooks: PermissionBridgeHooks;
 }
@@ -106,6 +110,7 @@ export class Conversation {
   #sessionId: string | null = null;
   #busy = false;
   #activity: string[] = [];
+  #liveText = "";
   #closed = false;
 
   // modelUsage и total_cost_usd в streaming-сессии накопительные:
@@ -136,6 +141,7 @@ export class Conversation {
     if (!this.#query) this.#start();
     this.#busy = true;
     this.#activity = [];
+    this.#liveText = "";
     this.#queue.push({
       type: "user",
       message: { role: "user", content: text },
@@ -206,6 +212,9 @@ export class Conversation {
         canUseTool,
         ...(resumeSessionId ? { resume: resumeSessionId } : {}),
         systemPrompt: { type: "preset", preset: "claude_code", append: SYSTEM_APPEND },
+        // Без этого SDK отдаёт только готовые сообщения, и в чате тишина всё
+        // время, пока модель печатает.
+        includePartialMessages: true,
         // env заменяет окружение подпроцесса целиком, а не дополняет его,
         // поэтому process.env нужно расстелить руками — иначе не будет PATH.
         env: buildEnv(credential),
@@ -249,12 +258,33 @@ export class Conversation {
         return;
       }
 
+      case "stream_event": {
+        // Кусочки текста по мере генерации: из них и собирается живой ответ.
+        const event = message.event as {
+          type?: string;
+          delta?: { type?: string; text?: string };
+        };
+        if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
+          this.#liveText += event.delta.text ?? "";
+          await output.stream(this.#liveText);
+        }
+        return;
+      }
+
       case "assistant": {
         for (const block of message.message.content) {
           if (block.type === "text" && block.text.trim()) {
-            for (const part of chunk(esc(block.text.trim()))) {
-              await output.send(part);
+            const full = block.text.trim();
+            // Дорисовываем начисто: в потоке могли пропасть куски из-за
+            // троттлинга, а это окончательный текст блока.
+            if (full.length <= TELEGRAM_LIMIT) {
+              await output.stream(full, true);
+            } else {
+              await output.endStream();
+              for (const part of chunk(esc(full))) await output.send(part);
             }
+            this.#liveText = "";
+            await output.endStream();
           } else if (block.type === "tool_use") {
             this.#activity.push(
               describeToolShort(block.name, (block.input ?? {}) as Record<string, unknown>),

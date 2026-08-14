@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { config } from "./config.js";
 import { encrypt, decrypt } from "./crypto.js";
 import type { TierId } from "./tiers.js";
-import type { AuthKind, Credential } from "./auth.js";
+import { looksLikeOauthToken, type AuthKind, type Credential } from "./auth.js";
 
 mkdirSync(config.dataDir, { recursive: true });
 
@@ -195,12 +195,24 @@ export function setCredential(userId: number, credential: Credential): void {
 export function getCredential(userId: number): Credential | null {
   const row = stmts.getUser.get(userId) as unknown as UserRow | undefined;
   if (!row?.api_key_enc || !row.auth_kind) return null;
+
+  let secret: string;
   try {
-    return { kind: row.auth_kind, secret: decrypt(row.api_key_enc) };
+    secret = decrypt(row.api_key_enc);
   } catch {
     // Сменился ENCRYPTION_KEY — старые секреты уже не расшифровать.
     return null;
   }
+
+  // Чиним записи, сделанные до исправления порядка распознавания: токен
+  // подписки тогда сохранялся как ключ API и уходил не в ту переменную,
+  // из-за чего Anthropic отвечал «API key is invalid».
+  if (row.auth_kind === "api" && looksLikeOauthToken(secret)) {
+    stmts.setKey.run(row.api_key_enc, "subscription", userId);
+    return { kind: "subscription", secret };
+  }
+
+  return { kind: row.auth_kind, secret };
 }
 
 export function clearCredential(userId: number): void {

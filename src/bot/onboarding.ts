@@ -78,11 +78,12 @@ export async function finishLogin(ctx: Context, userId: number, secret: string):
  * Принимает присланный секрет. Возвращает false, если он не похож ни на токен
  * подписки, ни на ключ API, — тогда пользователю показывается подсказка.
  */
-export function acceptCredential(userId: number, text: string): boolean {
+export function acceptCredential(userId: number, text: string, chosen: AuthKind): boolean {
   const value = text.trim();
-  // Верим формату, а не нажатой кнопке: промахнуться кнопкой легко, а секрет
-  // однозначно опознаётся по виду.
-  const kind = detectKind(value);
+  // Форма подписочного токена однозначна и перебивает выбор кнопкой: промахнуться
+  // кнопкой легко. Но если форму не опознали — идём за выбором пользователя,
+  // а не отказываем: форматы секретов у Anthropic со временем меняются.
+  const kind = detectKind(value) ?? (value.length >= 20 ? chosen : null);
   if (kind === null) return false;
   setCredential(userId, { kind, secret: value });
   setTier(userId, "max"); // тарифов больше нет, поле лишь помечает пройденный вход

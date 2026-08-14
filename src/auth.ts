@@ -36,20 +36,32 @@ export function credentialEnv(credential: Credential): Record<string, string | u
   return { ANTHROPIC_API_KEY: credential.secret, CLAUDE_CODE_OAUTH_TOKEN: undefined };
 }
 
-export function looksLikeApiKey(text: string): boolean {
-  return /^sk-ant-[A-Za-z0-9_-]{20,}$/.test(text.trim());
-}
-
-/** Токен от `claude setup-token`. Формат может меняться, поэтому проверка мягкая. */
+/**
+ * Токен от `claude setup-token` — `sk-ant-oat01-…`.
+ *
+ * Проверять его нужно ДО ключа API: шаблон ключа шире и накрывает токен
+ * подписки целиком. Ошибка в порядке стоила рабочего бота — токен подписки
+ * уходил как ANTHROPIC_API_KEY, и Anthropic отвечал «API key is invalid».
+ */
 export function looksLikeOauthToken(text: string): boolean {
-  const value = text.trim();
-  if (looksLikeApiKey(value)) return false;
-  return /^sk-ant-oat[A-Za-z0-9_-]{10,}$/.test(value) || /^[A-Za-z0-9_-]{40,}$/.test(value);
+  return /^sk-ant-oat\d*-[A-Za-z0-9_-]{20,}$/.test(text.trim());
 }
 
+/** Ключ API — тот же префикс, но без `oat`. */
+export function looksLikeApiKey(text: string): boolean {
+  const value = text.trim();
+  if (looksLikeOauthToken(value)) return false;
+  return /^sk-ant-[A-Za-z0-9_-]{20,}$/.test(value);
+}
+
+/**
+ * Определяет вид секрета по форме. Форма подписочного токена однозначна,
+ * поэтому она и решает; если не опознали — возвращаем null, и вызывающий
+ * берёт то, что выбрал пользователь кнопкой.
+ */
 export function detectKind(text: string): AuthKind | null {
-  if (looksLikeApiKey(text)) return "api";
   if (looksLikeOauthToken(text)) return "subscription";
+  if (looksLikeApiKey(text)) return "api";
   return null;
 }
 

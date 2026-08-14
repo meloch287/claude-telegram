@@ -438,8 +438,9 @@ bot.on("message:text", async (ctx) => {
   const text = ctx.message.text;
 
   // 1. Ждём токен подписки или ключ API.
-  if (awaitingKindFor(userId)) {
-    if (!acceptCredential(userId, text)) {
+  const awaitingKind = awaitingKindFor(userId);
+  if (awaitingKind) {
+    if (!acceptCredential(userId, text, awaitingKind)) {
       await ctx.reply(
         "Не похоже ни на токен подписки, ни на ключ API.\n\n" +
           "Токен даёт <code>claude setup-token</code>, ключ начинается с <code>sk-ant-</code>.",
