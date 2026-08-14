@@ -2,7 +2,6 @@ import type { Context } from "grammy";
 import { config } from "../config.js";
 import { getOrCreateUser, setCredential, setTier } from "../db.js";
 import { detectKind, describeKind, maskSecret, type AuthKind } from "../auth.js";
-import { mainMenuKeyboard } from "./keyboards.js";
 import { renderScreen } from "./screens.js";
 
 /** Пользователи, от которых сейчас ждём токен или ключ. */
@@ -71,7 +70,7 @@ export async function finishLogin(ctx: Context, userId: number, secret: string):
       `Просто напиши, что нужно сделать.\n\n` +
       `<code>/resume</code> — вернуться в один из прошлых чатов\n` +
       `<code>/help</code> — все команды`,
-    { parse_mode: "HTML", reply_markup: mainMenuKeyboard() },
+    { parse_mode: "HTML" },
   );
 }
 

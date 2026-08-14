@@ -41,7 +41,7 @@ import {
   startAwaiting,
   stopAwaiting,
 } from "./bot/onboarding.js";
-import { MODELS, mainMenuKeyboard } from "./bot/keyboards.js";
+import { MODELS } from "./bot/keyboards.js";
 import { isScreenId, renderScreen, type ScreenId } from "./bot/screens.js";
 import { checkAchievements, renderUnlocked, unlockedIds } from "./achievements.js";
 import { ACHIEVEMENTS, CAT_LEVELS, catForTokens, formatTokens, nextCat } from "./cats.js";
@@ -75,7 +75,7 @@ bot.command("start", async (ctx) => {
 });
 
 bot.command("help", async (ctx) => {
-  await ctx.reply(HELP, { parse_mode: "HTML", reply_markup: mainMenuKeyboard() });
+  await ctx.reply(HELP, { parse_mode: "HTML" });
 });
 
 bot.command("logout", async (ctx) => {
@@ -268,7 +268,7 @@ bot.command("stats", async (ctx) => {
       `Инструментов разрешено: ${user.tools_allowed} · отклонено: ${user.tools_denied}`,
       `Серия дней подряд: ${user.streak_days}`,
     ].join("\n"),
-    { parse_mode: "HTML", reply_markup: mainMenuKeyboard() },
+    { parse_mode: "HTML" },
   );
 });
 
@@ -292,7 +292,7 @@ bot.command("cats", async (ctx) => {
 
   await ctx.reply(
     `🐈 <b>Коты</b>\n${catLines}\n\n🏆 <b>Достижения</b> (${have.size}/${ACHIEVEMENTS.length})\n${achievementLines}`,
-    { parse_mode: "HTML", reply_markup: mainMenuKeyboard() },
+    { parse_mode: "HTML" },
   );
 });
 

@@ -1,6 +1,5 @@
 import { InlineKeyboard } from "grammy";
 import type { PendingPermission, PendingQuestion } from "../agent/permissions.js";
-import { config } from "../config.js";
 
 /**
  * callback_data ограничен 64 байтами, поэтому схема короткая:
@@ -48,8 +47,3 @@ export const MODELS: [string, string][] = [
   ["claude-haiku-4-5", "Haiku 4.5 — быстрая"],
 ];
 
-export function mainMenuKeyboard(): InlineKeyboard {
-  const kb = new InlineKeyboard();
-  if (config.miniappUrl) kb.webApp("🐱 Мой Claude-кот", config.miniappUrl).row();
-  return kb;
-}

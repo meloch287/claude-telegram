@@ -1,5 +1,4 @@
 import { InlineKeyboard } from "grammy";
-import { config } from "../config.js";
 import { getChat, getOrCreateUser } from "../db.js";
 import { describeKind } from "../auth.js";
 import { MODELS } from "./keyboards.js";
@@ -42,12 +41,12 @@ const SCREENS: Record<ScreenId, Screen> = {
         ? `Вход: ${describeKind(user.auth_kind)}`
         : "Вход не выполнен";
 
+      // Мини-апп живёт на кнопке меню Telegram, рядом с полем ввода.
+      // Дублировать его инлайн-кнопкой незачем: она уезжает вверх с историей.
       const keyboard = new InlineKeyboard()
         .text(user.auth_kind ? "🎫 Аккаунт" : "🎫 Войти", "nav:auth")
         .row()
-        .text("⚙️ Настройки", "nav:settings")
-        .row();
-      if (config.miniappUrl) keyboard.webApp("🐱 Мой Claude-кот", config.miniappUrl).row();
+        .text("⚙️ Настройки", "nav:settings");
 
       return {
         text: `<b>Claude Code в Telegram</b>\n\n${status}\n\nНапиши задачу текстом — агент возьмётся за неё.`,
