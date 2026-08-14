@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS chats (
   user_id         INTEGER NOT NULL,
   project         TEXT    NOT NULL DEFAULT 'default',
   session_id      TEXT,
+  title           TEXT,
   permission_mode TEXT    NOT NULL DEFAULT 'default',
   updated_at      INTEGER NOT NULL
 );
@@ -79,6 +80,7 @@ CREATE TABLE IF NOT EXISTS projects_seen (
 for (const [table, column, type] of [
   ["users", "auth_kind", "TEXT"],
   ["users", "model", "TEXT"],
+  ["chats", "title", "TEXT"],
 ] as const) {
   const existing = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
   if (!existing.some((c) => c.name === column)) {
@@ -109,6 +111,7 @@ export interface ChatRow {
   user_id: number;
   project: string;
   session_id: string | null;
+  title: string | null;
   permission_mode: string;
   updated_at: number;
 }
@@ -128,14 +131,18 @@ const stmts = {
     "UPDATE users SET total_tokens = total_tokens + ?, total_cost_usd = total_cost_usd + ? WHERE user_id = ?",
   ),
   setStreak: db.prepare("UPDATE users SET last_active_day = ?, streak_days = ? WHERE user_id = ?"),
+  addHistory: db.prepare(
+    "UPDATE users SET total_tokens = total_tokens + ?, total_messages = total_messages + ? WHERE user_id = ?",
+  ),
 
   getChat: db.prepare("SELECT * FROM chats WHERE chat_id = ?"),
   upsertChat: db.prepare(`
-    INSERT INTO chats (chat_id, user_id, project, session_id, permission_mode, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO chats (chat_id, user_id, project, session_id, title, permission_mode, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(chat_id) DO UPDATE SET
       project = excluded.project,
       session_id = excluded.session_id,
+      title = excluded.title,
       permission_mode = excluded.permission_mode,
       updated_at = excluded.updated_at
   `),
@@ -200,6 +207,12 @@ export function clearCredential(userId: number): void {
   stmts.setKey.run(null, null, userId);
 }
 
+/** Импорт истории из транскриптов Claude Code: разовая доливка счётчиков. */
+export function addHistoricalUsage(userId: number, tokens: number, messages: number): void {
+  getOrCreateUser(userId);
+  stmts.addHistory.run(tokens, messages, userId);
+}
+
 export function setModel(userId: number, model: string | null): void {
   stmts.setModel.run(model, userId);
 }
@@ -213,6 +226,7 @@ export function saveChat(chat: {
   userId: number;
   project: string;
   sessionId: string | null;
+  title?: string | null;
   permissionMode: string;
 }): void {
   stmts.upsertChat.run(
@@ -220,6 +234,7 @@ export function saveChat(chat: {
     chat.userId,
     chat.project,
     chat.sessionId,
+    chat.title ?? null,
     chat.permissionMode,
     Date.now(),
   );

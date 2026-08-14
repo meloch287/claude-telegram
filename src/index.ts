@@ -126,7 +126,7 @@ bot.callbackQuery(/^auth:(subscription|api)$/, async (ctx) => {
 
 bot.command("new", async (ctx) => {
   await resetSession(ctx.chat.id, ctx.from!.id);
-  await ctx.reply("🧹 Начал с чистого листа. Прошлый контекст забыт.");
+  await ctx.reply("🧹 Прошлый чат закрыт. Следующее сообщение начнёт новый.");
 });
 
 bot.command("stop", async (ctx) => {
@@ -202,6 +202,7 @@ bot.callbackQuery(/^rs:(.+)$/, async (ctx) => {
     userId,
     project: chatRow?.project ?? "default",
     sessionId,
+    title: chatRow?.title ?? null,
     permissionMode: chatRow?.permission_mode ?? "default",
   });
 
@@ -298,7 +299,11 @@ bot.command("cats", async (ctx) => {
 
 bot.command("status", async (ctx) => {
   const channel = activeChannel();
+  const chat = getChat(ctx.chat.id);
   const lines = [
+    "<b>Чат</b>",
+    chat?.title ? esc(chat.title) : "новый — ещё ни одной задачи",
+    "",
     "<b>Канал выхода</b>",
     channel
       ? `✅ ${esc(describeChannel(channel))}`
@@ -468,6 +473,21 @@ bot.on("message:text", async (ctx) => {
   }
 
   // 4. Обычная реплика агенту.
+  // Чат без названия — новый. Называем его первой репликой: так в /resume и
+  // /status видно, о чём он, а не безликий идентификатор сессии.
+  const chatRow = getChat(chatId);
+  if (!chatRow?.title) {
+    saveChat({
+      chatId,
+      userId,
+      project: chatRow?.project ?? "default",
+      sessionId: chatRow?.session_id ?? null,
+      title: text.slice(0, 60),
+      permissionMode: chatRow?.permission_mode ?? "default",
+    });
+    await ctx.reply(`💬 Новый чат: <b>${esc(text.slice(0, 60))}</b>`, { parse_mode: "HTML" });
+  }
+
   recordMessage(userId);
   const unlocked = checkAchievements(userId, { type: "message", hour: new Date().getHours() });
 

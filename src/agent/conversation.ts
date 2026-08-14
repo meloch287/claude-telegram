@@ -142,7 +142,11 @@ export class Conversation {
       parent_tool_use_id: null,
       session_id: this.#sessionId ?? "",
     } as SDKUserMessage);
+
     await this.#deps.output.typing();
+    // Первый инструмент может появиться через десяток секунд, а до тех пор
+    // чат выглядит мёртвым. Строку состояния показываем сразу.
+    await this.#deps.output.status("принял, думаю…");
   }
 
   async interrupt(): Promise<void> {
@@ -322,17 +326,22 @@ export class Conversation {
   }
 }
 
+/**
+ * Считаем вход и выход, но НЕ чтение кэша.
+ *
+ * Чтение кэша стоит десятую часть обычного токена и растёт лавинообразно: на
+ * реальной истории оно даёт 59 миллиардов против 232 миллионов настоящих.
+ * Сложив всё вместе, счётчик показывал бы числа, к которым проделанная работа
+ * отношения не имеет, и уровни котов брались бы за неделю.
+ *
+ * modelUsage, а не usage: второй покрывает только главный цикл и занижает
+ * расход на задачах с субагентами.
+ */
 function totalTokens(message: Extract<SDKMessage, { type: "result" }>): number {
-  // modelUsage покрывает основной цикл, субагентов и служебные вызовы —
-  // usage считает только главный цикл и занижает расход на задачах с Task.
   const models = message.modelUsage ?? {};
   let total = 0;
   for (const usage of Object.values(models)) {
-    total +=
-      usage.inputTokens +
-      usage.outputTokens +
-      usage.cacheReadInputTokens +
-      usage.cacheCreationInputTokens;
+    total += usage.inputTokens + usage.outputTokens;
   }
   return total;
 }
