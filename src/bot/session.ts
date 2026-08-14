@@ -120,7 +120,11 @@ export function ensureSession(options: EnsureOptions): ChatSession {
     onSessionId: (sessionId) => {
       const current = getChat(chatId);
       if (current?.session_id !== sessionId) recordSessionStart(userId);
-      saveChat({ chatId, userId, project, sessionId, permissionMode });
+      saveChat({ chatId, userId, project, sessionId, title: current?.title ?? null, permissionMode });
+    },
+    onResumeLost: () => {
+      const current = getChat(chatId);
+      saveChat({ chatId, userId, project, sessionId: null, title: current?.title ?? null, permissionMode });
     },
     onToolDecision: (toolName, allowed) => {
       recordToolDecision(userId, allowed);

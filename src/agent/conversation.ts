@@ -39,6 +39,8 @@ export interface ConversationDeps {
   /** Вызывается на каждом result с ДЕЛЬТОЙ расхода, не с накопленным итогом. */
   onUsage(usage: ConversationUsage): void;
   onSessionId(sessionId: string): void;
+  /** Сохранённой сессии не оказалось на диске — забыть её в базе. */
+  onResumeLost(): void;
   onToolDecision(toolName: string, allowed: boolean): void;
   /** Лимиты подписки. Приходят событием по ходу работы, а не по запросу. */
   onRateLimit(limit: RateLimitUpdate): void;
@@ -111,6 +113,8 @@ export class Conversation {
   #busy = false;
   #activity: string[] = [];
   #liveText = "";
+  #lastText: string | null = null;
+  #resumeSessionId: string | null;
   #closed = false;
 
   // modelUsage и total_cost_usd в streaming-сессии накопительные:
@@ -121,6 +125,7 @@ export class Conversation {
   constructor(deps: ConversationDeps) {
     this.#deps = deps;
     this.chatId = deps.chatId;
+    this.#resumeSessionId = deps.resumeSessionId;
   }
 
   get sessionId(): string | null {
@@ -142,6 +147,7 @@ export class Conversation {
     this.#busy = true;
     this.#activity = [];
     this.#liveText = "";
+    this.#lastText = text;
     this.#queue.push({
       type: "user",
       message: { role: "user", content: text },
@@ -191,8 +197,8 @@ export class Conversation {
   }
 
   #start(): void {
-    const { credential, model, cwd, permissionMode, resumeSessionId, permissionTimeoutMs, output } =
-      this.#deps;
+    const { credential, model, cwd, permissionMode, permissionTimeoutMs, output } = this.#deps;
+    const resumeSessionId = this.#resumeSessionId;
 
     const canUseTool = createPermissionBridge({
       chatId: this.chatId,
@@ -234,15 +240,29 @@ export class Conversation {
         await this.#handle(message);
       }
     } catch (error) {
+      const text = error instanceof Error ? error.message : String(error);
       this.#busy = false;
       flushChat(this.chatId, { kind: "deny", message: "Сессия упала" });
-      const text = error instanceof Error ? error.message : String(error);
-      await this.#deps.output.clearStatus();
-      await this.#deps.output.send(
-        `⚠️ Сессия оборвалась.\n\n<code>${esc(text.slice(0, 500))}</code>\n\nНапиши что-нибудь — я подниму её заново с того же места.`,
-      );
       this.#query = null;
       this.#queue = new MessageQueue<SDKUserMessage>();
+
+      // Сохранённая сессия не найдена: файлы могли пропасть вместе с
+      // пересборкой контейнера, а идентификатор в базе остался. Начинаем
+      // заново и повторяем реплику — пользователю незачем это разгребать.
+      if (/No conversation found/i.test(text) && this.#resumeSessionId) {
+        this.#resumeSessionId = null;
+        this.#sessionId = null;
+        this.#deps.onResumeLost();
+        await this.#deps.output.clearStatus();
+        await this.#deps.output.send("↻ Прошлый чат не нашёлся, начинаю новый.");
+        if (this.#lastText) await this.send(this.#lastText);
+        return;
+      }
+
+      await this.#deps.output.clearStatus();
+      await this.#deps.output.send(
+        `⚠️ Сессия оборвалась.\n\n<code>${esc(text.slice(0, 500))}</code>\n\nНапиши что-нибудь — я подниму её заново.`,
+      );
     }
   }
 

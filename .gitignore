@@ -6,3 +6,4 @@ workspaces/
 *.log
 .DS_Store
 proxy/
+claude-home/
