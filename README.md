@@ -318,6 +318,37 @@ systemctl daemon-reload
 systemctl enable --now claude-telegram-watchdog.timer
 ```
 
+### Автовыкатка
+
+`.github/ci.yml` описывает те же проверки для GitHub Actions, но лежит не в
+`.github/workflows/`: положить его туда может только токен с правом `workflow`.
+GitHub отклоняет такой путь для OAuth-приложений, и ssh-ключ развёртывания не
+помогает — он наследует ограничение приложения, которым создан. Включается
+одной командой с машины владельца:
+
+```bash
+git mv .github/ci.yml .github/workflows/ci.yml && git commit -m "Включить CI" && git push
+```
+
+Пока этого не сделано, ту же работу делает сервер. `scripts/autodeploy.sh` раз
+в три минуты смотрит, не появился ли в `main` новый коммит; если появился —
+прогоняет формат, линтер, типы и тесты в одноразовом контейнере `node:24-slim`
+и выкатывает только зелёное. Результат приходит владельцу в Telegram. Упавший
+коммит не проверяется повторно: пока не запушат следующий, таймер молчит.
+
+```bash
+cp scripts/systemd/claude-telegram-autodeploy.* /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now claude-telegram-autodeploy.timer
+```
+
+Когда CI заработает в GitHub Actions, этот таймер надо выключить, иначе выкатка
+пойдёт дважды:
+
+```bash
+systemctl disable --now claude-telegram-autodeploy.timer
+```
+
 ### Сборка без docker
 
 ```bash

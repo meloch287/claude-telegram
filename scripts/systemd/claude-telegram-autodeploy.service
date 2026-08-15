@@ -1,0 +1,13 @@
+[Unit]
+Description=Автовыкатка claude-telegram: проверки и деплой зелёного main
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/claude-telegram/scripts/autodeploy.sh
+# Ненулевой код — это «проверки не прошли» или «выкатка не удалась»,
+# а не поломка самого скрипта: о причине уже написано в Telegram.
+SuccessExitStatus=0 1
+# npm ci и сборка образа занимают минуты; обрывать на полпути хуже, чем ждать.
+TimeoutStartSec=25min

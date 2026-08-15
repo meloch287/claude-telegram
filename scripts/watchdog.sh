@@ -22,26 +22,10 @@ RESTART=${RESTART:-1}
 
 mkdir -p "$(dirname "$STATE_FILE")"
 
-# .env читаем сами: source затянул бы в окружение всё, включая ключи, и любая
-# опечатка в значении стала бы командой шелла.
-read_env() {
-  sed -n "s/^$1=//p" "$APP_DIR/.env" | head -1 | tr -d '"' | tr -d "'" | tr -d '\r'
-}
-
-BOT_TOKEN=$(read_env BOT_TOKEN)
-OWNER=$(read_env ALLOWED_USER_IDS | cut -d, -f1 | tr -d ' ')
-
-notify() {
-  if [ -z "$BOT_TOKEN" ] || [ -z "$OWNER" ]; then
-    echo "некому писать: в .env нет BOT_TOKEN или ALLOWED_USER_IDS" >&2
-    return
-  fi
-  curl -sS --max-time 15 -o /dev/null \
-    -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
-    --data-urlencode "chat_id=${OWNER}" \
-    --data-urlencode "text=$1" \
-    || echo "не удалось отправить сообщение" >&2
-}
+# Отправка общая со скриптом автовыкатки: обоим нужно уметь писать владельцу,
+# когда бот лежит или пересобирается.
+# shellcheck source=scripts/notify-owner.sh
+source "$APP_DIR/scripts/notify-owner.sh"
 
 # Пропавший контейнер отдаёт пустую строку, а не текст: подставляем свой,
 # иначе в сообщение владельцу уезжает пустота вместо причины.
