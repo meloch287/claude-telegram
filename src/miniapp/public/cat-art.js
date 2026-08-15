@@ -52,8 +52,8 @@ const EMPTY = ".";
 
 // Раскладка. Всё остальное расставлено относительно этих чисел, а не вписано
 // в спрайты руками, — иначе любая правка пропорций ломает половину деталей.
-const X0 = 6;
-const X1 = 15;
+const X0 = 5;
+const X1 = 16;
 const HEAD_TOP = 5;
 const BODY_BOTTOM = 14;
 const EAR_TOP = 3;
@@ -96,12 +96,12 @@ function stamp(grid, sprite, topRow, anchorX) {
  * У кепки на околыше четыре светлых клетки — та самая надпись с референса.
  */
 const HATS = {
-  2: ["..rrrrrr..", ".rrrrrrrr.", ".rwrwrwrw.", "rrrrrrrrrr", "rrrrrrrrrr"],
+  2: ["...rrrrrr...", "..rrrrrrrr..", "..rwrwrwrw..", "rrrrrrrrrrrr", "rrrrrrrrrrrr"],
   3: ["..kkkkkk..", "..kkkkkk..", "..rrrrrr..", ".kkkkkkkk.", "kkkkkkkkkk"],
   4: ["....b.....", "..bbbbbb..", ".bbbbbbbb.", ".bbbbbbbb.", "..bbbbbb.."],
-  5: ["..........", "..rrrrrr..", ".rrrrrrrr.", "rrrrrrrrrr", "r........r"],
-  6: ["....ss....", "..ssssss..", ".ssssssss.", "ssssssssss", "ssssssssss"],
-  7: ["..........", "..kkkkkk..", ".kkkkkkkk.", "ssssssssss", "ssssssssss"],
+  5: ["............", "...rrrrrr...", "..rrrrrrrr..", "rrrrrrrrrrrr", "r..........r"],
+  6: [".....ss.....", "...ssssss...", "..ssssssss..", "ssssssssssss", "ssssssssssss"],
+  7: ["............", "...kkkkkk...", "..kkkkkkkk..", "ssssssssssss", "ssssssssssss"],
   8: ["..........", ".y.y.y.y..", ".yyyyyyy..", ".yyykyyy..", ".yyyyyyy.."],
   9: ["..y.y.y...", ".y.y.y.y..", ".yyyyyyy..", ".yyykyyy..", ".yyyyyyy.."],
   10: [".......ppp", ".....pppp.", "...ppypp..", "..pppppp..", ".pppppppp."],
@@ -122,14 +122,19 @@ const NECKWEAR = {
  * машет сам по себе.
  */
 function drawTail(grid, level, fur) {
+  // Крепление ниже усов и правее корпуса: выше оно перечеркнуло бы усы,
+  // а вплотную к ногам — слилось бы с задней лапой в один ком.
+  rect(grid, X1 + 1, BODY_BOTTOM - 1, X1 + 2, BODY_BOTTOM, fur);
+
+  const stem = X1 + 3;
   if (level <= 2) {
-    rect(grid, X1 + 1, BODY_BOTTOM - 2, X1 + 2, BODY_BOTTOM, fur);
-    rect(grid, X1 + 2, BODY_BOTTOM, X1 + 4, BODY_BOTTOM, fur);
+    // Лежит поленом: уходит вправо по земле, мимо лап.
+    rect(grid, stem, BODY_BOTTOM, stem + 2, BODY_BOTTOM + 1, fur);
     return;
   }
-  rect(grid, X1 + 1, BODY_BOTTOM - 2, X1 + 2, BODY_BOTTOM, fur);
-  rect(grid, X1 + 2, EYE_ROW + 1, X1 + 3, BODY_BOTTOM - 2, fur);
-  if (level >= 8) rect(grid, X1 + 3, EYE_ROW, X1 + 4, EYE_ROW + 1, fur);
+  // Поднят трубой; с восьмого уровня кончик загибается наружу.
+  rect(grid, stem, EYE_ROW - 1, stem + 1, BODY_BOTTOM, fur);
+  if (level >= 8) rect(grid, stem + 1, EYE_ROW - 2, stem + 2, EYE_ROW - 1, fur);
 }
 
 /** Искры вокруг — только у двух верхних уровней, как знак предела. */
@@ -139,12 +144,12 @@ function drawSparkles(grid, level) {
     level === 9
       ? [
           [3, 6],
-          [19, 8],
+          [3, 14],
         ]
       : [
           [3, 5],
-          [20, 7],
-          [4, 16],
+          [3, 14],
+          [2, 17],
         ];
   for (const [x, y] of spots) {
     if (y < 1 || y > ROWS - 2 || x < 1 || x > COLS - 2) continue;
@@ -172,7 +177,7 @@ function buildBody(cat) {
   // Усы по обе стороны морды.
   for (const dy of [0, 2]) {
     rect(grid, X0 - 3, WHISKER_ROW + dy - 1, X0 - 1, WHISKER_ROW + dy - 1, "m");
-    rect(grid, X1 + 1, WHISKER_ROW + dy - 1, X1 + 3, WHISKER_ROW + dy - 1, "m");
+    rect(grid, X1 + 1, WHISKER_ROW + dy - 1, X1 + 2, WHISKER_ROW + dy - 1, "m");
   }
 
   // Морда светлее шкуры, рот — тёмный прямоугольник, как на референсе.
@@ -181,7 +186,8 @@ function buildBody(cat) {
   rect(grid, X0 + 4, MUZZLE_ROW, X0 + 4, MUZZLE_ROW, "i");
   rect(grid, X1 - 4, MUZZLE_ROW, X1 - 4, MUZZLE_ROW, "i");
 
-  // Лапы: четыре тумбы с просветами.
+  // Лапы: четыре тумбы по две клетки. Просветы 1–2–1: средний шире, поэтому
+  // видно переднюю и заднюю пары, а не забор из восьми палок.
   for (const x of [X0, X0 + 3, X1 - 4, X1 - 1]) {
     rect(grid, x, LEG_TOP, x + 1, ROWS - 3, "f");
   }
