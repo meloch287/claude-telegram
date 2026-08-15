@@ -880,3 +880,63 @@ test("расход за окно: считает только то, что по�
   assert.equal(result.убрано, 1, "чистка убирает то, что старше недельного окна с запасом");
   assert.equal(result.послеЧистки, 700, "чужой расход в чужие окна не попадает");
 });
+
+// Расход подписки считается по транскриптам: своя таблица знает только то,
+// что прошло через бота, и не считает кэш — а подписка тратится на всё.
+test("расход подписки: берёт кэш и отсекает то, что вне окна", async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const { execFileSync } = await import("node:child_process");
+  const { fileURLToPath } = await import("node:url");
+
+  const home = mkdtempSync(join(tmpdir(), "дом-"));
+  const projects = join(home, ".claude", "projects", "проба");
+  mkdirSync(projects, { recursive: true });
+
+  const line = (minutesAgo, usage) =>
+    JSON.stringify({
+      timestamp: new Date(Date.now() - minutesAgo * 60_000).toISOString(),
+      message: { usage },
+    });
+
+  const свежий = join(projects, "свежий.jsonl");
+  writeFileSync(
+    свежий,
+    [
+      line(10, { input_tokens: 100, output_tokens: 50, cache_read_input_tokens: 900 }),
+      line(600, { input_tokens: 7000, output_tokens: 7000 }), // вне пятичасового окна
+      "не json вовсе",
+      JSON.stringify({ message: { usage: { input_tokens: 5 } } }), // без времени
+    ].join("\n"),
+  );
+
+  // Файл, не менявшийся с начала окна, не читается вовсе — на этом вся экономия.
+  const старый = join(projects, "старый.jsonl");
+  writeFileSync(старый, line(10, { input_tokens: 999999, output_tokens: 999999 }));
+  const давно = Date.now() / 1000 - 40 * 3600;
+  utimesSync(старый, давно, давно);
+
+  const modulePath = fileURLToPath(new URL("../src/subscription-usage.ts", import.meta.url));
+  const script = join(home, "проба.mjs");
+  writeFileSync(
+    script,
+    `
+    process.env.HOME = ${JSON.stringify(home)};
+    const m = await import(${JSON.stringify(modulePath)});
+    console.log(JSON.stringify(m.subscriptionUsage(5 * 3600 * 1000)));
+    `,
+  );
+
+  const out = execFileSync("npx", ["tsx", script], {
+    encoding: "utf8",
+    env: { ...process.env, HOME: home },
+  });
+  const result = JSON.parse(out.trim().split("\n").pop() ?? "{}");
+  rmSync(home, { recursive: true, force: true });
+
+  assert.equal(result.tokens, 1050, "кэш идёт в счёт подписки наравне с input и output");
+  assert.equal(result.tokensWithoutCache, 150, "без кэша остаются только input и output");
+  assert.equal(result.replies, 1, "записи вне окна и без времени не считаются");
+  assert.equal(result.filesScanned, 1, "файл старее окна не читается вовсе");
+});

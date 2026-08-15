@@ -225,8 +225,9 @@ function renderLimits(limits) {
     note.textContent =
       "Процент от лимита подписки Anthropic сейчас недоступен: событие его не " +
       "присылает, а запрос расхода плана отвечает отказом — токену не хватает " +
-      "области профиля. Пока показываю собственный замер за то же окно: сколько " +
-      "потратил бот.";
+      "области профиля. Вместо него — свой замер по транскриптам: весь расход " +
+      "Claude Code на этом сервере, вместе с кэшем и субагентами. Работа с " +
+      "других машин сюда не попадает: тех файлов на сервере нет.";
   }
 
   for (const limit of limits) {
@@ -250,7 +251,7 @@ function renderLimits(limits) {
 
     const valueEl = document.createElement("span");
     valueEl.className = percent === null ? "limit-percent limit-percent--own" : "limit-percent";
-    valueEl.append(text(percent === null ? formatOwn(own) : `${percent}%`));
+    valueEl.append(text(percent === null ? formatOwn(own?.subscription?.tokens) : `${percent}%`));
     head.append(nameEl, valueEl);
 
     const track = document.createElement("div");
@@ -266,7 +267,7 @@ function renderLimits(limits) {
       track.setAttribute("role", "img");
       track.setAttribute(
         "aria-label",
-        `Процент недоступен. Наш замер за окно: ${own ? nf.format(own.tokens) : 0} токенов`,
+        `Процент недоступен. Замер за окно: ${nf.format(own?.subscription?.tokens ?? 0)} токенов`,
       );
     } else {
       track.setAttribute("role", "progressbar");
@@ -310,8 +311,14 @@ function renderLimits(limits) {
     }
 
     if (percent === null && own) {
+      // Полное число — то, что списывается с подписки, вместе с кэшем.
+      // Рядом доля бота: остальное — работа Claude Code мимо чата.
       const ownEl = document.createElement("span");
-      ownEl.append(text(`наш счёт: ${nf.format(own.tokens)} токенов`));
+      ownEl.append(
+        text(
+          `замер: ${nf.format(own.subscription.tokens)} токенов, из них через бота ${nf.format(own.bot.tokens)}`,
+        ),
+      );
       foot.append(ownEl);
     }
 
@@ -327,8 +334,7 @@ function renderLimits(limits) {
 }
 
 /** Короткая запись расхода за окно: 14 402 → «14,4 тыс.». */
-function formatOwn(own) {
-  const value = own?.tokens ?? 0;
+function formatOwn(value = 0) {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1).replace(".", ",")} млн`;
   if (value >= 1000) return `${(value / 1000).toFixed(1).replace(".", ",")} тыс.`;
   return String(value);

@@ -231,11 +231,19 @@
       "title": "Пятичасовое окно",
       "status": "allowed",
       "utilization": 42,
-      "resetsAt": 1786829400000,
-      "seenAt": 1786813500000,
+      "resetsAt": 1786836600000,
+      "seenAt": 1786824300000,
       "own": {
-        "tokens": 8420,
-        "costUsd": 1.2
+        "subscription": {
+          "tokens": 147219535,
+          "tokensWithoutCache": 388501,
+          "replies": 345,
+          "filesScanned": 5
+        },
+        "bot": {
+          "tokens": 8420,
+          "costUsd": 1.2
+        }
       }
     },
     {
@@ -246,8 +254,16 @@
       "resetsAt": null,
       "seenAt": null,
       "own": {
-        "tokens": 143200,
-        "costUsd": 18.4
+        "subscription": {
+          "tokens": 362876339,
+          "tokensWithoutCache": 1088267,
+          "replies": 1388,
+          "filesScanned": 15
+        },
+        "bot": {
+          "tokens": 143200,
+          "costUsd": 18.4
+        }
       }
     }
   ],

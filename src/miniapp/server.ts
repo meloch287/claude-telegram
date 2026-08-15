@@ -16,6 +16,7 @@ import {
 import { ACHIEVEMENTS, CAT_LEVELS, catForTokens, catProgress, nextCat } from "../cats.js";
 import { MODELS } from "../bot/keyboards.js";
 import { limitTitle, toMillis } from "../limits.js";
+import { subscriptionUsage } from "../subscription-usage.js";
 
 const PUBLIC_DIR = resolve(fileURLToPath(new URL("./public", import.meta.url)));
 
@@ -74,11 +75,21 @@ function buildLimits(userId: number) {
       /**
        * Собственный замер за то же окно. Процент подписки приходит не всегда:
        * событие его не несёт, а usage-эндпоинт плана отвечает отказом, если у
-       * токена нет области профиля. Тогда шкала показывает хотя бы наш счёт —
-       * это правда, просто про другое: сколько потратили мы, а не сколько
-       * осталось по плану.
+       * токена нет области профиля. Тогда шкала показывает хотя бы наш счёт.
+       *
+       * Считаем по транскриптам, а не по своей таблице: подписка тратится на
+       * всё, что запускает Claude Code в этом контейнере, включая субагентов,
+       * и считает ещё и кэш. Своя таблица знает только то, что прошло через
+       * бота, и только input/output — рядом с подпиской это другая величина.
+       * Обе и показываем: сколько ушло всего и сколько из этого через бота.
        */
-      own: ms === null ? null : usageSince(userId, ms),
+      own:
+        ms === null
+          ? null
+          : {
+              subscription: subscriptionUsage(ms),
+              bot: usageSince(userId, ms),
+            },
     };
   };
 

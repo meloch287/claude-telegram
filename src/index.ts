@@ -58,6 +58,7 @@ import { checkAchievements, renderUnlocked, unlockedIds } from "./achievements.j
 import { ACHIEVEMENTS, CAT_LEVELS, catForTokens, formatTokens, nextCat } from "./cats.js";
 import { esc, formatUsd } from "./agent/render.js";
 import { limitTitle, toMillis } from "./limits.js";
+import { subscriptionUsage } from "./subscription-usage.js";
 import { saveTelegramFile } from "./bot/attachments.js";
 import { transcribe, transcriptionConfigured, TranscriptionNotConfigured } from "./bot/voice.js";
 import { formatSize } from "./bot/artifacts.js";
@@ -815,13 +816,14 @@ bot.command("status", async (ctx) => {
   lines.push("", "<b>Лимиты подписки</b>");
   for (const [type, ms] of windows) {
     const row = known.get(type);
-    const own = usageSince(ctx.from!.id, ms);
+    const own = subscriptionUsage(ms);
+    const viaBot = usageSince(ctx.from!.id, ms);
     const parts = [`<b>${esc(limitTitle(type))}</b>`];
     if (row?.utilization != null) {
       parts.push(`${Math.round(row.utilization)}%`);
     } else {
       // Процента нет — показываем свой замер и честно называем его своим.
-      parts.push(`наш счёт ${formatTokens(own.tokens)}`);
+      parts.push(`замер ${formatTokens(own.tokens)} (через бота ${formatTokens(viaBot.tokens)})`);
     }
     if (row?.resets_at) {
       parts.push(
@@ -839,8 +841,10 @@ bot.command("status", async (ctx) => {
   if (![...known.values()].some((row) => row.utilization != null)) {
     lines.push(
       "",
-      "<i>Процент от лимита Anthropic недоступен: событие его не присылает, " +
-        "а запрос расхода плана отвечает отказом — токену не хватает области профиля.</i>",
+      "<i>Процент от лимита Anthropic недоступен: событие его не присылает, а запрос " +
+        "расхода плана отвечает отказом — токену не хватает области профиля. Замер " +
+        "считается по транскриптам: весь расход Claude Code на этом сервере, вместе с " +
+        "кэшем. Работа с других машин сюда не попадает.</i>",
     );
   }
 
