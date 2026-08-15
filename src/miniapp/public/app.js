@@ -219,15 +219,19 @@ function renderLimits(limits) {
   // Процент подписки есть не всегда: событие его не несёт, а запрос расхода
   // плана отвечает отказом, если у токена нет области профиля. Молчать об этом
   // нельзя — иначе пустая шкала читается как поломка.
-  const missing = limits.some((l) => l.utilization === null);
-  note.hidden = !missing;
-  if (missing) {
+  const своиШкалы = limits.some((l) => l.utilization === null);
+  note.hidden = !своиШкалы;
+  if (своиШкалы) {
+    const безПотолка = limits.some((l) => l.utilization === null && !l.ceiling);
     note.textContent =
-      "Процент от лимита подписки Anthropic сейчас недоступен: событие его не " +
-      "присылает, а запрос расхода плана отвечает отказом — токену не хватает " +
-      "области профиля. Вместо него — свой замер по транскриптам: весь расход " +
-      "Claude Code на этом сервере, вместе с кэшем и субагентами. Работа с " +
-      "других машин сюда не попадает: тех файлов на сервере нет.";
+      "Процент считается от своего потолка, а не от лимита Anthropic: их число " +
+      "приходит с claude.ai, а он с этого сервера отдаёт проверку Cloudflare — " +
+      "датацентровые адреса не пускает. Расход считается по транскриптам: всё, " +
+      "что сделал Claude Code на сервере, вместе с кэшем и субагентами. Работа " +
+      "с других машин сюда не попадает." +
+      (безПотолка
+        ? " Потолок пока не задан: LIMIT_FIVE_HOUR_TOKENS и LIMIT_SEVEN_DAY_TOKENS в .env."
+        : "");
   }
 
   for (const limit of limits) {
@@ -236,7 +240,11 @@ function renderLimits(limits) {
     const key = limit.type;
     const name = limit.title ?? limit.type;
     const status = limit.status ? (LIMIT_STATUSES[limit.status] ?? null) : null;
-    const percent = limit.utilization === null ? null : Math.round(limit.utilization);
+    // Сперва число от Anthropic. Его этим токеном не получить, поэтому
+    // запасной путь — доля от потолка, заданного владельцем.
+    const fromAnthropic = limit.utilization === null ? null : Math.round(limit.utilization);
+    const percent = fromAnthropic ?? limit.ownPercent ?? null;
+    const ownScale = fromAnthropic === null && percent !== null;
     const own = limit.own;
 
     const li = document.createElement("li");
@@ -250,7 +258,7 @@ function renderLimits(limits) {
     nameEl.append(text(name));
 
     const valueEl = document.createElement("span");
-    valueEl.className = percent === null ? "limit-percent limit-percent--own" : "limit-percent";
+    valueEl.className = ownScale ? "limit-percent limit-percent--own" : "limit-percent";
     valueEl.append(text(percent === null ? formatOwn(own?.subscription?.tokens) : `${percent}%`));
     head.append(nameEl, valueEl);
 
@@ -279,7 +287,7 @@ function renderLimits(limits) {
       // пользователь всё равно узнает состояние, не полагаясь на цвет.
       track.setAttribute(
         "aria-valuetext",
-        `${percent} процентов${status ? `, ${status.word.toLowerCase()}` : ""}${reset}`,
+        `${percent} процентов${ownScale ? " от своего потолка" : ""}${status ? `, ${status.word.toLowerCase()}` : ""}${reset}`,
       );
       const fill = document.createElement("div");
       fill.className = `progress-fill progress-fill--${limit.status ?? "allowed"}`;
@@ -310,13 +318,14 @@ function renderLimits(limits) {
       foot.append(when);
     }
 
-    if (percent === null && own) {
+    if (own) {
       // Полное число — то, что списывается с подписки, вместе с кэшем.
       // Рядом доля бота: остальное — работа Claude Code мимо чата.
       const ownEl = document.createElement("span");
+      const из = limit.ceiling ? ` из ${formatOwn(limit.ceiling)}` : "";
       ownEl.append(
         text(
-          `замер: ${nf.format(own.subscription.tokens)} токенов, из них через бота ${nf.format(own.bot.tokens)}`,
+          `${nf.format(own.subscription.tokens)}${из} токенов, через бота ${nf.format(own.bot.tokens)}`,
         ),
       );
       foot.append(ownEl);

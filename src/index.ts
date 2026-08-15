@@ -57,7 +57,7 @@ import { isScreenId, renderScreen, type ScreenId } from "./bot/screens.js";
 import { checkAchievements, renderUnlocked, unlockedIds } from "./achievements.js";
 import { ACHIEVEMENTS, CAT_LEVELS, catForTokens, formatTokens, nextCat } from "./cats.js";
 import { esc, formatUsd } from "./agent/render.js";
-import { limitTitle, toMillis } from "./limits.js";
+import { limitTitle, percentOf, toMillis, WINDOWS } from "./limits.js";
 import { subscriptionUsage } from "./subscription-usage.js";
 import { saveTelegramFile } from "./bot/attachments.js";
 import { transcribe, transcriptionConfigured, TranscriptionNotConfigured } from "./bot/voice.js";
@@ -808,21 +808,21 @@ bot.command("status", async (ctx) => {
   // подходе к пределу, и до тех пор строка просто отсутствовала — это читалось
   // как поломка, хотя данных действительно нет.
   const known = new Map(listRateLimits(ctx.from!.id).map((row) => [row.limit_type, row]));
-  const windows: [string, number][] = [
-    ["five_hour", 5 * 60 * 60 * 1000],
-    ["seven_day", 7 * 24 * 60 * 60 * 1000],
-  ];
 
   lines.push("", "<b>Лимиты подписки</b>");
-  for (const [type, ms] of windows) {
+  for (const { type, ms } of WINDOWS) {
     const row = known.get(type);
     const own = subscriptionUsage(ms);
     const viaBot = usageSince(ctx.from!.id, ms);
     const parts = [`<b>${esc(limitTitle(type))}</b>`];
+    const ceiling = type === "five_hour" ? config.limitFiveHourTokens : config.limitSevenDayTokens;
+    const свой = percentOf(own.tokens, ceiling);
     if (row?.utilization != null) {
       parts.push(`${Math.round(row.utilization)}%`);
+    } else if (свой !== null) {
+      // Процент от своего потолка: у Anthropic его этим токеном не взять.
+      parts.push(`${свой}% из 100 (${formatTokens(own.tokens)} из ${formatTokens(ceiling)})`);
     } else {
-      // Процента нет — показываем свой замер и честно называем его своим.
       parts.push(`замер ${formatTokens(own.tokens)} (через бота ${formatTokens(viaBot.tokens)})`);
     }
     if (row?.resets_at) {
@@ -841,10 +841,10 @@ bot.command("status", async (ctx) => {
   if (![...known.values()].some((row) => row.utilization != null)) {
     lines.push(
       "",
-      "<i>Процент от лимита Anthropic недоступен: событие его не присылает, а запрос " +
-        "расхода плана отвечает отказом — токену не хватает области профиля. Замер " +
-        "считается по транскриптам: весь расход Claude Code на этом сервере, вместе с " +
-        "кэшем. Работа с других машин сюда не попадает.</i>",
+      "<i>Процент считается от своего потолка: число Anthropic приходит с claude.ai, " +
+        "а он с этого сервера отдаёт проверку Cloudflare. Расход берётся из транскриптов — " +
+        "всё, что сделал Claude Code на сервере, вместе с кэшем. Потолок задаётся в .env: " +
+        "LIMIT_FIVE_HOUR_TOKENS и LIMIT_SEVEN_DAY_TOKENS.</i>",
     );
   }
 

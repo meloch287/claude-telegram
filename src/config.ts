@@ -77,6 +77,17 @@ export const config = {
   /** Слать голос через тот же прокси, что и запросы к Anthropic. Обычно не нужно. */
   whisperViaProxy: optional("WHISPER_VIA_PROXY", "") === "1",
 
+  /**
+   * Потолки окон подписки в токенах. Нужны, чтобы показывать «сколько из 100%».
+   *
+   * Своё число, а не от Anthropic: настоящий процент приходит с claude.ai, а он
+   * с этого сервера отдаёт проверку Cloudflare — датацентровые адреса он не
+   * пускает. Поэтому знаменатель задаёт владелец и видит, от чего считается.
+   * Ноль — потолок не задан, процент не показываем.
+   */
+  limitFiveHourTokens: Number(optional("LIMIT_FIVE_HOUR_TOKENS", "0")),
+  limitSevenDayTokens: Number(optional("LIMIT_SEVEN_DAY_TOKENS", "0")),
+
   /** Файл с описанием MCP-серверов в формате Claude Code. */
   mcpConfigPath: optional("MCP_CONFIG", resolve(process.cwd(), "mcp.json")),
 } as const;

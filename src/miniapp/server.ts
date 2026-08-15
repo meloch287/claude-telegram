@@ -15,7 +15,7 @@ import {
 } from "../db.js";
 import { ACHIEVEMENTS, CAT_LEVELS, catForTokens, catProgress, nextCat } from "../cats.js";
 import { MODELS } from "../bot/keyboards.js";
-import { limitTitle, toMillis } from "../limits.js";
+import { limitTitle, percentOf, toMillis, WINDOWS } from "../limits.js";
 import { subscriptionUsage } from "../subscription-usage.js";
 
 const PUBLIC_DIR = resolve(fileURLToPath(new URL("./public", import.meta.url)));
@@ -52,10 +52,12 @@ function authenticate(initData: string | null): number | null {
  * недельное окно присылает событие только на подходе к пределу, и до тех пор
  * шкала просто отсутствовала — выглядело как поломка.
  */
-const WINDOWS: { type: string; ms: number }[] = [
-  { type: "five_hour", ms: 5 * 60 * 60 * 1000 },
-  { type: "seven_day", ms: 7 * 24 * 60 * 60 * 1000 },
-];
+/** Потолок окна из настроек. Ноль — не задан, процент не считаем. */
+function ceilingFor(type: string): number {
+  if (type === "five_hour") return config.limitFiveHourTokens;
+  if (type === "seven_day") return config.limitSevenDayTokens;
+  return 0;
+}
 
 function buildLimits(userId: number) {
   const known = new Map(listRateLimits(userId).map((row) => [row.limit_type, row]));
@@ -90,6 +92,13 @@ function buildLimits(userId: number) {
               subscription: subscriptionUsage(ms),
               bot: usageSince(userId, ms),
             },
+      /**
+       * Потолок окна и доля от него. Именно это показывается как «X из 100%»,
+       * когда Anthropic своего процента не даёт. Знаменатель задаёт владелец —
+       * иначе процент был бы выдуман молча.
+       */
+      ceiling: ms === null ? 0 : ceilingFor(type),
+      ownPercent: ms === null ? null : percentOf(subscriptionUsage(ms).tokens, ceilingFor(type)),
     };
   };
 

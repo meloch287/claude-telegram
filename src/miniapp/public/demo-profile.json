@@ -230,7 +230,9 @@
       "type": "five_hour",
       "title": "Пятичасовое окно",
       "status": "allowed",
-      "utilization": 42,
+      "utilization": null,
+      "ownPercent": 74,
+      "ceiling": 200000000,
       "resetsAt": 1786836600000,
       "seenAt": 1786824300000,
       "own": {
@@ -251,6 +253,8 @@
       "title": "Недельный лимит",
       "status": null,
       "utilization": null,
+      "ownPercent": 36,
+      "ceiling": 1000000000,
       "resetsAt": null,
       "seenAt": null,
       "own": {
