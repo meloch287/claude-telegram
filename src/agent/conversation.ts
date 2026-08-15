@@ -74,7 +74,8 @@ export interface ConversationDeps {
 
 export interface RateLimitUpdate {
   limitType: string;
-  status: "allowed" | "allowed_warning" | "rejected";
+  /** Приходит только событием. Пусто — значит обновление из /usage, там его нет. */
+  status?: "allowed" | "allowed_warning" | "rejected";
   utilization?: number;
   resetsAt?: number;
 }
@@ -109,6 +110,9 @@ const AUTO_APPROVED = [
  * не читает ничего, и агент в боте отличался бы от агента в терминале.
  */
 const SETTING_SOURCES = ["user", "project", "local"] as const;
+
+/** Не чаще раза в минуту: метод ходит в сеть, а задач за минуту бывает много. */
+const RATE_LIMIT_REFRESH_MS = 60_000;
 
 /**
  * Окружение подпроцесса. Лишний способ входа нужно именно удалить: если
@@ -187,6 +191,7 @@ export class Conversation {
   // modelUsage и total_cost_usd в streaming-сессии накопительные:
   // каждый result содержит итог с начала сессии. Пишем в статистику разницу.
   #lastTokens = 0;
+  #lastRateLimitFetch = 0;
   #lastCost = 0;
 
   /** Состояние рабочей папки до задачи — чтобы понять, что агент создал. */
@@ -283,6 +288,58 @@ export class Conversation {
       // Запрос ходит в API и может не ответить. Тогда отдаём последнее, что
       // приезжало с сообщениями агента, — это лучше, чем «не знаю».
       return this.#context;
+    }
+  }
+
+  /**
+   * Забирает все окна лимитов разом.
+   *
+   * Событие rate_limit_event приносит по одному окну и часто без процента —
+   * поэтому в статистике висело только пятичасовое, да и то пустое. Метод
+   * /usage отдаёт сразу пятичасовое, недельное и по моделям, с процентами и
+   * временем сброса.
+   *
+   * Метод помечен экспериментальным, и его имя автор обещает сменить, поэтому
+   * зовём через проверку наличия: пропадёт — бот просто останется на событиях,
+   * а не упадёт.
+   */
+  async refreshRateLimits(force = false): Promise<void> {
+    if (!this.#query) return;
+    const now = Date.now();
+    // Запрос ходит в claude.ai, а result приходит на каждую задачу: без
+    // промежутка получилось бы по обращению на каждое сообщение.
+    if (!force && now - this.#lastRateLimitFetch < RATE_LIMIT_REFRESH_MS) return;
+    this.#lastRateLimitFetch = now;
+
+    const holder = this.#query as unknown as Record<string, unknown>;
+    const method = holder["usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET"];
+    if (typeof method !== "function") return;
+
+    try {
+      const response = await (method as () => Promise<unknown>).call(this.#query);
+      const data = response as {
+        rate_limits_available?: boolean;
+        rate_limits?: Record<
+          string,
+          { utilization?: number | null; resets_at?: string | null } | null
+        > | null;
+      };
+      // По API-ключу лимиты плана не действуют, и показывать нечего.
+      if (data.rate_limits_available === false || !data.rate_limits) return;
+
+      for (const [limitType, window] of Object.entries(data.rate_limits)) {
+        if (!window) continue;
+        const utilization = typeof window.utilization === "number" ? window.utilization : undefined;
+        const parsed = window.resets_at ? Date.parse(window.resets_at) : Number.NaN;
+        const resetsAt = Number.isFinite(parsed) ? parsed : undefined;
+        // Пустое окно писать незачем: строка без числа и без срока ничего не
+        // говорит, а место в списке занимает.
+        if (utilization === undefined && resetsAt === undefined) continue;
+        this.#deps.onRateLimit({ limitType, utilization, resetsAt });
+      }
+    } catch {
+      // Экспериментальный метод, да ещё и по сети. Не ответил — покажем то,
+      // что уже лежит в базе.
     }
   }
 
@@ -612,6 +669,10 @@ export class Conversation {
         const deltaCost = Math.max(0, cost - this.#lastCost);
         this.#lastTokens = tokens;
         this.#lastCost = cost;
+
+        // Задача закончилась — самое время узнать, сколько осталось.
+        // Не ждём: пользователю важен ответ, а не свежесть счётчика.
+        void this.refreshRateLimits();
         this.#deps.onUsage({ tokens: deltaTokens, costUsd: deltaCost });
 
         for (const denial of message.permission_denials ?? []) {

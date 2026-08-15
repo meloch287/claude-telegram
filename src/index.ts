@@ -56,6 +56,7 @@ import { isScreenId, renderScreen, type ScreenId } from "./bot/screens.js";
 import { checkAchievements, renderUnlocked, unlockedIds } from "./achievements.js";
 import { ACHIEVEMENTS, CAT_LEVELS, catForTokens, formatTokens, nextCat } from "./cats.js";
 import { esc, formatUsd } from "./agent/render.js";
+import { limitTitle, toMillis } from "./limits.js";
 import { saveTelegramFile } from "./bot/attachments.js";
 import { transcribe, transcriptionConfigured, TranscriptionNotConfigured } from "./bot/voice.js";
 import { formatSize } from "./bot/artifacts.js";
@@ -786,6 +787,11 @@ bot.command("cats", async (ctx) => {
 bot.command("status", async (ctx) => {
   const channel = activeChannel();
   const chat = getChat(ctx.chat.id);
+
+  // Спрашивают про остаток — значит хотят свежее число, а не то, что осело
+  // после прошлой задачи. Живой сессии может и не быть: тогда покажем базу.
+  const session = getSession(ctx.chat.id);
+  if (session) await session.conversation.refreshRateLimits(true);
   const lines = [
     "<b>Чат</b>",
     chat?.title ? esc(chat.title) : "новый — ещё ни одной задачи",
@@ -799,7 +805,7 @@ bot.command("status", async (ctx) => {
   const limits = listRateLimits(ctx.from!.id);
   lines.push("", "<b>Лимиты подписки</b>");
   if (limits.length === 0) {
-    lines.push("данных пока нет — они приходят по ходу работы агента");
+    lines.push("данных пока нет. Они приходят от подписки — по API-ключу лимитов плана нет вовсе.");
   } else {
     for (const limit of limits) {
       const percent = limit.utilization === null ? "?" : `${Math.round(limit.utilization)}%`;
@@ -807,7 +813,15 @@ bot.command("status", async (ctx) => {
         hour: "2-digit",
         minute: "2-digit",
       });
-      lines.push(`${esc(limit.limit_type)}: ${percent} · данные на ${seen}`);
+      const resets = limit.resets_at
+        ? ` · сброс ${new Date(toMillis(limit.resets_at)).toLocaleString("ru-RU", {
+            day: "2-digit",
+            month: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+          })}`
+        : "";
+      lines.push(`${esc(limitTitle(limit.limit_type))}: ${percent}${resets} · данные на ${seen}`);
     }
   }
 

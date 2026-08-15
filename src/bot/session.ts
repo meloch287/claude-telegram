@@ -151,7 +151,8 @@ export function ensureSession(options: EnsureOptions): ChatSession {
       // Упереться в лимит посреди работы и не понять почему — худшее, что может
       // случиться. Поэтому предупреждение и отказ уходят в чат сразу, не
       // дожидаясь, пока пользователь откроет мини-апп.
-      if (limit.status === "allowed") return;
+      // Обновление из /usage статуса не несёт — тревожить по нему нечем.
+      if (limit.status === undefined || limit.status === "allowed") return;
       void notify(renderLimitWarning(limit));
     },
   });

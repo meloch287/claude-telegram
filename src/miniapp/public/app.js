@@ -172,15 +172,6 @@ function render(profile) {
   setupShare(profile);
 }
 
-const LIMIT_NAMES = {
-  five_hour: "Пятичасовое окно",
-  seven_day: "Недельный лимит",
-  seven_day_opus: "Недельный лимит Opus",
-  seven_day_sonnet: "Недельный лимит Sonnet",
-  seven_day_overage_included: "Недельный лимит с перерасходом",
-  overage: "Перерасход",
-};
-
 const LIMIT_STATUSES = {
   allowed: { icon: "✓", word: "Норма" },
   allowed_warning: { icon: "⚠️", word: "На исходе" },
@@ -228,7 +219,9 @@ function renderLimits(limits) {
     // Ключ берём из типа окна, а не из индекса: число строк меняется, и на
     // индексах id разъехались бы между отрисовками.
     const key = limit.type;
-    const name = LIMIT_NAMES[limit.type] ?? limit.type;
+    // Название приходит с сервера: держать здесь второй словарь значило бы
+    // однажды поправить только один из них.
+    const name = limit.title ?? limit.type;
     const status = LIMIT_STATUSES[limit.status] ?? LIMIT_STATUSES.allowed;
     // utilization и resetsAt приходят не всегда — считать их обязательными нельзя.
     const percent = limit.utilization === null ? null : Math.round(limit.utilization);

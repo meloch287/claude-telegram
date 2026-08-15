@@ -7,6 +7,7 @@ import { verifyInitData } from "../crypto.js";
 import { getOrCreateUser, getUsageToday, listAchievements, listRateLimits } from "../db.js";
 import { ACHIEVEMENTS, CAT_LEVELS, catForTokens, catProgress, nextCat } from "../cats.js";
 import { MODELS } from "../bot/keyboards.js";
+import { limitTitle, toMillis } from "../limits.js";
 
 const PUBLIC_DIR = resolve(fileURLToPath(new URL("./public", import.meta.url)));
 
@@ -100,21 +101,15 @@ function profilePayload(userId: number) {
     achievements: ACHIEVEMENTS.map((a) => ({ ...a, unlocked: unlocked.has(a.id) })),
     limits: listRateLimits(userId).map((row) => ({
       type: row.limit_type,
+      // Название отдаём отсюда, а не держим второй словарь во фронте: разойтись
+      // им проще, чем кажется.
+      title: limitTitle(row.limit_type),
       status: row.status,
       utilization: row.utilization,
       resetsAt: row.resets_at === null ? null : toMillis(row.resets_at),
       seenAt: row.seen_at,
     })),
   };
-}
-
-/**
- * resetsAt приходит от SDK без указания единиц. Значения до 1e12 — это секунды
- * (2001 год в миллисекундах), выше — уже миллисекунды. Ошибка в тысячу раз
- * превратила бы «через два часа» в «через сто лет», поэтому определяем явно.
- */
-function toMillis(value: number): number {
-  return value < 1e12 ? value * 1000 : value;
 }
 
 async function serveStatic(pathname: string): Promise<{ body: Buffer; type: string } | null> {

@@ -229,6 +229,17 @@ const stmts = {
       resets_at = excluded.resets_at,
       seen_at = excluded.seen_at
   `),
+  // Отдельный запрос для обновлений из /usage: там есть проценты и время
+  // сброса, но нет статуса. Затирать им ранее пришедшее «предупреждение»
+  // нельзя, поэтому при конфликте статус остаётся прежним.
+  upsertLimitUsage: db.prepare(`
+    INSERT INTO rate_limits (user_id, limit_type, status, utilization, resets_at, seen_at)
+    VALUES (?, ?, 'allowed', ?, ?, ?)
+    ON CONFLICT(user_id, limit_type) DO UPDATE SET
+      utilization = excluded.utilization,
+      resets_at = excluded.resets_at,
+      seen_at = excluded.seen_at
+  `),
   listLimits: db.prepare("SELECT * FROM rate_limits WHERE user_id = ? ORDER BY limit_type"),
 
   seeProject: db.prepare("INSERT OR IGNORE INTO projects_seen (user_id, project) VALUES (?, ?)"),
@@ -376,8 +387,18 @@ export interface RateLimitRow {
  */
 export function recordRateLimit(
   userId: number,
-  limit: { limitType: string; status: string; utilization?: number; resetsAt?: number },
+  limit: { limitType: string; status?: string; utilization?: number; resetsAt?: number },
 ): void {
+  if (limit.status === undefined) {
+    stmts.upsertLimitUsage.run(
+      userId,
+      limit.limitType,
+      limit.utilization ?? null,
+      limit.resetsAt ?? null,
+      Date.now(),
+    );
+    return;
+  }
   stmts.upsertLimit.run(
     userId,
     limit.limitType,
