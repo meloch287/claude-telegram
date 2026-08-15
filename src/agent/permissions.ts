@@ -125,6 +125,116 @@ export interface PermissionBridgeOptions {
   hooks: PermissionBridgeHooks;
 }
 
+export interface DecisionRequest {
+  chatId: number;
+  toolName: string;
+  input: Record<string, unknown>;
+  timeoutMs: number;
+  hooks: PermissionBridgeHooks;
+  signal: AbortSignal;
+  suggestions?: PermissionUpdate[];
+  title?: string;
+  displayName?: string;
+  description?: string;
+  toolUseID: string;
+}
+
+/**
+ * Показывает карточку и ждёт решения пользователя.
+ *
+ * Вынесено из моста, потому что спрашивать нужно из двух мест: обычный путь
+ * через canUseTool и сторож опасных команд на PreToolUse, который работает
+ * там, где canUseTool не зовут вовсе.
+ *
+ * Функция обязана разрешиться всегда: любой выход — таймаут, обрыв, неудачная
+ * отправка карточки — даёт отказ, но не молчание. Молчание здесь означало бы
+ * навсегда заблокированный вызов.
+ */
+export function requestDecision(request: DecisionRequest): Promise<Decision> {
+  const { chatId, toolName, input, timeoutMs, hooks, signal } = request;
+  const id = nextId("p");
+
+  return new Promise<Decision>((resolvePromise) => {
+    let settled = false;
+    const finish = (decision: Decision) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+      permissions.delete(id);
+      resolvePromise(decision);
+    };
+
+    const pending: PendingPermission = {
+      id,
+      chatId,
+      toolName,
+      input,
+      title: request.title,
+      displayName: request.displayName,
+      description: request.description,
+      suggestions: request.suggestions ?? [],
+      toolUseID: request.toolUseID,
+      createdAt: Date.now(),
+      resolve: finish,
+    };
+
+    const onAbort = () => {
+      permissions.delete(id);
+      finish({ kind: "deny", message: "Запрос отменён" });
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+
+    const timer = setTimeout(() => {
+      permissions.delete(id);
+      void hooks.onTimeout(pending);
+      finish({ kind: "deny", message: "Пользователь не ответил на запрос разрешения вовремя" });
+    }, timeoutMs);
+    // Висящий таймер не должен удерживать процесс живым при выключении.
+    timer.unref?.();
+
+    permissions.set(id, pending);
+    void hooks
+      .onAsk(pending)
+      .then((messageId) => {
+        const stored = permissions.get(id);
+        if (stored) stored.messageId = messageId;
+      })
+      .catch((error: unknown) => {
+        // Не смогли показать карточку — молча блокировать нельзя.
+        permissions.delete(id);
+        finish({ kind: "deny", message: `Не удалось запросить подтверждение: ${String(error)}` });
+      });
+  });
+}
+
+/** Решение пользователя в форму, которую понимает SDK. */
+export function decisionToResult(
+  decision: Decision,
+  suggestions: PermissionUpdate[] = [],
+): PermissionResult {
+  switch (decision.kind) {
+    case "allow":
+      return { behavior: "allow" };
+    case "allow_always":
+      return {
+        behavior: "allow",
+        // Правила с destination localSettings пишутся в .claude/settings.local.json,
+        // поэтому «Всегда» переживает перезапуск сессии.
+        updatedPermissions: suggestions.filter(
+          (s) => s.destination === "localSettings" || s.destination === "session",
+        ),
+      };
+    case "deny":
+      return {
+        behavior: "deny",
+        message: decision.message ?? "Пользователь отклонил это действие",
+      };
+    case "stop":
+      return { behavior: "deny", message: "Пользователь остановил работу", interrupt: true };
+  }
+}
+
 export function createPermissionBridge(options: PermissionBridgeOptions) {
   const { chatId, timeoutMs, autoApprove, hooks } = options;
 
@@ -148,94 +258,20 @@ export function createPermissionBridge(options: PermissionBridgeOptions) {
       return { behavior: "allow" };
     }
 
-    const id = nextId("p");
-    return new Promise<PermissionResult>((resolvePromise) => {
-      let settled = false;
-      const finish = (result: PermissionResult) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        ctx.signal.removeEventListener("abort", onAbort);
-        permissions.delete(id);
-        resolvePromise(result);
-      };
-
-      const pending: PendingPermission = {
-        id,
-        chatId,
-        toolName,
-        input,
-        title: ctx.title,
-        displayName: ctx.displayName,
-        description: ctx.description,
-        suggestions: ctx.suggestions ?? [],
-        toolUseID: ctx.toolUseID,
-        createdAt: Date.now(),
-        resolve: (decision) => {
-          switch (decision.kind) {
-            case "allow":
-              finish({ behavior: "allow" });
-              return;
-            case "allow_always":
-              finish({
-                behavior: "allow",
-                // Правила с destination localSettings пишутся в .claude/settings.local.json,
-                // поэтому «Всегда» переживает перезапуск сессии.
-                updatedPermissions: (ctx.suggestions ?? []).filter(
-                  (s) => s.destination === "localSettings" || s.destination === "session",
-                ),
-              });
-              return;
-            case "deny":
-              finish({
-                behavior: "deny",
-                message: decision.message ?? "Пользователь отклонил это действие",
-              });
-              return;
-            case "stop":
-              finish({
-                behavior: "deny",
-                message: "Пользователь остановил работу",
-                interrupt: true,
-              });
-              return;
-          }
-        },
-      };
-
-      const onAbort = () => {
-        permissions.delete(id);
-        finish({ behavior: "deny", message: "Запрос отменён" });
-      };
-      ctx.signal.addEventListener("abort", onAbort, { once: true });
-
-      const timer = setTimeout(() => {
-        permissions.delete(id);
-        void hooks.onTimeout(pending);
-        finish({
-          behavior: "deny",
-          message: "Пользователь не ответил на запрос разрешения вовремя",
-        });
-      }, timeoutMs);
-      // Висящий таймер не должен удерживать процесс живым при выключении.
-      timer.unref?.();
-
-      permissions.set(id, pending);
-      void hooks
-        .onAsk(pending)
-        .then((messageId) => {
-          const stored = permissions.get(id);
-          if (stored) stored.messageId = messageId;
-        })
-        .catch((error: unknown) => {
-          // Не смогли показать карточку — молча блокировать нельзя.
-          permissions.delete(id);
-          finish({
-            behavior: "deny",
-            message: `Не удалось запросить подтверждение: ${String(error)}`,
-          });
-        });
+    const decision = await requestDecision({
+      chatId,
+      toolName,
+      input,
+      timeoutMs,
+      hooks,
+      signal: ctx.signal,
+      suggestions: ctx.suggestions,
+      title: ctx.title,
+      displayName: ctx.displayName,
+      description: ctx.description,
+      toolUseID: ctx.toolUseID,
     });
+    return decisionToResult(decision, ctx.suggestions ?? []);
   };
 }
 

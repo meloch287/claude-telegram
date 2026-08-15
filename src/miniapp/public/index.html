@@ -70,6 +70,35 @@
           <p class="section-note" id="cache-note"></p>
         </section>
 
+        <!--
+          График идёт после чисел: он их объясняет, а не заменяет. Сам рисунок
+          помечен role="img" с подписью, а под ним лежит таблица для тех, кто
+          читает экраном, — цифры не должны существовать только в картинке.
+        -->
+        <section aria-labelledby="chart-heading">
+          <h2 id="chart-heading">Расход по дням</h2>
+          <p class="section-note" id="chart-note"></p>
+          <div class="chart" id="chart" hidden>
+            <svg id="chart-svg" role="img" aria-labelledby="chart-alt" preserveAspectRatio="none">
+              <title id="chart-alt"></title>
+            </svg>
+            <div class="chart-axis" id="chart-axis" aria-hidden="true"></div>
+            <div class="chart-tip" id="chart-tip" role="status" hidden></div>
+          </div>
+          <table class="visually-hidden" id="chart-table">
+            <caption>
+              Расход токенов по дням
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col">День</th>
+                <th scope="col">Токенов</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </section>
+
         <section aria-labelledby="cats-heading">
           <h2 id="cats-heading">Коты</h2>
           <p class="section-note" id="cats-note"></p>

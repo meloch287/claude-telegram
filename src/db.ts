@@ -241,6 +241,9 @@ const stmts = {
       seen_at = excluded.seen_at
   `),
   listLimits: db.prepare("SELECT * FROM rate_limits WHERE user_id = ? ORDER BY limit_type"),
+  listDayUsage: db.prepare(
+    "SELECT day, tokens, cost_usd FROM usage_daily WHERE user_id = ? ORDER BY day DESC LIMIT ?",
+  ),
 
   seeProject: db.prepare("INSERT OR IGNORE INTO projects_seen (user_id, project) VALUES (?, ?)"),
   countProjects: db.prepare("SELECT COUNT(*) AS n FROM projects_seen WHERE user_id = ?"),
@@ -421,4 +424,33 @@ export function seeProject(userId: number, project: string): number {
 
 export function closeDb(): void {
   db.close();
+}
+
+/**
+ * Расход по дням за последние N суток — для графика в мини-аппе.
+ *
+ * Дни без работы в usage_daily просто отсутствуют. Возвращать их пропусками
+ * нельзя: график сжался бы, и неделя простоя выглядела бы как неделя работы.
+ * Поэтому ряд достраивается нулями здесь, а не во фронте.
+ */
+export function usageByDay(
+  userId: number,
+  days: number,
+): { day: string; tokens: number; costUsd: number }[] {
+  const rows = stmts.listDayUsage.all(userId, days) as unknown as {
+    day: string;
+    tokens: number;
+    cost_usd: number;
+  }[];
+  const known = new Map(rows.map((r) => [r.day, r]));
+
+  const result: { day: string; tokens: number; costUsd: number }[] = [];
+  for (let i = days - 1; i >= 0; i -= 1) {
+    const at = new Date();
+    at.setUTCDate(at.getUTCDate() - i);
+    const day = at.toISOString().slice(0, 10);
+    const row = known.get(day);
+    result.push({ day, tokens: row?.tokens ?? 0, costUsd: row?.cost_usd ?? 0 });
+  }
+  return result;
 }

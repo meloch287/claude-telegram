@@ -29,6 +29,8 @@ export default tseslint.config(
         localStorage: "readonly",
         navigator: "readonly",
         URLSearchParams: "readonly",
+        setTimeout: "readonly",
+        clearTimeout: "readonly",
       },
     },
   },

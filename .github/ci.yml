@@ -41,6 +41,9 @@ jobs:
       - name: Линтер
         run: npm run lint
 
+      - name: Линтер shell-скриптов
+        run: npm run lint:sh
+
       - name: Типы
         run: npm run typecheck
 

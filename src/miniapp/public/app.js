@@ -48,6 +48,7 @@ function render(profile) {
   }
 
   renderLimits(profile.limits ?? []);
+  renderChart(profile.usageByDay ?? []);
 
   // Статистика бота: токены и деньги здесь про один и тот же период, поэтому
   // их можно ставить рядом.
@@ -385,3 +386,195 @@ async function main() {
 }
 
 void main();
+
+/* ── График расхода по дням ───────────────────────────────────────────────
+   Форма выбрана по задаче: расход за сутки — величина за дискретный период,
+   это столбцы, а не линия. Серия одна, поэтому легенды нет — её роль играет
+   заголовок раздела.
+
+   Геометрия считается в настоящих пикселях по ширине контейнера, а не
+   растягивается через preserveAspectRatio: растяжение размазало бы скругления
+   и толщину линий вместе с картинкой. */
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+const PLOT_HEIGHT = 88;
+const BAR_GAP = 2;
+const CORNER = 4;
+/** Высота засечки для дня без работы. */
+const EMPTY_STUB = 2;
+
+let chartDays = [];
+
+function svgEl(name, attrs) {
+  const node = document.createElementNS(SVG_NS, name);
+  for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, String(value));
+  return node;
+}
+
+function dayLabel(iso) {
+  const [, month, day] = iso.split("-");
+  return `${day}.${month}`;
+}
+
+function dayFull(iso) {
+  return new Date(`${iso}T00:00:00Z`).toLocaleDateString("ru-RU", {
+    day: "numeric",
+    month: "long",
+    timeZone: "UTC",
+  });
+}
+
+function renderChart(days) {
+  chartDays = days ?? [];
+  const box = el("chart");
+  const note = el("chart-note");
+  const tbody = el("chart-table").querySelector("tbody");
+
+  const total = chartDays.reduce((sum, d) => sum + d.tokens, 0);
+  if (chartDays.length === 0 || total === 0) {
+    box.hidden = true;
+    note.textContent =
+      "Пока пусто: график наполнится, когда агент поработает. Импортированная история сюда не попадает — в ней нет разбивки по дням.";
+    tbody.replaceChildren();
+    return;
+  }
+
+  box.hidden = false;
+  note.textContent = `За две недели — ${nf.format(total)} токенов.`;
+
+  drawChart();
+  fillChartTable(tbody);
+}
+
+function drawChart() {
+  const svg = el("chart-svg");
+  const width = el("chart").clientWidth || 320;
+  const count = chartDays.length;
+  const barWidth = Math.max(3, (width - BAR_GAP * (count - 1)) / count);
+  const peak = Math.max(...chartDays.map((d) => d.tokens));
+  const peakIndex = chartDays.findIndex((d) => d.tokens === peak);
+  // Место под подпись пика: без запаса она вылезала бы за верх картинки.
+  const barsTop = 16;
+  const usable = PLOT_HEIGHT - barsTop;
+
+  svg.setAttribute("viewBox", `0 0 ${width} ${PLOT_HEIGHT}`);
+  svg.setAttribute("width", width);
+  svg.setAttribute("height", PLOT_HEIGHT);
+
+  const title = svg.querySelector("title");
+  svg.replaceChildren(title);
+  title.textContent =
+    `Столбчатый график расхода за ${count} дней. ` +
+    `Больше всего ${dayFull(chartDays[peakIndex].day)} — ${nf.format(peak)} токенов. ` +
+    `Точные числа по дням есть в таблице ниже.`;
+
+  chartDays.forEach((day, index) => {
+    const x = index * (barWidth + BAR_GAP);
+    const isEmpty = day.tokens === 0;
+    // Минимум три пикселя у непустого дня: иначе слабый день неотличим от нуля.
+    const height = isEmpty ? EMPTY_STUB : Math.max(3, Math.round((day.tokens / peak) * usable));
+    const y = PLOT_HEIGHT - height;
+
+    svg.append(
+      svgEl("rect", {
+        class: isEmpty ? "bar-empty" : "bar",
+        x: x.toFixed(2),
+        y,
+        width: barWidth.toFixed(2),
+        height,
+        rx: Math.min(CORNER, barWidth / 2, height / 2),
+      }),
+    );
+
+    const hit = svgEl("rect", {
+      class: "hit",
+      x: x.toFixed(2),
+      y: 0,
+      width: (barWidth + BAR_GAP).toFixed(2),
+      height: PLOT_HEIGHT,
+      tabindex: "-1",
+    });
+    hit.addEventListener("pointerenter", () => showTip(index, x + barWidth / 2, width));
+    hit.addEventListener("pointerdown", () => showTip(index, x + barWidth / 2, width));
+    hit.addEventListener("pointerleave", hideTip);
+    svg.append(hit);
+
+    if (index === peakIndex) {
+      svg.append(
+        Object.assign(
+          svgEl("text", {
+            class: "peak-label",
+            x: (x + barWidth / 2).toFixed(2),
+            y: Math.max(11, y - 5),
+          }),
+          { textContent: compactTokens(day.tokens) },
+        ),
+      );
+    }
+  });
+
+  svg.append(
+    svgEl("line", {
+      class: "baseline",
+      x1: 0,
+      y1: PLOT_HEIGHT + 0.5,
+      x2: width,
+      y2: PLOT_HEIGHT + 0.5,
+    }),
+  );
+
+  // По краям — только первая и последняя дата: четырнадцать подписей на
+  // телефоне налезают друг на друга и не читаются вовсе.
+  const axis = el("chart-axis");
+  axis.replaceChildren();
+  const first = document.createElement("span");
+  first.append(text(dayLabel(chartDays[0].day)));
+  const last = document.createElement("span");
+  last.append(text("сегодня"));
+  axis.append(first, last);
+}
+
+/** Короткая запись для подписи над столбцом: 12 300 → «12,3К». */
+function compactTokens(value) {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1).replace(".", ",")}М`;
+  if (value >= 1000) return `${(value / 1000).toFixed(1).replace(".", ",")}К`;
+  return String(value);
+}
+
+function showTip(index, centerX, width) {
+  const day = chartDays[index];
+  const tip = el("chart-tip");
+  const money = day.costUsd > 0 ? ` · $${day.costUsd.toFixed(2)}` : "";
+  tip.textContent = `${dayFull(day.day)} · ${nf.format(day.tokens)} токенов${money}`;
+  tip.hidden = false;
+  // Не даём подсказке уехать за край экрана — на узком телефоне это заметно.
+  const half = tip.offsetWidth / 2;
+  const clamped = Math.min(Math.max(centerX, half), width - half);
+  tip.style.left = `${clamped}px`;
+}
+
+function hideTip() {
+  el("chart-tip").hidden = true;
+}
+
+function fillChartTable(tbody) {
+  tbody.replaceChildren();
+  for (const day of chartDays) {
+    const row = document.createElement("tr");
+    const head = document.createElement("th");
+    head.setAttribute("scope", "row");
+    head.append(text(dayFull(day.day)));
+    const value = document.createElement("td");
+    value.append(text(nf.format(day.tokens)));
+    row.append(head, value);
+    tbody.append(row);
+  }
+}
+
+// Поворот телефона меняет ширину: геометрия в пикселях, поэтому пересчитываем.
+let resizeTimer = null;
+window.addEventListener("resize", () => {
+  if (chartDays.length === 0) return;
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(drawChart, 150);
+});

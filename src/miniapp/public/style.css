@@ -596,3 +596,82 @@ h2 {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ── График расхода ───────────────────────────────────────────────────────
+   Столбцы носят фирменный акцент: 4.91:1 к поверхности в светлой теме и
+   6.55:1 в тёмной при норме 3:1 для графики. Тёмная тема — отдельный шаг той
+   же шкалы, а не автоматическая инверсия.
+
+   Дни простоя рисуются короткой засечкой нейтральным цветом: обнулённый
+   столбец нулевой высоты выглядел бы как пропуск в данных, а это разные вещи. */
+.chart {
+  position: relative;
+  margin-top: 4px;
+}
+
+.chart svg {
+  display: block;
+  width: 100%;
+  height: 88px;
+  overflow: visible;
+}
+
+.chart .bar {
+  fill: var(--accent);
+}
+
+.chart .bar-empty {
+  fill: var(--line);
+}
+
+/* Базовая линия намеренно бледная: она держит взгляд, но не спорит с данными. */
+.chart .baseline {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+/* Подпись только у самого высокого столбца. Число над каждым превратило бы
+   график в таблицу, которая и так есть ниже — для скринридера. */
+.chart .peak-label {
+  fill: var(--ink-muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-anchor: middle;
+}
+
+.chart-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  color: var(--ink-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.chart-tip {
+  position: absolute;
+  top: -4px;
+  transform: translate(-50%, -100%);
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: var(--ink);
+  color: var(--surface);
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 6px 18px rgb(0 0 0 / 18%);
+  z-index: 2;
+}
+
+/* Область нажатия шире самого столбца: пальцем в двухпиксельную засечку
+   не попасть, а тач-таргет по норме не меньше 44 px. */
+.chart .hit {
+  fill: transparent;
+  cursor: pointer;
+}
+
+.chart .hit:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}

@@ -20,6 +20,8 @@ BRANCH=${BRANCH:-main}
 STATE_FILE=${STATE_FILE:-/var/lib/claude-telegram/autodeploy.state}
 WORK_DIR=${WORK_DIR:-/tmp/claude-telegram-checks}
 NODE_IMAGE=${NODE_IMAGE:-node:24-slim}
+# Вне репозитория: см. комментарий у check_authors.
+AUTHORS_FILE=${AUTHORS_FILE:-/etc/claude-telegram/deploy-authors}
 
 # shellcheck source=scripts/notify-owner.sh
 source "$APP_DIR/scripts/notify-owner.sh"
@@ -45,9 +47,63 @@ target=$(git rev-parse "origin/$BRANCH")
 [ -f "$STATE_FILE" ] && [ "$(cat "$STATE_FILE")" = "$target" ] && exit 0
 echo "$target" > "$STATE_FILE"
 
+# ── Кто имеет право выкатываться ────────────────────────────────────────────
+#
+# Список лежит ВНЕ репозитория намеренно: держи его внутри — и тот, кто получил
+# доступ к main, первым делом допишет себя. Файла нет — не выкатываем вовсе:
+# лучше остановиться, чем пропустить что попало.
+#
+# Проверяется каждый коммит от текущего HEAD до цели, а не только верхний:
+# иначе чужое можно было бы спрятать под своим последним коммитом.
+check_authors() {
+  if [ ! -f "$AUTHORS_FILE" ]; then
+    echo "нет списка авторов $AUTHORS_FILE — выкатка остановлена"
+    notify "🛑 Выкатка ${short} остановлена: на сервере нет списка авторов ${AUTHORS_FILE}.
+
+Пока файла нет, автовыкатка не работает — это защита, а не сбой."
+    return 1
+  fi
+
+  local allowed strangers author
+  # Пустые строки и комментарии выкидываем, регистр не важен: почта к нему
+  # нечувствительна.
+  allowed=$(grep -vE '^[[:space:]]*(#|$)' "$AUTHORS_FILE" | tr -d '[:blank:]' | tr '[:upper:]' '[:lower:]' | sort -u)
+  strangers=""
+
+  while IFS= read -r author; do
+    [ -z "$author" ] && continue
+    if ! printf '%s\n' "$allowed" | grep -qxF "$(printf '%s' "$author" | tr '[:upper:]' '[:lower:]')"; then
+      strangers=$(printf '%s\n%s' "$strangers" "$author")
+    fi
+  done < <(git log --format='%ae' "$current..$target")
+
+  # Остаётся ведущий перевод строки от накопления — он же служит признаком,
+  # что список пуст: пустая строка и есть «все свои».
+  strangers=$(printf '%s' "$strangers" | grep -v '^$' || true)
+
+  if [ -n "$strangers" ]; then
+    echo "среди новых коммитов есть авторы не из списка:"
+    printf '%s\n' "$strangers"
+    notify "🛑 Выкатка остановлена: среди новых коммитов есть автор не из списка.
+
+Цель: ${short} — ${subject}
+
+Авторы не из списка:
+${strangers}
+
+Если это свой человек, добавь почту в ${AUTHORS_FILE} на сервере."
+    return 1
+  fi
+  return 0
+}
+
 subject=$(git log --format=%s -1 "$target")
 short=$(git rev-parse --short "$target")
 echo "новый коммит $short: $subject"
+
+# Проверка авторов идёт до сборки: чужой код не должен даже запускаться в
+# контейнере — npm ci выполняет скрипты пакетов из package.json цели.
+check_authors || exit 1
 
 # Проверяем ровно то дерево, которое поедет, а не рабочую папку сервера.
 rm -rf "$WORK_DIR"
@@ -59,7 +115,7 @@ docker run --rm \
   -v "$WORK_DIR:/проверка" -w /проверка \
   -e NODE_ENV=development \
   "$NODE_IMAGE" \
-  bash -lc "npm ci --include=optional && npm run format:check && npm run lint && npm run typecheck && npm test" \
+  bash -lc "npm ci --include=optional && npm run format:check && npm run lint && npm run lint:sh && npm run typecheck && npm test" \
   > "$log" 2>&1
 code=$?
 

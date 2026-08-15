@@ -4,7 +4,13 @@ import { extname, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { config } from "../config.js";
 import { verifyInitData } from "../crypto.js";
-import { getOrCreateUser, getUsageToday, listAchievements, listRateLimits } from "../db.js";
+import {
+  getOrCreateUser,
+  getUsageToday,
+  listAchievements,
+  listRateLimits,
+  usageByDay,
+} from "../db.js";
 import { ACHIEVEMENTS, CAT_LEVELS, catForTokens, catProgress, nextCat } from "../cats.js";
 import { MODELS } from "../bot/keyboards.js";
 import { limitTitle, toMillis } from "../limits.js";
@@ -60,6 +66,9 @@ function profilePayload(userId: number) {
       streakDays: user.streak_days,
     },
     today: { tokens: today.tokens },
+    // Две недели — столько столбиков читается на телефоне без сжатия в кашу.
+    // Ряд приходит сплошным, с нулями за дни простоя.
+    usageByDay: usageByDay(userId, 14),
     /**
      * Расход бота отдельно от импортированной истории: деньги известны только
      * за то, что бот сделал сам, и рядом с токенами за всю жизнь выглядели бы

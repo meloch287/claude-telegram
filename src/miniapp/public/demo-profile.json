@@ -256,5 +256,77 @@
   "history": {
     "tokens": 0,
     "messages": 0
-  }
+  },
+  "usageByDay": [
+    {
+      "day": "2026-08-02",
+      "tokens": 8200,
+      "costUsd": 1.02
+    },
+    {
+      "day": "2026-08-03",
+      "tokens": 15400,
+      "costUsd": 1.93
+    },
+    {
+      "day": "2026-08-04",
+      "tokens": 0,
+      "costUsd": 0
+    },
+    {
+      "day": "2026-08-05",
+      "tokens": 0,
+      "costUsd": 0
+    },
+    {
+      "day": "2026-08-06",
+      "tokens": 23100,
+      "costUsd": 2.89
+    },
+    {
+      "day": "2026-08-07",
+      "tokens": 41800,
+      "costUsd": 5.22
+    },
+    {
+      "day": "2026-08-08",
+      "tokens": 12600,
+      "costUsd": 1.57
+    },
+    {
+      "day": "2026-08-09",
+      "tokens": 5400,
+      "costUsd": 0.68
+    },
+    {
+      "day": "2026-08-10",
+      "tokens": 0,
+      "costUsd": 0
+    },
+    {
+      "day": "2026-08-11",
+      "tokens": 33200,
+      "costUsd": 4.15
+    },
+    {
+      "day": "2026-08-12",
+      "tokens": 58900,
+      "costUsd": 7.36
+    },
+    {
+      "day": "2026-08-13",
+      "tokens": 27400,
+      "costUsd": 3.42
+    },
+    {
+      "day": "2026-08-14",
+      "tokens": 9100,
+      "costUsd": 1.14
+    },
+    {
+      "day": "2026-08-15",
+      "tokens": 14402,
+      "costUsd": 1.8
+    }
+  ]
 }

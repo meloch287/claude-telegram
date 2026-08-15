@@ -7,6 +7,7 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import { MessageQueue } from "./queue.js";
 import { createPermissionBridge, flushChat, type PermissionBridgeHooks } from "./permissions.js";
+import { createDangerGuard } from "./guard.js";
 import {
   describeToolShort,
   chunk,
@@ -373,6 +374,17 @@ export class Conversation {
       hooks: output.permissionHooks,
     });
 
+    // Сторож необратимого. Нужен именно на PreToolUse: в режиме «без вопросов»
+    // canUseTool не зовут вовсе, и карточки — вместе с кнопкой «Стоп» — не
+    // появляются. Читает режим через функцию, а не значением: режим меняют
+    // на лету из /mode, а хук создаётся один раз на сессию.
+    const dangerGuard = createDangerGuard({
+      chatId: this.chatId,
+      timeoutMs: permissionTimeoutMs,
+      hooks: output.permissionHooks,
+      currentMode: () => this.#deps.permissionMode,
+    });
+
     this.#query = query({
       prompt: this.#queue,
       options: {
@@ -386,6 +398,7 @@ export class Conversation {
           ? { allowDangerouslySkipPermissions: true }
           : {}),
         canUseTool,
+        hooks: { PreToolUse: [{ hooks: [dangerGuard] }] },
         ...(resumeSessionId ? { resume: resumeSessionId } : {}),
         systemPrompt: { type: "preset", preset: "claude_code", append: SYSTEM_APPEND },
         // Скиллы, CLAUDE.md и правила проекта.
