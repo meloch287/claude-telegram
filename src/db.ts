@@ -254,7 +254,9 @@ const stmts = {
       seen_at = excluded.seen_at
   `),
   listLimits: db.prepare("SELECT * FROM rate_limits WHERE user_id = ? ORDER BY limit_type"),
-  addEvent: db.prepare("INSERT INTO usage_events (user_id, at, tokens, cost_usd) VALUES (?, ?, ?, ?)"),
+  addEvent: db.prepare(
+    "INSERT INTO usage_events (user_id, at, tokens, cost_usd) VALUES (?, ?, ?, ?)",
+  ),
   sumSince: db.prepare(
     "SELECT COALESCE(SUM(tokens), 0) AS tokens, COALESCE(SUM(cost_usd), 0) AS cost FROM usage_events WHERE user_id = ? AND at >= ?",
   ),
