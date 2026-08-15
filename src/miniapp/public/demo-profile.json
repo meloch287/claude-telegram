@@ -1,9 +1,7 @@
 {
-  "tier": {
-    "id": "max",
-    "title": "Max",
-    "emoji": "🚀",
-    "model": "claude-opus-5"
+  "model": {
+    "id": "claude-opus-5",
+    "label": "Opus 5 — сильная"
   },
   "totals": {
     "tokens": 420000,
@@ -15,8 +13,7 @@
     "streakDays": 9
   },
   "today": {
-    "tokens": 84210,
-    "limit": 10000000
+    "tokens": 84210
   },
   "cat": {
     "level": 4,

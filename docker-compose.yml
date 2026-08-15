@@ -10,6 +10,9 @@ services:
     command: ["run", "-c", "/etc/xray/config.json"]
     volumes:
       - ./proxy/xray.json:/etc/xray/config.json:ro
+    # healthcheck здесь не задать: в образе xray нет ни шелла, ни утилит —
+    # docker exec падает с «sh: executable file not found». Живость канала
+    # проверяет сам бот и переключается на запасной, см. src/proxy.ts.
     ports:
       # На петлю хоста: нужно сборке образа — внутри неё имя claude-proxy
       # не резолвится, своей сети у сборки нет.
@@ -35,6 +38,18 @@ services:
     ports:
       # Только на петлю: наружу мини-апп отдаёт Caddy, он же держит TLS.
       - "127.0.0.1:8788:8788"
+    # Одного restart: unless-stopped мало: он поднимает упавший процесс, но
+    # зависший считается живым, пока жив pid. Проба ходит в /healthz мини-аппа —
+    # он крутится в том же процессе, что и бот, поэтому отвечает ровно тогда,
+    # когда живо всё остальное.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8788/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      # Первая сборка сессии и проба каналов занимают время; до конца этого
+      # окна неудачи не считаются падением.
+      start_period: 60s
     networks:
       - claude
 

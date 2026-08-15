@@ -14,9 +14,9 @@ function text(value) {
 }
 
 function render(profile) {
-  const { cat, cats, achievements, totals, today, tier } = profile;
+  const { cat, cats, achievements, totals, today, model } = profile;
 
-  el("plan-line").textContent = `План ${tier.emoji} ${tier.title} · модель ${tier.model}`;
+  el("plan-line").textContent = `Модель ${model.label}`;
 
   // Герой
   el("hero-cat").innerHTML = catSvg(cat, 148);
@@ -58,7 +58,7 @@ function render(profile) {
     [nf.format(totals.toolsAllowed), "инструментов разрешено"],
     [nf.format(totals.toolsDenied), "отклонено"],
     [nf.format(totals.streakDays), "дней подряд"],
-    [`${nf.format(today.tokens)} / ${nf.format(today.limit)}`, "сегодня из лимита"],
+    [nf.format(today.tokens), "токенов сегодня"],
   ];
   const statsList = el("stats");
   statsList.replaceChildren();

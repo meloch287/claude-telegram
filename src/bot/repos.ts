@@ -2,8 +2,9 @@ import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
-import { activeProxyUrl } from "../proxy.js";
-import { config } from "../config.js";
+import { gitEnv, hideToken } from "./git.js";
+
+export { hideToken };
 
 const run = promisify(execFile);
 
@@ -17,11 +18,6 @@ function folderName(url: string): string {
   return name || "repo";
 }
 
-/** Токен в адресе не должен попасть ни в лог, ни в сообщение об ошибке. */
-export function hideToken(text: string): string {
-  return text.replace(/\/\/[^@/\s]+@/g, "//***@");
-}
-
 /**
  * Забирает репозиторий в рабочую папку проекта.
  *
@@ -33,22 +29,9 @@ export async function cloneRepository(url: string, cwd: string): Promise<string>
   const name = folderName(url);
   const target = join(cwd, name);
 
-  // Прокси нужен и git: до GitHub с этого сервера дорога та же, что до Anthropic.
-  const proxy = activeProxyUrl();
-  const env: NodeJS.ProcessEnv = {
-    ...process.env,
-    ...(proxy ? { HTTPS_PROXY: proxy, HTTP_PROXY: proxy } : {}),
-  };
-
-  // Сохранённый токен подставляется сам: вставлять его в адрес руками — значит
-  // оставить секрет в истории чата.
-  if (config.githubToken) {
-    env.GITHUB_TOKEN = config.githubToken;
-    env.GIT_CONFIG_COUNT = "1";
-    env.GIT_CONFIG_KEY_0 = "credential.https://github.com.helper";
-    env.GIT_CONFIG_VALUE_0 =
-      '!f() { echo username=x-access-token; echo password=$GITHUB_TOKEN; }; f';
-  }
+  // Прокси и токен — те же, что у остальных операций с git: до GitHub с этого
+  // сервера дорога та же, что до Anthropic, а секрет подставляет credential-хелпер.
+  const env = gitEnv();
 
   try {
     if (existsSync(join(target, ".git"))) {

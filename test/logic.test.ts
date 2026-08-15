@@ -4,8 +4,6 @@ import { createHmac } from "node:crypto";
 
 process.env.BOT_TOKEN ??= "123456:TEST-TOKEN-FOR-UNIT-TESTS";
 process.env.ENCRYPTION_KEY ??= Buffer.alloc(32, 7).toString("base64");
-process.env.AUTH_MODE ??= "owner";
-process.env.OWNER_ANTHROPIC_API_KEY ??= "sk-ant-test";
 process.env.DATA_DIR ??= "./data/test";
 process.env.WORKSPACE_ROOT ??= "./workspaces/test";
 
@@ -483,4 +481,67 @@ test("настоящий mcp.json проекта валиден", async () => {
     assert.equal(server.type, "http", `${name} должен ходить по http`);
     assert.ok(server.url?.startsWith("https://"), `${name} должен быть по https`);
   }
+});
+
+// ── Копии базы ────────────────────────────────────────────────────────────
+// Ломается незаметно: копия либо не снимается вовсе, либо снимается битой.
+// Проверяем, что снимок читается как настоящая база и данные в нём те же.
+
+test("копия базы: снимается, читается и содержит те же строки", async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const { mkdirSync, rmSync, existsSync } = await import("node:fs");
+  const { join, resolve } = await import("node:path");
+
+  const dataDir = resolve(process.cwd(), process.env.DATA_DIR ?? "./data/test");
+  mkdirSync(dataDir, { recursive: true });
+  rmSync(join(dataDir, "backups"), { recursive: true, force: true });
+
+  // Пишем в ту же базу, которую снимает backupNow: путь берётся из конфига.
+  const db = new DatabaseSync(join(dataDir, "bot.db"));
+  db.exec("PRAGMA journal_mode = WAL");
+  db.exec("CREATE TABLE IF NOT EXISTS proba (id INTEGER PRIMARY KEY, note TEXT)");
+  db.exec("DELETE FROM proba");
+  db.prepare("INSERT INTO proba (id, note) VALUES (?, ?)").run(1, "строка до копии");
+  db.close();
+
+  const { backupNow } = await import("../src/backup.js");
+  const made = backupNow();
+  assert.ok(made, "первая копия за сутки должна сниматься");
+  assert.ok(existsSync(made), "файл копии должен появиться на диске");
+
+  const copy = new DatabaseSync(made, { readOnly: true });
+  const row = copy.prepare("SELECT note FROM proba WHERE id = 1").get() as { note: string };
+  assert.equal(row.note, "строка до копии", "данные в копии должны совпадать с оригиналом");
+  copy.close();
+
+  assert.equal(backupNow(), null, "вторая копия за те же сутки не нужна");
+
+  rmSync(join(dataDir, "backups"), { recursive: true, force: true });
+});
+
+// findRepos решает, с чем работают /diff, /commit и /push. Ошибётся — команды
+// уйдут не в тот репозиторий или скажут «нечего коммитить» при изменениях.
+test("поиск репозитория: корень, подпапка, несколько, пусто", async () => {
+  const { mkdirSync, rmSync } = await import("node:fs");
+  const { join, resolve } = await import("node:path");
+  const { findRepos } = await import("../src/bot/git.js");
+
+  const root = resolve(process.cwd(), "workspaces/test/repos-proba");
+  rmSync(root, { recursive: true, force: true });
+  mkdirSync(root, { recursive: true });
+
+  assert.deepEqual(findRepos(root), [], "в пустой папке репозиториев нет");
+  assert.deepEqual(findRepos(join(root, "нет-такой")), [], "несуществующая папка не роняет");
+
+  mkdirSync(join(root, "один", ".git"), { recursive: true });
+  assert.deepEqual(findRepos(root), [join(root, "один")], "репозиторий в подпапке находится");
+
+  mkdirSync(join(root, "два", ".git"), { recursive: true });
+  assert.equal(findRepos(root).length, 2, "оба репозитория видны — выбирать будет пользователь");
+
+  // Сам проект тоже может быть репозиторием: тогда подпапки не при чём.
+  mkdirSync(join(root, ".git"), { recursive: true });
+  assert.deepEqual(findRepos(root), [root], "корень перебивает подпапки");
+
+  rmSync(root, { recursive: true, force: true });
 });

@@ -43,7 +43,7 @@ import {
   startAwaiting,
   stopAwaiting,
 } from "./bot/onboarding.js";
-import { MODELS } from "./bot/keyboards.js";
+import { MODELS, commitKeyboard } from "./bot/keyboards.js";
 import { isScreenId, renderScreen, type ScreenId } from "./bot/screens.js";
 import { checkAchievements, renderUnlocked, unlockedIds } from "./achievements.js";
 import { ACHIEVEMENTS, CAT_LEVELS, catForTokens, formatTokens, nextCat } from "./cats.js";
@@ -52,13 +52,25 @@ import { saveTelegramFile } from "./bot/attachments.js";
 import { transcribe, transcriptionConfigured, TranscriptionNotConfigured } from "./bot/voice.js";
 import { formatSize } from "./bot/artifacts.js";
 import { cloneRepository } from "./bot/repos.js";
+import {
+  commitAll,
+  createPr,
+  diff as gitDiff,
+  findRepos,
+  push,
+  status,
+  suggestCommitMessage,
+  type RepoStatus,
+} from "./bot/git.js";
 import { startMiniAppServer } from "./miniapp/server.js";
+import { scheduleDailyBackups } from "./backup.js";
 import {
   activeChannel,
   chooseChannel,
   describeChannel,
   parsePool,
   setActiveChannel,
+  startChannelWatch,
 } from "./proxy.js";
 
 const bot = new Bot(config.botToken);
@@ -421,6 +433,224 @@ bot.command("clone", async (ctx) => {
       ctx.chat.id,
       note.message_id,
       `⚠️ Не получилось: <code>${esc(message.slice(0, 500))}</code>`,
+      { parse_mode: "HTML" },
+    );
+  }
+});
+
+
+// ── Git прямо из чата ────────────────────────────────────────────────────────
+// Клон уже был, но всё остальное приходилось просить агента словами. Эти четыре
+// команды закрывают обычный круг: посмотреть, закоммитить, отправить, открыть PR.
+
+/**
+ * Ищет репозиторий в папке текущего проекта и объясняет, если нашлось не одно.
+ * Возвращает null, если работать не с чем — сообщение пользователю уже ушло.
+ */
+async function resolveRepo(ctx: CommandContext<Context>): Promise<string | null> {
+  const chatRow = getChat(ctx.chat.id);
+  const project = chatRow?.project ?? "default";
+  const cwd = workspaceFor(ctx.from!.id, project);
+  const repos = findRepos(cwd);
+
+  if (repos.length === 0) {
+    await ctx.reply(
+      `В проекте <code>${esc(project)}</code> нет репозитория.\n\n` +
+        "Забрать: <code>/clone https://github.com/user/repo</code>",
+      { parse_mode: "HTML" },
+    );
+    return null;
+  }
+  if (repos.length > 1) {
+    const names = repos.map((path) => `• <code>${esc(basename(path))}</code>`).join("\n");
+    await ctx.reply(
+      `В проекте несколько репозиториев, не знаю, какой брать:\n\n${names}\n\n` +
+        "Разведи их по проектам: <code>/project имя</code>.",
+      { parse_mode: "HTML" },
+    );
+    return null;
+  }
+  return repos[0] ?? null;
+}
+
+/** Заголовок «где мы сейчас»: ветка, отставание от сервера, число изменений. */
+function describeStatus(state: RepoStatus, repo: string): string {
+  const parts = [`🌿 <code>${esc(state.branch)}</code> · <code>${esc(basename(repo))}</code>`];
+  if (state.ahead) parts.push(`↑${state.ahead}`);
+  if (state.behind) parts.push(`↓${state.behind}`);
+  if (!state.remote) parts.push("нет ветки на сервере");
+  return parts.join(" · ");
+}
+
+bot.command("diff", async (ctx) => {
+  const repo = await resolveRepo(ctx);
+  if (!repo) return;
+
+  try {
+    const state = await status(repo);
+    if (state.entries.length === 0) {
+      await ctx.reply(`${describeStatus(state, repo)}\n\nЧисто: менять нечего.`, {
+        parse_mode: "HTML",
+      });
+      return;
+    }
+
+    const summary = await gitDiff(repo);
+    const head = `${describeStatus(state, repo)}\n\n<b>Изменено файлов: ${summary.files}</b>`;
+    const stat = summary.stat ? `\n<pre>${esc(summary.stat)}</pre>` : "";
+    await ctx.reply(head + stat, { parse_mode: "HTML" });
+
+    // Сам дифф отправляем файлом: в сообщении он и не поместится, и читаться
+    // на телефоне будет плохо, а файл открывается просмотрщиком.
+    if (summary.patch.trim()) {
+      const note = summary.truncated ? " (обрезан)" : "";
+      await ctx.replyWithDocument(
+        new InputFile(Buffer.from(summary.patch, "utf8"), `${basename(repo)}.diff`),
+        { caption: `Полный дифф${note}` },
+      );
+    }
+  } catch (error) {
+    await ctx.reply(`⚠️ ${esc((error as Error).message.slice(0, 500))}`, { parse_mode: "HTML" });
+  }
+});
+
+/**
+ * Предложенные сообщения коммита ждут кнопки. Ключ короткий: callback_data
+ * ограничен 64 байтами, туда не влезет ни путь, ни само сообщение.
+ */
+const pendingCommits = new Map<string, { repo: string; message: string }>();
+let commitSeq = 0;
+
+bot.command("commit", async (ctx) => {
+  const repo = await resolveRepo(ctx);
+  if (!repo) return;
+
+  const given = ctx.match?.toString().trim() ?? "";
+
+  try {
+    const state = await status(repo);
+    if (state.entries.length === 0) {
+      await ctx.reply("Нечего коммитить: изменений нет.");
+      return;
+    }
+
+    if (given) {
+      const hash = await commitAll(repo, given);
+      await ctx.reply(
+        `✅ Коммит <code>${esc(hash)}</code>\n\n${esc(given)}\n\nОтправить: /push`,
+        { parse_mode: "HTML" },
+      );
+      return;
+    }
+
+    const credential = getCredential(ctx.from!.id);
+    if (!credential) {
+      await ctx.reply("Сначала войди: /start");
+      return;
+    }
+
+    const note = await ctx.reply("⏳ Смотрю изменения и придумываю сообщение…");
+    const user = getOrCreateUser(ctx.from!.id);
+    const suggested = await suggestCommitMessage(repo, credential, user.model);
+    if (!suggested) {
+      await ctx.api.editMessageText(
+        ctx.chat.id,
+        note.message_id,
+        "Не смог придумать сообщение. Напиши своё: <code>/commit текст</code>",
+        { parse_mode: "HTML" },
+      );
+      return;
+    }
+
+    const id = String(++commitSeq);
+    pendingCommits.set(id, { repo, message: suggested });
+    await ctx.api.editMessageText(
+      ctx.chat.id,
+      note.message_id,
+      `${describeStatus(state, repo)}\n\nСообщение коммита:\n\n<b>${esc(suggested)}</b>\n\n` +
+        `Файлов затронуто: ${state.entries.length}`,
+      { parse_mode: "HTML", reply_markup: commitKeyboard(id) },
+    );
+  } catch (error) {
+    await ctx.reply(`⚠️ ${esc((error as Error).message.slice(0, 500))}`, { parse_mode: "HTML" });
+  }
+});
+
+bot.callbackQuery(/^gc:(\d+):(y|n)$/, async (ctx) => {
+  const id = ctx.match[1] ?? "";
+  const action = ctx.match[2];
+  const pending = pendingCommits.get(id);
+  if (!pending) {
+    await ctx.answerCallbackQuery("Это предложение уже неактуально");
+    await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => undefined);
+    return;
+  }
+  pendingCommits.delete(id);
+  await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => undefined);
+
+  if (action === "n") {
+    await ctx.answerCallbackQuery("Отменил");
+    await ctx.reply("Отменил. Своё сообщение: <code>/commit текст</code>", { parse_mode: "HTML" });
+    return;
+  }
+
+  await ctx.answerCallbackQuery("Коммичу");
+  try {
+    const hash = await commitAll(pending.repo, pending.message);
+    await ctx.reply(
+      `✅ Коммит <code>${esc(hash)}</code>\n\n${esc(pending.message)}\n\nОтправить: /push`,
+      { parse_mode: "HTML" },
+    );
+  } catch (error) {
+    await ctx.reply(`⚠️ ${esc((error as Error).message.slice(0, 500))}`, { parse_mode: "HTML" });
+  }
+});
+
+bot.command("push", async (ctx) => {
+  const repo = await resolveRepo(ctx);
+  if (!repo) return;
+
+  const note = await ctx.reply("⏳ Отправляю…");
+  try {
+    await push(repo);
+    const state = await status(repo);
+    await ctx.api.editMessageText(
+      ctx.chat.id,
+      note.message_id,
+      `📤 Отправлено в <code>${esc(state.remote ?? state.branch)}</code>.`,
+      { parse_mode: "HTML" },
+    );
+  } catch (error) {
+    await ctx.api.editMessageText(
+      ctx.chat.id,
+      note.message_id,
+      `⚠️ ${esc((error as Error).message.slice(0, 500))}`,
+      { parse_mode: "HTML" },
+    );
+  }
+});
+
+bot.command("pr", async (ctx) => {
+  const repo = await resolveRepo(ctx);
+  if (!repo) return;
+
+  const title = ctx.match?.toString().trim() ?? "";
+  const note = await ctx.reply("⏳ Отправляю ветку и открываю pull request…");
+  try {
+    const state = await status(repo);
+    // Без заголовка отдаём gh --fill-first: он возьмёт первый коммит ветки.
+    const result = await createPr(repo, title || state.branch, "");
+    await ctx.api.editMessageText(
+      ctx.chat.id,
+      note.message_id,
+      `🔀 Pull request: ${esc(result.url)}`,
+      { parse_mode: "HTML" },
+    );
+  } catch (error) {
+    await ctx.api.editMessageText(
+      ctx.chat.id,
+      note.message_id,
+      `⚠️ ${esc((error as Error).message.slice(0, 500))}`,
       { parse_mode: "HTML" },
     );
   }
@@ -1036,6 +1266,10 @@ await bot.api.setMyCommands([
   { command: "mode", description: "режим разрешений" },
   { command: "model", description: "сменить модель" },
   { command: "clone", description: "забрать репозиторий" },
+  { command: "diff", description: "что изменилось в коде" },
+  { command: "commit", description: "закоммитить изменения" },
+  { command: "push", description: "отправить на GitHub" },
+  { command: "pr", description: "открыть pull request" },
   { command: "project", description: "переключить проект" },
   { command: "stats", description: "расход и мой кот" },
   { command: "cats", description: "коты и достижения" },
@@ -1062,6 +1296,25 @@ if (choice.active) {
 }
 
 /**
+ * Дальше канал перепроверяется сам. Владельцу пишем только о смене: молчаливое
+ * переключение выглядело бы как необъяснимая пауза в работе, а сообщение на
+ * каждую проверку раз в десять минут превратилось бы в шум.
+ */
+startChannelWatch(parsePool(config.proxyPool), {
+  requireCountry: config.proxyRequireCountry || undefined,
+  onChange: (next, previous) => {
+    const owner = config.allowedUserIds[0];
+    if (owner === undefined) return;
+    const was = previous ? describeChannel(previous) : "неизвестно";
+    const text = next
+      ? `🌍 Канал выхода переключён.\n\nБыл: <code>${esc(was)}</code>\nСтал: <code>${esc(describeChannel(next))}</code>`
+      : `⚠️ Живого канала до Anthropic не осталось. Был: <code>${esc(was)}</code>\n\nАгент не сможет работать, пока канал не поднимется.`;
+    // Сбой отправки не должен ронять процесс: это уведомление, а не работа.
+    void bot.api.sendMessage(owner, text, { parse_mode: "HTML" }).catch(() => {});
+  },
+});
+
+/**
  * Мини-апп вешается на кнопку меню Telegram — ту, что рядом с полем ввода.
  * Инлайн-кнопка внутри сообщения уезжает вверх с историей и теряется, а эта
  * висит всегда. Без chat_id значение становится умолчанием для всех чатов.
@@ -1081,6 +1334,7 @@ if (config.miniappUrl) {
 }
 
 startMiniAppServer();
+scheduleDailyBackups();
 
 console.log("🤖 Бот запущен");
 await bot.start({ drop_pending_updates: true });

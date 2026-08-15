@@ -1,6 +1,6 @@
 import type { Context } from "grammy";
 import { config } from "../config.js";
-import { getOrCreateUser, setCredential, setTier } from "../db.js";
+import { getOrCreateUser, setCredential, markOnboarded } from "../db.js";
 import { detectKind, describeKind, maskSecret, type AuthKind } from "../auth.js";
 import { renderScreen } from "./screens.js";
 
@@ -86,7 +86,7 @@ export function acceptCredential(userId: number, text: string, chosen: AuthKind)
   const kind = detectKind(value) ?? (value.length >= 20 ? chosen : null);
   if (kind === null) return false;
   setCredential(userId, { kind, secret: value });
-  setTier(userId, "max"); // тарифов больше нет, поле лишь помечает пройденный вход
+  markOnboarded(userId);
   return true;
 }
 
@@ -103,6 +103,10 @@ export const HELP = `
 /mode — спрашивать разрешения / править молча / только план
 /model — сменить модель
 /clone адрес — забрать репозиторий в проект
+/diff — что изменилось в коде
+/commit [текст] — закоммитить; без текста сообщение придумает модель
+/push — отправить ветку на GitHub
+/pr [заголовок] — открыть pull request
 /project имя — переключить рабочую папку
 /stats — расход и мой кот
 /cats — коты и достижения

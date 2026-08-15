@@ -57,3 +57,13 @@ export const MODELS: [string, string][] = [
   ["claude-haiku-4-5", "Haiku 4.5 — быстрая"],
 ];
 
+
+/**
+ * Подтверждение коммита. Сообщение придумала модель, и последнее слово должно
+ * остаться за человеком: коммит с чужой формулировкой потом читать ему.
+ */
+export function commitKeyboard(id: string): InlineKeyboard {
+  return new InlineKeyboard()
+    .text("✅ Закоммитить", `gc:${id}:y`)
+    .text("🚫 Отмена", `gc:${id}:n`);
+}

@@ -41,13 +41,6 @@ function optional(name: string, fallback: string): string {
   return value === undefined || value === "" ? fallback : value;
 }
 
-export type AuthMode = "owner" | "byok";
-
-const authMode = optional("AUTH_MODE", "owner") as AuthMode;
-if (authMode !== "owner" && authMode !== "byok") {
-  throw new Error(`AUTH_MODE должен быть "owner" или "byok", а не "${authMode}"`);
-}
-
 const allowedUserIds = optional("ALLOWED_USER_IDS", "")
   .split(",")
   .map((s) => s.trim())
@@ -62,8 +55,6 @@ export const config = {
   botToken: required("BOT_TOKEN"),
   allowedUserIds,
   encryptionKey: required("ENCRYPTION_KEY"),
-  authMode,
-  ownerApiKey: process.env.OWNER_ANTHROPIC_API_KEY ?? "",
   workspaceRoot: resolve(process.cwd(), optional("WORKSPACE_ROOT", "./workspaces")),
   dataDir: resolve(process.cwd(), optional("DATA_DIR", "./data")),
   miniappPort: Number(optional("MINIAPP_PORT", "8788")),
@@ -89,12 +80,6 @@ export const config = {
   /** Файл с описанием MCP-серверов в формате Claude Code. */
   mcpConfigPath: optional("MCP_CONFIG", resolve(process.cwd(), "mcp.json")),
 } as const;
-
-if (config.authMode === "owner" && !config.ownerApiKey) {
-  throw new Error(
-    "AUTH_MODE=owner, но OWNER_ANTHROPIC_API_KEY пустой. Либо задай ключ, либо переключись на AUTH_MODE=byok.",
-  );
-}
 
 if (config.allowedUserIds.length === 0) {
   console.warn(

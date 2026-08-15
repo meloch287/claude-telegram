@@ -6,7 +6,7 @@ import { config } from "../config.js";
 import { verifyInitData } from "../crypto.js";
 import { getOrCreateUser, getUsageToday, listAchievements, listRateLimits } from "../db.js";
 import { ACHIEVEMENTS, CAT_LEVELS, catForTokens, catProgress, nextCat } from "../cats.js";
-import { TIERS, type TierId } from "../tiers.js";
+import { MODELS } from "../bot/keyboards.js";
 
 const PUBLIC_DIR = resolve(fileURLToPath(new URL("./public", import.meta.url)));
 
@@ -40,11 +40,15 @@ function profilePayload(userId: number) {
   const cat = catForTokens(user.total_tokens);
   const next = nextCat(user.total_tokens);
   const unlocked = new Set(listAchievements(userId).map((row) => row.achievement));
-  const tier = TIERS[(user.tier as TierId) ?? "free"] ?? TIERS.free;
   const today = getUsageToday(userId);
 
   return {
-    tier: { id: tier.id, title: tier.title, emoji: tier.emoji, model: tier.model },
+    model: {
+      id: user.model ?? "",
+      // Ярлык берём из того же списка, что показывает бот в /model, — чтобы
+      // мини-апп и чат не разошлись в названиях.
+      label: MODELS.find(([id]) => id === (user.model ?? ""))?.[1] ?? user.model ?? "По умолчанию",
+    },
     totals: {
       tokens: user.total_tokens,
       costUsd: Number(user.total_cost_usd.toFixed(4)),
@@ -54,7 +58,7 @@ function profilePayload(userId: number) {
       toolsDenied: user.tools_denied,
       streakDays: user.streak_days,
     },
-    today: { tokens: today.tokens, limit: tier.dailyTokenBudget },
+    today: { tokens: today.tokens },
     cat: {
       level: cat.level,
       id: cat.id,
@@ -115,6 +119,17 @@ async function serveStatic(pathname: string): Promise<{ body: Buffer; type: stri
 export function startMiniAppServer(): void {
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+
+    /**
+     * Проба для docker healthcheck. Без неё restart: unless-stopped спасает
+     * только от упавшего процесса, но не от зависшего: контейнер числится
+     * живым, пока жив pid, даже если бот давно ничего не обслуживает.
+     */
+    if (url.pathname === "/healthz") {
+      res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+      res.end(JSON.stringify({ ok: true, uptimeSec: Math.round(process.uptime()) }));
+      return;
+    }
 
     if (url.pathname === "/api/profile") {
       const initData =

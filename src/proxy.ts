@@ -185,3 +185,72 @@ export function activeChannel(): ChannelStatus | null {
 export function activeProxyUrl(): string {
   return active?.candidate.url ?? "";
 }
+
+/**
+ * Периодическая перепроверка канала.
+ *
+ * Выбор на старте — снимок одного момента. Германский сервер может отвалиться
+ * посреди дня, и тогда бот продолжал бы слать запросы в мёртвый адрес, пока
+ * кто-нибудь не перезапустит контейнер. Проверка дешёвая: один запрос к
+ * api.anthropic.com, ответ 401 без ключа.
+ *
+ * Сначала проверяется текущий канал: если он жив, остальные не трогаем — это
+ * один запрос вместо полного перебора. Полный выбор запускается, только когда
+ * текущий отвалился.
+ */
+export interface ChannelWatchOptions {
+  requireCountry?: string;
+  intervalMs?: number;
+  /** Зовётся при смене канала и когда живого канала не осталось. */
+  onChange?: (next: ChannelStatus | null, previous: ChannelStatus | null) => void;
+}
+
+const WATCH_INTERVAL_MS = 10 * 60_000;
+
+export function startChannelWatch(
+  pool: ProxyCandidate[],
+  options: ChannelWatchOptions = {},
+): () => void {
+  const interval = options.intervalMs ?? WATCH_INTERVAL_MS;
+  let checking = false;
+
+  async function tick(): Promise<void> {
+    // Проба идёт по сети и может растянуться; параллельные заходы не нужны.
+    if (checking) return;
+    checking = true;
+    try {
+      const previous = activeChannel();
+      if (previous) {
+        const again = await probe(previous.candidate);
+        if (again.reachable) {
+          // Канал жив: обновляем снимок, чтобы /status показывал свежие данные.
+          setActiveChannel(again);
+          return;
+        }
+        console.warn(
+          `⚠️  Канал отвалился: ${previous.candidate.label} — ${again.httpStatus === null ? again.error ?? "нет ответа" : `HTTP ${again.httpStatus}`}`,
+        );
+      }
+
+      const choice = await chooseChannel(pool, { requireCountry: options.requireCountry });
+      setActiveChannel(choice.active);
+      if (choice.active) {
+        console.log(`🌍 Канал переключён: ${describeChannel(choice.active)}`);
+      } else {
+        console.warn("⚠️  Живого канала до Anthropic не осталось.");
+      }
+      // Молчим, если менять было нечего: сообщение о «переключении» на тот же
+      // адрес только путало бы.
+      const changed = choice.active?.candidate.url !== previous?.candidate.url;
+      if (changed || (previous && !choice.active)) options.onChange?.(choice.active, previous);
+    } catch (error) {
+      console.error("⚠️  Перепроверка канала не удалась:", (error as Error).message);
+    } finally {
+      checking = false;
+    }
+  }
+
+  const timer = setInterval(() => void tick(), interval);
+  timer.unref();
+  return () => clearInterval(timer);
+}

@@ -3,7 +3,6 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { config } from "./config.js";
 import { encrypt, decrypt } from "./crypto.js";
-import type { TierId } from "./tiers.js";
 import { looksLikeOauthToken, type AuthKind, type Credential } from "./auth.js";
 
 mkdirSync(config.dataDir, { recursive: true });
@@ -15,7 +14,6 @@ db.exec("PRAGMA foreign_keys = ON");
 db.exec(`
 CREATE TABLE IF NOT EXISTS users (
   user_id        INTEGER PRIMARY KEY,
-  tier           TEXT    NOT NULL DEFAULT 'free',
   api_key_enc    TEXT,
   auth_kind      TEXT,
   model          TEXT,
@@ -88,9 +86,21 @@ for (const [table, column, type] of [
   }
 }
 
+/**
+ * Столбец tier остался от системы тарифов, которой больше нет: модель и режим
+ * разрешений выбираются кнопками, а лимиты приходят от подписки. Роняем его
+ * отдельной миграцией, потому что CREATE TABLE IF NOT EXISTS про существующую
+ * таблицу молчит и лишнее поле само не исчезнет.
+ */
+{
+  const columns = db.prepare("PRAGMA table_info(users)").all() as { name: string }[];
+  if (columns.some((c) => c.name === "tier")) {
+    db.exec("ALTER TABLE users DROP COLUMN tier");
+  }
+}
+
 export interface UserRow {
   user_id: number;
-  tier: TierId;
   api_key_enc: string | null;
   auth_kind: AuthKind | null;
   model: string | null;
@@ -119,7 +129,7 @@ export interface ChatRow {
 const stmts = {
   getUser: db.prepare("SELECT * FROM users WHERE user_id = ?"),
   insertUser: db.prepare("INSERT OR IGNORE INTO users (user_id, created_at) VALUES (?, ?)"),
-  setTier: db.prepare("UPDATE users SET tier = ?, onboarded = 1 WHERE user_id = ?"),
+  markOnboarded: db.prepare("UPDATE users SET onboarded = 1 WHERE user_id = ?"),
   setKey: db.prepare("UPDATE users SET api_key_enc = ?, auth_kind = ? WHERE user_id = ?"),
   setModel: db.prepare("UPDATE users SET model = ? WHERE user_id = ?"),
   bumpCounter: db.prepare("UPDATE users SET total_messages = total_messages + 1 WHERE user_id = ?"),
@@ -184,8 +194,8 @@ export function getOrCreateUser(userId: number): UserRow {
   return stmts.getUser.get(userId) as unknown as UserRow;
 }
 
-export function setTier(userId: number, tier: TierId): void {
-  stmts.setTier.run(tier, userId);
+export function markOnboarded(userId: number): void {
+  stmts.markOnboarded.run(userId);
 }
 
 export function setCredential(userId: number, credential: Credential): void {
