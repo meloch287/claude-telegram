@@ -3,18 +3,24 @@
  * scripts/render-cats.ts, который печатает SVG для README. Одна реализация —
  * значит картинки в документации не разъедутся с тем, что видит пользователь.
  *
- * Кот стоит в профиль: прямоугольный корпус, два уха вырезом сверху, светлые
- * глаза-прямоугольники, усы слева, хвост справа, четыре лапы снизу. Заливка
- * сплошная, без обводки — силуэт держится сам, за счёт крупной клетки.
+ * Кот стоит в фас: квадратная голова, два уха углами, тёмные глаза, светлая
+ * морда с открытым ртом, усы по бокам, четыре лапы снизу, хвост справа.
+ * Заливка сплошная, без обводки — силуэт держится сам, за счёт крупной клетки.
  *
  * Сетка 22×20:
  *
- *   ряды 0–5     шляпа
- *   ряды 4–5     уши
- *   ряды 6–15    корпус: глаза, усы, шея
- *   ряды 12–15   шарф, бабочка, плащ
- *   ряды 16–17   лапы
- *   колонки 14+  хвост
+ *   ряды 0–4     головной убор
+ *   ряды 3–4     уши
+ *   ряды 5–14    голова и корпус
+ *   ряд  8       глаза
+ *   ряд  10      усы
+ *   ряды 11–12   морда и рот
+ *   ряды 15–17   лапы
+ *   колонки 16+  хвост
+ *
+ * Рисунок разложен по слоям — тело, глаза, хвост, убор — и каждый слой
+ * выезжает отдельной группой. Иначе анимация не сделать: мигать должны только
+ * глаза, а кепка съезжать независимо от корпуса.
  *
  * shape-rendering="crispEdges" не даёт браузеру размазать границы: это вектор,
  * который на любом масштабе остаётся резко пиксельным.
@@ -28,15 +34,15 @@ export const BRAND = {
   green: "#788C5D",
 };
 
-/** Цвета нарядов. Живут отдельно от шкуры: шляпа не должна менять тон вместе с котом. */
+/** Цвета нарядов. Живут отдельно от шкуры: кепка не меняет тон вместе с котом. */
 const OUTFIT = {
-  k: "#2B2A28", // чёрный цилиндр, оправа
-  r: "#B23A26", // красный: бабочка, лента
+  k: "#2B2A28", // чёрный: цилиндр, оправа
+  r: "#B23A26", // красный: кепка, бабочка, лента
   y: "#E0A93B", // золото: корона, застёжка, искры
   p: "#6B4E9B", // фиолетовый: колпак, плащ
   b: "#7A5236", // коричневый: берет, шарф
   s: "#8C9BA8", // сталь: каска, визор
-  w: "#FAF9F5", // крем: глаза, блики
+  w: "#FAF9F5", // крем: надпись на кепке, блики
 };
 
 export const COLS = 22;
@@ -47,13 +53,14 @@ const EMPTY = ".";
 // Раскладка. Всё остальное расставлено относительно этих чисел, а не вписано
 // в спрайты руками, — иначе любая правка пропорций ломает половину деталей.
 const X0 = 6;
-const X1 = 13;
-const BODY_TOP = 6;
-const BODY_BOTTOM = 15;
-const EAR_TOP = 4;
+const X1 = 15;
+const HEAD_TOP = 5;
+const BODY_BOTTOM = 14;
+const EAR_TOP = 3;
 const EYE_ROW = 8;
-const WHISKER_ROW = 8;
-const LEG_TOP = 16;
+const WHISKER_ROW = 10;
+const MUZZLE_ROW = 11;
+const LEG_TOP = 15;
 
 function blankGrid() {
   return Array.from({ length: ROWS }, () => Array.from({ length: COLS }, () => EMPTY));
@@ -83,107 +90,46 @@ function stamp(grid, sprite, topRow, anchorX) {
 }
 
 /**
- * Головные уборы. Нижний ряд каждого спрайта ложится на уши, поэтому шляпа
+ * Головные уборы в фас. Нижний ряд спрайта ложится на макушку, поэтому убор
  * сидит на голове, а не висит над ней.
+ *
+ * У кепки на околыше четыре светлых клетки — та самая надпись с референса.
  */
 const HATS = {
-  2: [
-    // кепка козырьком влево
-    "..........",
-    "..........",
-    "...kkkk...",
-    "..kkkkkk..",
-    "kkkkkkkk..",
-  ],
-  3: [
-    // цилиндр с красной лентой — как на референсе
-    "..kkkkkk..",
-    "..kkkkkk..",
-    "..rrrrrr..",
-    "..kkkkkk..",
-    ".kkkkkkkk.",
-  ],
-  4: [
-    // берет со стебельком, завален влево
-    "....b.....",
-    "..bbbbb...",
-    ".bbbbbbb..",
-    ".bbbbbbbb.",
-    "..bbbbbb..",
-  ],
-  5: [
-    // бандана
-    "..........",
-    "..........",
-    "..rrrrrr..",
-    ".rrrrrrrr.",
-    "rr......rr",
-  ],
-  6: [
-    // каска с гребнем
-    "..........",
-    "....ss....",
-    "..ssssss..",
-    ".ssssssss.",
-    "ssssssssss",
-  ],
-  7: [
-    // визор
-    "..........",
-    "..........",
-    "..kkkkkk..",
-    ".ssssssss.",
-    "ssssssss..",
-  ],
-  8: [
-    // корона с камнем
-    "..........",
-    "..y.y.y.y.",
-    "..yyyyyyy.",
-    "..yyykyyy.",
-    "..yyyyyyy.",
-  ],
-  9: [
-    // корона повыше
-    "...y.y.y..",
-    "..y.y.y.y.",
-    "..yyyyyyy.",
-    "..yyykyyy.",
-    "..yyyyyyy.",
-  ],
-  10: [
-    // колпак волшебника с загнутым верхом и звёздами
-    ".......ppp",
-    ".....pppp.",
-    "...ppypp..",
-    "..pyppp...",
-    ".pppppppp.",
-  ],
+  2: ["..rrrrrr..", ".rrrrrrrr.", ".rwrwrwrw.", "rrrrrrrrrr", "rrrrrrrrrr"],
+  3: ["..kkkkkk..", "..kkkkkk..", "..rrrrrr..", ".kkkkkkkk.", "kkkkkkkkkk"],
+  4: ["....b.....", "..bbbbbb..", ".bbbbbbbb.", ".bbbbbbbb.", "..bbbbbb.."],
+  5: ["..........", "..rrrrrr..", ".rrrrrrrr.", "rrrrrrrrrr", "r........r"],
+  6: ["....ss....", "..ssssss..", ".ssssssss.", "ssssssssss", "ssssssssss"],
+  7: ["..........", "..kkkkkk..", ".kkkkkkkk.", "ssssssssss", "ssssssssss"],
+  8: ["..........", ".y.y.y.y..", ".yyyyyyy..", ".yyykyyy..", ".yyyyyyy.."],
+  9: ["..y.y.y...", ".y.y.y.y..", ".yyyyyyy..", ".yyykyyy..", ".yyyyyyy.."],
+  10: [".......ppp", ".....pppp.", "...ppypp..", "..pppppp..", ".pppppppp."],
 };
 
-/** Шея и грудь: шарф, бабочка, плащ. Ставится поверх корпуса. */
+/** Шея и грудь: бабочка, шарф, ожерелье, плащ. Ставится поверх корпуса. */
 const NECKWEAR = {
-  3: { row: 13, art: ["..r..r..", "..rrrr..", "..r..r.."] }, // бабочка
-  4: { row: 13, art: ["bbbbbbbb", "bb......", "bb......"] }, // шарф с концом
-  8: { row: 13, art: ["y......y", ".y....y.", "..yyyy..", "...y...."] }, // ожерелье
-  9: { row: 13, art: ["ppppppppp", "ppppppppp", ".pppppppp"] }, // плащ
-  10: { row: 13, art: ["..yyyy...", "ppppppppp", "ppppppppp", ".pppppppp"] },
+  3: { row: 13, art: ["..r..r..", "..rrrr..", "...rr..."] },
+  4: { row: 13, art: ["bbbbbbbb", "b......b", "b......."] },
+  8: { row: 13, art: ["y......y", ".y....y.", "..yyyy.."] },
+  9: { row: 13, art: ["pppppppppp", "pppppppppp"] },
+  10: { row: 13, art: ["..yyyyyy..", "pppppppppp", "pppppppppp"] },
 };
 
 /**
- * Хвост. У младших лежит поленом, у старших поднят трубой — на референсе
- * поднятый хвост и читается как «кот подрос».
+ * Хвост. У младших опущен вниз, у старших поднят трубой — поднятый хвост
+ * читается как «кот подрос». Рисуется отдельным слоем: он единственный
+ * машет сам по себе.
  */
 function drawTail(grid, level, fur) {
   if (level <= 2) {
-    // лежит поленом у задней лапы
-    rect(grid, X1 + 1, BODY_BOTTOM - 3, X1 + 4, BODY_BOTTOM - 1, fur);
+    rect(grid, X1 + 1, BODY_BOTTOM - 2, X1 + 2, BODY_BOTTOM, fur);
+    rect(grid, X1 + 2, BODY_BOTTOM, X1 + 4, BODY_BOTTOM, fur);
     return;
   }
-  // поднят трубой; с восьмого уровня загибается наружу
-  rect(grid, X1 + 1, BODY_BOTTOM - 3, X1 + 2, BODY_BOTTOM - 1, fur);
-  rect(grid, X1 + 2, EYE_ROW + 3, X1 + 3, BODY_BOTTOM - 2, fur);
-  if (level >= 8) rect(grid, X1 + 3, EYE_ROW + 2, X1 + 4, EYE_ROW + 3, fur);
+  rect(grid, X1 + 1, BODY_BOTTOM - 2, X1 + 2, BODY_BOTTOM, fur);
+  rect(grid, X1 + 2, EYE_ROW + 1, X1 + 3, BODY_BOTTOM - 2, fur);
+  if (level >= 8) rect(grid, X1 + 3, EYE_ROW, X1 + 4, EYE_ROW + 1, fur);
 }
 
 /** Искры вокруг — только у двух верхних уровней, как знак предела. */
@@ -192,13 +138,13 @@ function drawSparkles(grid, level) {
   const spots =
     level === 9
       ? [
-          [3, 5],
-          [18, 7],
+          [3, 6],
+          [19, 8],
         ]
       : [
-          [3, 4],
-          [19, 6],
-          [4, 15],
+          [3, 5],
+          [20, 7],
+          [4, 16],
         ];
   for (const [x, y] of spots) {
     if (y < 1 || y > ROWS - 2 || x < 1 || x > COLS - 2) continue;
@@ -210,51 +156,66 @@ function drawSparkles(grid, level) {
   }
 }
 
-/** Глаза светлые: на референсе это два ярких прямоугольника, а не тёмные точки. */
-function drawEyes(grid, level, row) {
-  rect(grid, X0 + 2, row, X0 + 2, row + 1, "w");
-  rect(grid, X0 + 5, row, X0 + 5, row + 1, "w");
-}
-
-/**
- * Усы по обе стороны морды. Пар всего две, а не три: справа ниже начинается
- * хвост, и третья пара попала бы прямо под него — хвост рисуется поверх и
- * съел бы её.
- */
-function drawWhiskers(grid, row) {
-  for (const dy of [0, 2]) {
-    rect(grid, X0 - 3, row + dy, X0 - 1, row + dy, "e");
-    rect(grid, X1 + 1, row + dy, X1 + 3, row + dy, "e");
-  }
-}
-
-function buildGrid(cat) {
+/** Голова, уши, морда, лапы — всё, что не мигает и не машет. */
+function buildBody(cat) {
   const grid = blankGrid();
-  const level = cat.level;
 
-  drawWhiskers(grid, WHISKER_ROW);
-  drawTail(grid, level, "f");
+  // Уши углами, между ними провал.
+  rect(grid, X0, EAR_TOP, X0 + 1, HEAD_TOP - 1, "f");
+  rect(grid, X1 - 1, EAR_TOP, X1, HEAD_TOP - 1, "f");
 
-  // Уши вырезом: два блока по углам, между ними провал в четыре клетки.
-  rect(grid, X0, EAR_TOP, X0 + 1, BODY_TOP - 1, "f");
-  rect(grid, X1 - 1, EAR_TOP, X1, BODY_TOP - 1, "f");
-  rect(grid, X0, BODY_TOP, X1, BODY_BOTTOM, "f"); // корпус
+  rect(grid, X0, HEAD_TOP, X1, BODY_BOTTOM, "f");
+
+  // Тень по правому краю: без неё голова читается плоской наклейкой.
+  rect(grid, X1, HEAD_TOP, X1, BODY_BOTTOM, "m");
+
+  // Усы по обе стороны морды.
+  for (const dy of [0, 2]) {
+    rect(grid, X0 - 3, WHISKER_ROW + dy - 1, X0 - 1, WHISKER_ROW + dy - 1, "m");
+    rect(grid, X1 + 1, WHISKER_ROW + dy - 1, X1 + 3, WHISKER_ROW + dy - 1, "m");
+  }
+
+  // Морда светлее шкуры, рот — тёмный прямоугольник, как на референсе.
+  rect(grid, X0 + 2, MUZZLE_ROW, X1 - 2, MUZZLE_ROW + 1, "w");
+  rect(grid, X0 + 4, MUZZLE_ROW + 1, X1 - 4, MUZZLE_ROW + 1, "i");
+  rect(grid, X0 + 4, MUZZLE_ROW, X0 + 4, MUZZLE_ROW, "i");
+  rect(grid, X1 - 4, MUZZLE_ROW, X1 - 4, MUZZLE_ROW, "i");
 
   // Лапы: четыре тумбы с просветами.
-  for (const x of [X0, X0 + 2, X1 - 2, X1]) {
-    rect(grid, x, LEG_TOP, x, ROWS - 2, "f");
+  for (const x of [X0, X0 + 3, X1 - 4, X1 - 1]) {
+    rect(grid, x, LEG_TOP, x + 1, ROWS - 3, "f");
   }
 
-  drawEyes(grid, level, EYE_ROW);
-
-  const neck = NECKWEAR[level];
+  const neck = NECKWEAR[cat.level];
   if (neck) stamp(grid, neck.art, neck.row);
 
-  const hat = HATS[level];
+  drawSparkles(grid, cat.level);
+  return grid;
+}
+
+function buildEyes(open) {
+  const grid = blankGrid();
+  if (open) {
+    rect(grid, X0 + 2, EYE_ROW, X0 + 3, EYE_ROW + 1, "i");
+    rect(grid, X1 - 3, EYE_ROW, X1 - 2, EYE_ROW + 1, "i");
+  } else {
+    // Закрытые глаза — одна полоска: так моргание читается даже на 76 пикселях.
+    rect(grid, X0 + 2, EYE_ROW + 1, X0 + 3, EYE_ROW + 1, "i");
+    rect(grid, X1 - 3, EYE_ROW + 1, X1 - 2, EYE_ROW + 1, "i");
+  }
+  return grid;
+}
+
+function buildTail(cat) {
+  const grid = blankGrid();
+  drawTail(grid, cat.level, "f");
+  return grid;
+}
+
+function buildHat(cat) {
+  const grid = blankGrid();
+  const hat = HATS[cat.level];
   if (hat) stamp(grid, hat, EAR_TOP + 2 - hat.length);
-
-  drawSparkles(grid, level);
-
   return grid;
 }
 
@@ -294,18 +255,34 @@ export function claudeStar(size, color = BRAND.clay) {
      shape-rendering="crispEdges" aria-hidden="true" focusable="false">${rects.join("")}</svg>`;
 }
 
+/**
+ * options.animated — разложить на живые слои. Само движение задаёт CSS
+ * мини-аппа: держать кадры в разметке значило бы дублировать их в каждом коте.
+ * Для README и для тех, кто просил меньше движения, слои остаются, но классов
+ * анимации нет.
+ */
 export function catSvg(cat, size, options = {}) {
   const [fur, mark, ink] = cat.palette;
-
   const palette = { ...OUTFIT, f: fur, e: mark, m: mark, i: ink };
 
   const background = options.background
     ? `<rect width="${COLS}" height="${ROWS}" fill="${options.background}"/>`
     : "";
 
+  const layer = (name, grid, extra = "") =>
+    `<g class="cat-${name}"${extra}>${gridRects(grid, palette)}</g>`;
+
   const height = Math.round((size * ROWS) / COLS);
+  const animated = options.animated ? " cat-animated" : "";
+
   return `
 <svg viewBox="0 0 ${COLS} ${ROWS}" width="${size}" height="${height}"
      xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges"
-     aria-hidden="true" focusable="false">${background}${gridRects(buildGrid(cat), palette)}</svg>`.trim();
+     class="cat-sprite${animated}" aria-hidden="true" focusable="false">${background}${layer(
+       "tail",
+       buildTail(cat),
+     )}${layer("body", buildBody(cat))}${layer("eyes", buildEyes(true))}${layer(
+       "eyes-shut",
+       buildEyes(false),
+     )}${layer("hat", buildHat(cat))}</svg>`.trim();
 }

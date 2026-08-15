@@ -675,3 +675,228 @@ h2 {
   outline: 2px solid var(--focus);
   outline-offset: 1px;
 }
+
+/* ── Живые коты ────────────────────────────────────────────────────────────
+   Цикл 5 секунд, 12 кадров в секунду — то есть 60 кадров, и один кадр это
+   1,667% цикла. Все ключевые точки стоят на границах кадров, а step-end не
+   даёт браузеру плавно перетечь между ними: пиксельная картинка обязана
+   щёлкать, а не размазываться.
+
+   Слои двигаются отдельно: корпус качается, глаза моргают, хвост машет,
+   убор съезжает и возвращается. Общее покачивание висит на самом svg,
+   поэтому части качаются вместе с котом, а своё движение накладывают сверху. */
+
+.cat-sprite {
+  overflow: visible;
+}
+
+/* Закрытые глаза лежат поверх открытых и появляются только на кадрах моргания. */
+.cat-sprite .cat-eyes-shut {
+  opacity: 0;
+}
+
+.cat-sprite g {
+  transform-box: fill-box;
+}
+
+.cat-animated {
+  animation: cat-sway 5s step-end infinite;
+  transform-origin: 50% 100%;
+}
+
+.cat-animated .cat-tail {
+  animation: cat-tail 5s step-end infinite;
+  transform-origin: 0% 100%;
+}
+
+.cat-animated .cat-eyes {
+  animation: cat-eyes-open 5s step-end infinite;
+}
+
+.cat-animated .cat-eyes-shut {
+  animation: cat-eyes-shut 5s step-end infinite;
+}
+
+.cat-animated .cat-hat {
+  animation: cat-hat 5s step-end infinite;
+  transform-origin: 50% 100%;
+}
+
+/* Покачивание: двенадцать положений за цикл, по кадру каждые пять. Медленно и
+   спокойно — кот дышит, а не трясётся. */
+@keyframes cat-sway {
+  0% {
+    transform: rotate(0deg) translateY(0);
+  }
+  8.333% {
+    transform: rotate(0.8deg) translateY(0);
+  }
+  16.667% {
+    transform: rotate(1.4deg) translateY(-0.15px);
+  }
+  25% {
+    transform: rotate(1.4deg) translateY(-0.15px);
+  }
+  33.333% {
+    transform: rotate(0.8deg) translateY(0);
+  }
+  41.667% {
+    transform: rotate(0deg) translateY(0);
+  }
+  50% {
+    transform: rotate(-0.8deg) translateY(0);
+  }
+  58.333% {
+    transform: rotate(-1.4deg) translateY(-0.15px);
+  }
+  66.667% {
+    transform: rotate(-1.4deg) translateY(-0.15px);
+  }
+  75% {
+    transform: rotate(-0.8deg) translateY(0);
+  }
+  83.333% {
+    transform: rotate(0deg) translateY(0);
+  }
+  100% {
+    transform: rotate(0deg) translateY(0);
+  }
+}
+
+/* Хвост машет вдвое чаще корпуса: так он живёт своей жизнью, а не повторяет
+   качание, — иначе движение читается как один общий крен. */
+@keyframes cat-tail {
+  0% {
+    transform: rotate(0deg);
+  }
+  6.667% {
+    transform: rotate(-5deg);
+  }
+  13.333% {
+    transform: rotate(-8deg);
+  }
+  20% {
+    transform: rotate(-5deg);
+  }
+  26.667% {
+    transform: rotate(0deg);
+  }
+  33.333% {
+    transform: rotate(5deg);
+  }
+  40% {
+    transform: rotate(8deg);
+  }
+  46.667% {
+    transform: rotate(5deg);
+  }
+  53.333% {
+    transform: rotate(0deg);
+  }
+  60% {
+    transform: rotate(-5deg);
+  }
+  66.667% {
+    transform: rotate(-8deg);
+  }
+  73.333% {
+    transform: rotate(-5deg);
+  }
+  80% {
+    transform: rotate(0deg);
+  }
+  86.667% {
+    transform: rotate(5deg);
+  }
+  93.333% {
+    transform: rotate(3deg);
+  }
+  100% {
+    transform: rotate(0deg);
+  }
+}
+
+/* Моргание: два раза за цикл, по два кадра — 24-25 и 50-51. Один кадр глаз
+   не успевает заметить, три уже похоже на дремоту. */
+@keyframes cat-eyes-open {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  40% {
+    opacity: 0;
+  }
+  43.333% {
+    opacity: 1;
+  }
+  83.333% {
+    opacity: 0;
+  }
+  86.667% {
+    opacity: 1;
+  }
+}
+
+@keyframes cat-eyes-shut {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  40% {
+    opacity: 1;
+  }
+  43.333% {
+    opacity: 0;
+  }
+  83.333% {
+    opacity: 1;
+  }
+  86.667% {
+    opacity: 0;
+  }
+}
+
+/* Кепка съезжает набок и возвращается — один раз за цикл, в середине.
+   Съезд идёт тремя кадрами, чтобы читалось движение, а не подмена картинки. */
+@keyframes cat-hat {
+  0%,
+  48.333% {
+    transform: translate(0, 0) rotate(0deg);
+  }
+  50% {
+    transform: translate(0.15px, 0.4px) rotate(4deg);
+  }
+  51.667% {
+    transform: translate(0.3px, 0.8px) rotate(8deg);
+  }
+  53.333%,
+  60% {
+    transform: translate(0.4px, 1px) rotate(11deg);
+  }
+  61.667% {
+    transform: translate(0.25px, 0.6px) rotate(7deg);
+  }
+  63.333% {
+    transform: translate(0.1px, 0.25px) rotate(3deg);
+  }
+  65%,
+  100% {
+    transform: translate(0, 0) rotate(0deg);
+  }
+}
+
+/* Кто просил систему поменьше двигать — тому неподвижный кот. Это не украшение,
+   а требование доступности: анимация может вызывать дурноту. */
+@media (prefers-reduced-motion: reduce) {
+  .cat-animated,
+  .cat-animated .cat-tail,
+  .cat-animated .cat-eyes,
+  .cat-animated .cat-eyes-shut,
+  .cat-animated .cat-hat {
+    animation: none;
+  }
+
+  .cat-sprite .cat-eyes-shut {
+    opacity: 0;
+  }
+}

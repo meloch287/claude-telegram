@@ -19,7 +19,7 @@ function render(profile) {
   el("plan-line").textContent = `Модель ${model.label}`;
 
   // Герой
-  el("hero-cat").innerHTML = catSvg(cat, 148);
+  el("hero-cat").innerHTML = catSvg(cat, 148, { animated: true });
   el("hero-level").textContent = `Уровень ${cat.level} из ${cats.length}`;
   el("hero-name").textContent = cat.name;
   el("hero-title").textContent = cat.title;
@@ -101,13 +101,18 @@ function render(profile) {
 
   const grid = el("cat-grid");
   grid.replaceChildren();
-  for (const item of cats) {
+  cats.forEach((item, index) => {
     const li = document.createElement("li");
     li.className = `cat-card${item.unlocked ? "" : " cat-card--locked"}`;
 
     const art = document.createElement("div");
     art.className = "cat-art";
-    art.innerHTML = catSvg(item, 76);
+    // Открытые коты в сетке тоже живые, но вразнобой: одинаковый такт у десяти
+    // штук сразу читается как дребезг экрана, а не как жизнь.
+    art.innerHTML = catSvg(item, 76, { animated: item.unlocked });
+    // Сдвиг фазы вешаем на сам рисунок: анимация живёт на нём, а не на обёртке.
+    const sprite = art.firstElementChild;
+    if (sprite) sprite.style.animationDelay = -(index % 5) * 0.9 + "s";
 
     const level = document.createElement("span");
     level.className = "cat-card-level";
@@ -133,7 +138,7 @@ function render(profile) {
 
     li.append(art, level, name, threshold, badge);
     grid.append(li);
-  }
+  });
 
   // Достижения
   const gotCount = achievements.filter((a) => a.unlocked).length;
