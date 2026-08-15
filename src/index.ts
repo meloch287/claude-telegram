@@ -18,6 +18,7 @@ import {
   getOrCreateUser,
   getUsageToday,
   listRateLimits,
+  usageSince,
   recordMessage,
   saveChat,
   setModel,
@@ -802,27 +803,45 @@ bot.command("status", async (ctx) => {
       : "❌ рабочего канала нет — Anthropic недоступен ни напрямую, ни через прокси",
   ];
 
-  const limits = listRateLimits(ctx.from!.id);
+  // Две шкалы показываем всегда: недельное окно присылает событие только на
+  // подходе к пределу, и до тех пор строка просто отсутствовала — это читалось
+  // как поломка, хотя данных действительно нет.
+  const known = new Map(listRateLimits(ctx.from!.id).map((row) => [row.limit_type, row]));
+  const windows: [string, number][] = [
+    ["five_hour", 5 * 60 * 60 * 1000],
+    ["seven_day", 7 * 24 * 60 * 60 * 1000],
+  ];
+
   lines.push("", "<b>Лимиты подписки</b>");
-  if (limits.length === 0) {
-    lines.push("данных пока нет. Они приходят от подписки — по API-ключу лимитов плана нет вовсе.");
-  } else {
-    for (const limit of limits) {
-      const percent = limit.utilization === null ? "?" : `${Math.round(limit.utilization)}%`;
-      const seen = new Date(limit.seen_at).toLocaleString("ru-RU", {
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-      const resets = limit.resets_at
-        ? ` · сброс ${new Date(toMillis(limit.resets_at)).toLocaleString("ru-RU", {
-            day: "2-digit",
-            month: "2-digit",
-            hour: "2-digit",
-            minute: "2-digit",
-          })}`
-        : "";
-      lines.push(`${esc(limitTitle(limit.limit_type))}: ${percent}${resets} · данные на ${seen}`);
+  for (const [type, ms] of windows) {
+    const row = known.get(type);
+    const own = usageSince(ctx.from!.id, ms);
+    const parts = [`<b>${esc(limitTitle(type))}</b>`];
+    if (row?.utilization != null) {
+      parts.push(`${Math.round(row.utilization)}%`);
+    } else {
+      // Процента нет — показываем свой замер и честно называем его своим.
+      parts.push(`наш счёт ${formatTokens(own.tokens)}`);
     }
+    if (row?.resets_at) {
+      parts.push(
+        `сброс ${new Date(toMillis(row.resets_at)).toLocaleString("ru-RU", {
+          day: "2-digit",
+          month: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+        })}`,
+      );
+    }
+    lines.push(parts.join(" · "));
+  }
+
+  if (![...known.values()].some((row) => row.utilization != null)) {
+    lines.push(
+      "",
+      "<i>Процент от лимита Anthropic недоступен: событие его не присылает, " +
+        "а запрос расхода плана отвечает отказом — токену не хватает области профиля.</i>",
+    );
   }
 
   await ctx.reply(lines.join("\n"), { parse_mode: "HTML" });

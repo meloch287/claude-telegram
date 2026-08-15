@@ -11,6 +11,7 @@ import {
   listAchievements,
   listRateLimits,
   usageByDay,
+  usageSince,
 } from "../db.js";
 import { ACHIEVEMENTS, CAT_LEVELS, catForTokens, catProgress, nextCat } from "../cats.js";
 import { MODELS } from "../bot/keyboards.js";
@@ -41,6 +42,50 @@ function authenticate(initData: string | null): number | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Окна подписки, которые показываем всегда: пятичасовое и недельное.
+ *
+ * Держим список фиксированным, а не строим по тому, что успело прийти в базу:
+ * недельное окно присылает событие только на подходе к пределу, и до тех пор
+ * шкала просто отсутствовала — выглядело как поломка.
+ */
+const WINDOWS: { type: string; ms: number }[] = [
+  { type: "five_hour", ms: 5 * 60 * 60 * 1000 },
+  { type: "seven_day", ms: 7 * 24 * 60 * 60 * 1000 },
+];
+
+function buildLimits(userId: number) {
+  const known = new Map(listRateLimits(userId).map((row) => [row.limit_type, row]));
+
+  const describe = (type: string, ms: number | null) => {
+    const row = known.get(type);
+    known.delete(type);
+    return {
+      type,
+      // Название отдаём отсюда, а не держим второй словарь во фронте: разойтись
+      // им проще, чем кажется.
+      title: limitTitle(type),
+      status: row?.status ?? null,
+      utilization: row?.utilization ?? null,
+      resetsAt: row?.resets_at == null ? null : toMillis(row.resets_at),
+      seenAt: row?.seen_at ?? null,
+      /**
+       * Собственный замер за то же окно. Процент подписки приходит не всегда:
+       * событие его не несёт, а usage-эндпоинт плана отвечает отказом, если у
+       * токена нет области профиля. Тогда шкала показывает хотя бы наш счёт —
+       * это правда, просто про другое: сколько потратили мы, а не сколько
+       * осталось по плану.
+       */
+      own: ms === null ? null : usageSince(userId, ms),
+    };
+  };
+
+  const rows = WINDOWS.map((w) => describe(w.type, w.ms));
+  // Всё прочее, что успело прийти (по моделям, перерасход), — следом.
+  for (const type of known.keys()) rows.push(describe(type, null));
+  return rows;
 }
 
 function profilePayload(userId: number) {
@@ -109,16 +154,7 @@ function profilePayload(userId: number) {
       unlocked: user.total_tokens >= c.threshold,
     })),
     achievements: ACHIEVEMENTS.map((a) => ({ ...a, unlocked: unlocked.has(a.id) })),
-    limits: listRateLimits(userId).map((row) => ({
-      type: row.limit_type,
-      // Название отдаём отсюда, а не держим второй словарь во фронте: разойтись
-      // им проще, чем кажется.
-      title: limitTitle(row.limit_type),
-      status: row.status,
-      utilization: row.utilization,
-      resetsAt: row.resets_at === null ? null : toMillis(row.resets_at),
-      seenAt: row.seen_at,
-    })),
+    limits: buildLimits(userId),
   };
 }
 

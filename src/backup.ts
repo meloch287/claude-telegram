@@ -2,6 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { config } from "./config.js";
+import { pruneUsageEvents } from "./db.js";
 
 /**
  * Копии базы. В bot.db лежит всё, что нельзя восстановить пересборкой:
@@ -65,6 +66,10 @@ function runOnce(): void {
   try {
     const made = backupNow();
     const removed = prune();
+    // Заодно подчищаем расход старше недельного окна: он больше ни на что не
+    // влияет, а таблица без чистки растёт без конца.
+    const events = pruneUsageEvents();
+    if (events > 0) console.log(`🧹 Убрано старых записей расхода: ${events}`);
     if (made) {
       const size = (statSync(made).size / 1024).toFixed(0);
       console.log(

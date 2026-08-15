@@ -70,6 +70,19 @@ CREATE TABLE IF NOT EXISTS rate_limits (
   PRIMARY KEY (user_id, limit_type)
 );
 
+-- Расход с отметкой времени. Подённой таблицы не хватает: окна подписки
+-- скользящие — пять часов и семь суток, — и «сколько ушло за последние пять
+-- часов» из суток не вычислить. Записи старше восьми суток чистятся: недельное
+-- окно длиннее не бывает, а таблица иначе растёт без конца.
+CREATE TABLE IF NOT EXISTS usage_events (
+  user_id  INTEGER NOT NULL,
+  at       INTEGER NOT NULL,
+  tokens   INTEGER NOT NULL,
+  cost_usd REAL    NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS usage_events_by_user_at ON usage_events (user_id, at);
+
 CREATE TABLE IF NOT EXISTS projects_seen (
   user_id INTEGER NOT NULL,
   project TEXT    NOT NULL,
@@ -241,6 +254,11 @@ const stmts = {
       seen_at = excluded.seen_at
   `),
   listLimits: db.prepare("SELECT * FROM rate_limits WHERE user_id = ? ORDER BY limit_type"),
+  addEvent: db.prepare("INSERT INTO usage_events (user_id, at, tokens, cost_usd) VALUES (?, ?, ?, ?)"),
+  sumSince: db.prepare(
+    "SELECT COALESCE(SUM(tokens), 0) AS tokens, COALESCE(SUM(cost_usd), 0) AS cost FROM usage_events WHERE user_id = ? AND at >= ?",
+  ),
+  prunEvents: db.prepare("DELETE FROM usage_events WHERE at < ?"),
   listDayUsage: db.prepare(
     "SELECT day, tokens, cost_usd FROM usage_daily WHERE user_id = ? ORDER BY day DESC LIMIT ?",
   ),
@@ -341,6 +359,8 @@ export function recordToolDecision(userId: number, allowed: boolean): void {
 export function recordUsage(userId: number, tokens: number, costUsd: number): void {
   stmts.addUsage.run(tokens, costUsd, userId);
   stmts.addDayUsage.run(userId, today(), tokens, costUsd);
+  // Ноль писать незачем: событий и так по одному на задачу.
+  if (tokens > 0 || costUsd > 0) stmts.addEvent.run(userId, Date.now(), tokens, costUsd);
 }
 
 export function getUsageToday(userId: number): { tokens: number; cost_usd: number } {
@@ -453,4 +473,23 @@ export function usageByDay(
     result.push({ day, tokens: row?.tokens ?? 0, costUsd: row?.cost_usd ?? 0 });
   }
   return result;
+}
+
+/** Расход за скользящее окно: сколько ушло за последние N миллисекунд. */
+export function usageSince(userId: number, windowMs: number): { tokens: number; costUsd: number } {
+  const row = stmts.sumSince.get(userId, Date.now() - windowMs) as unknown as {
+    tokens: number;
+    cost: number;
+  };
+  return { tokens: row?.tokens ?? 0, costUsd: row?.cost ?? 0 };
+}
+
+/**
+ * Чистка старых событий. Восемь суток: недельное окно длиннее не бывает, а
+ * запас в сутки покрывает разницу часовых поясов и задержку чистки.
+ */
+export function pruneUsageEvents(): number {
+  const edge = Date.now() - 8 * 24 * 60 * 60 * 1000;
+  const result = stmts.prunEvents.run(edge);
+  return Number(result.changes ?? 0);
 }

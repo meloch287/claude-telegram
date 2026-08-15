@@ -1,4 +1,5 @@
 import { catSvg } from "./cat-art.js";
+import { achievementSvg } from "./achievement-art.js";
 
 const tg = window.Telegram?.WebApp;
 const nf = new Intl.NumberFormat("ru-RU");
@@ -150,10 +151,13 @@ function render(profile) {
     const li = document.createElement("li");
     li.className = `achievement${item.unlocked ? "" : " achievement--locked"}`;
 
+    // Свой пиксельный значок вместо эмодзи: системные рисуются по-разному на
+    // каждом телефоне и рядом с котами выглядят чужеродно. Закрытые не прячем
+    // и не подменяем заглушкой — видно, что именно предстоит получить.
     const icon = document.createElement("span");
     icon.className = "achievement-icon";
     icon.setAttribute("aria-hidden", "true");
-    icon.append(text(item.unlocked ? item.icon : "▫️"));
+    icon.innerHTML = achievementSvg(item.id, 28);
 
     const body = document.createElement("div");
     const name = document.createElement("p");
@@ -209,29 +213,30 @@ function renderLimits(limits) {
   const list = el("limits");
   const note = el("limits-note");
 
-  if (limits.length === 0) {
-    note.textContent = "Данных пока нет — они приходят по ходу работы агента.";
-    note.hidden = false;
-    list.hidden = true;
-    list.replaceChildren();
-    return;
-  }
-
-  note.hidden = true;
   list.hidden = false;
   list.replaceChildren();
+
+  // Процент подписки есть не всегда: событие его не несёт, а запрос расхода
+  // плана отвечает отказом, если у токена нет области профиля. Молчать об этом
+  // нельзя — иначе пустая шкала читается как поломка.
+  const missing = limits.some((l) => l.utilization === null);
+  note.hidden = !missing;
+  if (missing) {
+    note.textContent =
+      "Процент от лимита подписки Anthropic сейчас недоступен: событие его не " +
+      "присылает, а запрос расхода плана отвечает отказом — токену не хватает " +
+      "области профиля. Пока показываю собственный замер за то же окно: сколько " +
+      "потратил бот.";
+  }
 
   for (const limit of limits) {
     // Ключ берём из типа окна, а не из индекса: число строк меняется, и на
     // индексах id разъехались бы между отрисовками.
     const key = limit.type;
-    // Название приходит с сервера: держать здесь второй словарь значило бы
-    // однажды поправить только один из них.
     const name = limit.title ?? limit.type;
-    const status = LIMIT_STATUSES[limit.status] ?? LIMIT_STATUSES.allowed;
-    // utilization и resetsAt приходят не всегда — считать их обязательными нельзя.
+    const status = limit.status ? (LIMIT_STATUSES[limit.status] ?? null) : null;
     const percent = limit.utilization === null ? null : Math.round(limit.utilization);
-    const seen = timeFormat.format(new Date(limit.seenAt));
+    const own = limit.own;
 
     const li = document.createElement("li");
     li.className = "limit";
@@ -242,63 +247,92 @@ function renderLimits(limits) {
     nameEl.className = "limit-name";
     nameEl.id = `limit-name-${key}`;
     nameEl.append(text(name));
-    const percentEl = document.createElement("span");
-    percentEl.className = "limit-percent";
-    percentEl.append(text(percent === null ? "—" : `${percent}%`));
-    head.append(nameEl, percentEl);
+
+    const valueEl = document.createElement("span");
+    valueEl.className = percent === null ? "limit-percent limit-percent--own" : "limit-percent";
+    valueEl.append(text(percent === null ? formatOwn(own) : `${percent}%`));
+    head.append(nameEl, valueEl);
 
     const track = document.createElement("div");
-    track.className = "progress-track";
+    track.className =
+      percent === null ? "progress-track progress-track--unknown" : "progress-track";
     track.id = `limit-bar-${key}`;
-    track.setAttribute("role", "progressbar");
-    track.setAttribute("aria-valuemin", "0");
-    track.setAttribute("aria-valuemax", "100");
-    track.setAttribute("aria-valuenow", String(percent ?? 0));
     track.setAttribute("aria-labelledby", nameEl.id);
-    track.setAttribute("aria-describedby", `limit-seen-${key}`);
-    // Статус дублируется в valuetext: попав сразу на полосу мимо подписи,
-    // пользователь всё равно узнает состояние, не полагаясь на цвет.
-    const reset = limit.resetsAt === null ? "" : `, сброс ${untilReset(limit.resetsAt)}`;
-    track.setAttribute(
-      "aria-valuetext",
-      percent === null
-        ? `${status.word}${reset}`
-        : `${percent} процентов, ${status.word.toLowerCase()}${reset}`,
-    );
+    track.setAttribute("aria-describedby", `limit-foot-${key}`);
 
-    const fill = document.createElement("div");
-    fill.className = `progress-fill progress-fill--${limit.status}`;
-    fill.style.width = `${percent ?? 0}%`;
-    track.append(fill);
+    if (percent === null) {
+      // Полосу без числа не изображаем: нарисованный «примерно столько» врал бы
+      // ровно там, где человек ищет точность. Пустая дорожка честнее.
+      track.setAttribute("role", "img");
+      track.setAttribute(
+        "aria-label",
+        `Процент недоступен. Наш замер за окно: ${own ? nf.format(own.tokens) : 0} токенов`,
+      );
+    } else {
+      track.setAttribute("role", "progressbar");
+      track.setAttribute("aria-valuemin", "0");
+      track.setAttribute("aria-valuemax", "100");
+      track.setAttribute("aria-valuenow", String(percent));
+      const reset = limit.resetsAt === null ? "" : `, сброс ${untilReset(limit.resetsAt)}`;
+      // Статус дублируется словом: попав сразу на полосу мимо подписи,
+      // пользователь всё равно узнает состояние, не полагаясь на цвет.
+      track.setAttribute(
+        "aria-valuetext",
+        `${percent} процентов${status ? `, ${status.word.toLowerCase()}` : ""}${reset}`,
+      );
+      const fill = document.createElement("div");
+      fill.className = `progress-fill progress-fill--${limit.status ?? "allowed"}`;
+      fill.style.width = `${percent}%`;
+      track.append(fill);
+    }
 
     const foot = document.createElement("p");
     foot.className = "limit-foot";
+    foot.id = `limit-foot-${key}`;
 
-    const badge = document.createElement("span");
-    badge.className = `badge badge--${limit.status}`;
-    const badgeIcon = document.createElement("span");
-    badgeIcon.setAttribute("aria-hidden", "true");
-    badgeIcon.append(text(status.icon));
-    badge.append(badgeIcon, text(` ${status.word}`));
+    if (status) {
+      const badge = document.createElement("span");
+      badge.className = `badge badge--${limit.status}`;
+      const badgeIcon = document.createElement("span");
+      badgeIcon.setAttribute("aria-hidden", "true");
+      badgeIcon.append(text(status.icon));
+      badge.append(badgeIcon, text(` ${status.word}`));
+      foot.append(badge);
+    }
 
-    const when = document.createElement("span");
     if (limit.resetsAt !== null) {
+      const when = document.createElement("span");
       const time = document.createElement("time");
       time.dateTime = new Date(limit.resetsAt).toISOString();
       time.append(text(untilReset(limit.resetsAt)));
       when.append(text("Сброс "), time);
+      foot.append(when);
     }
 
-    const seenEl = document.createElement("span");
-    seenEl.id = `limit-seen-${key}`;
-    seenEl.append(text(`данные на ${seen}`));
+    if (percent === null && own) {
+      const ownEl = document.createElement("span");
+      ownEl.append(text(`наш счёт: ${nf.format(own.tokens)} токенов`));
+      foot.append(ownEl);
+    }
 
-    foot.append(badge, when, seenEl);
+    if (limit.seenAt) {
+      const seenEl = document.createElement("span");
+      seenEl.append(text(`данные на ${timeFormat.format(new Date(limit.seenAt))}`));
+      foot.append(seenEl);
+    }
+
     li.append(head, track, foot);
     list.append(li);
   }
 }
 
+/** Короткая запись расхода за окно: 14 402 → «14,4 тыс.». */
+function formatOwn(own) {
+  const value = own?.tokens ?? 0;
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1).replace(".", ",")} млн`;
+  if (value >= 1000) return `${(value / 1000).toFixed(1).replace(".", ",")} тыс.`;
+  return String(value);
+}
 function setupShare(profile) {
   const line = `Мой Claude-кот: ${profile.cat.name} (уровень ${profile.cat.level}/10), ${nf.format(profile.totals.tokens)} токенов`;
 

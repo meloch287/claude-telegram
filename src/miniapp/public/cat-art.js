@@ -61,6 +61,8 @@ const EYE_ROW = 8;
 const WHISKER_ROW = 10;
 const MUZZLE_ROW = 11;
 const LEG_TOP = 15;
+/** Середина корпуса: нос и рот держатся её, а не считаются на глаз. */
+const CENTRE = Math.floor((X0 + X1) / 2);
 
 function blankGrid() {
   return Array.from({ length: ROWS }, () => Array.from({ length: COLS }, () => EMPTY));
@@ -180,11 +182,12 @@ function buildBody(cat) {
     rect(grid, X1 + 1, WHISKER_ROW + dy - 1, X1 + 2, WHISKER_ROW + dy - 1, "m");
   }
 
-  // Морда светлее шкуры, рот — тёмный прямоугольник, как на референсе.
-  rect(grid, X0 + 2, MUZZLE_ROW, X1 - 2, MUZZLE_ROW + 1, "w");
-  rect(grid, X0 + 4, MUZZLE_ROW + 1, X1 - 4, MUZZLE_ROW + 1, "i");
-  rect(grid, X0 + 4, MUZZLE_ROW, X0 + 4, MUZZLE_ROW, "i");
-  rect(grid, X1 - 4, MUZZLE_ROW, X1 - 4, MUZZLE_ROW, "i");
+  // Щёки двумя подушками по бокам и нос между ними. Раньше здесь была светлая
+  // плита во всю ширину — она читалась как заплатка, а не как морда.
+
+  rect(grid, X0 + 3, MUZZLE_ROW, X0 + 4, MUZZLE_ROW + 1, "w");
+  rect(grid, X1 - 4, MUZZLE_ROW, X1 - 3, MUZZLE_ROW + 1, "w");
+  rect(grid, CENTRE, MUZZLE_ROW - 1, CENTRE + 1, MUZZLE_ROW - 1, "i");
 
   // Лапы: четыре тумбы по две клетки. Просветы 1–2–1: средний шире, поэтому
   // видно переднюю и заднюю пары, а не забор из восьми палок. По клетке
@@ -198,6 +201,22 @@ function buildBody(cat) {
   if (neck) stamp(grid, neck.art, neck.row);
 
   drawSparkles(grid, cat.level);
+  return grid;
+}
+
+/**
+ * Рот. Двумя слоями, как глаза: закрытый висит всегда, открытый показывается
+ * несколькими кадрами за цикл. Подменять форму в одном слое нельзя — вышел бы
+ * прыжок геометрии вместо движения.
+ */
+function buildMouth(open) {
+  const grid = blankGrid();
+  if (open) {
+    rect(grid, CENTRE - 1, MUZZLE_ROW, CENTRE + 2, MUZZLE_ROW + 1, "i");
+    rect(grid, CENTRE, MUZZLE_ROW + 1, CENTRE + 1, MUZZLE_ROW + 1, "w");
+  } else {
+    rect(grid, CENTRE - 1, MUZZLE_ROW + 1, CENTRE + 2, MUZZLE_ROW + 1, "i");
+  }
   return grid;
 }
 
@@ -283,14 +302,19 @@ export function catSvg(cat, size, options = {}) {
   const height = Math.round((size * ROWS) / COLS);
   const animated = options.animated ? " cat-animated" : "";
 
+  const layers = [
+    background,
+    layer("tail", buildTail(cat)),
+    layer("body", buildBody(cat)),
+    layer("eyes", buildEyes(true)),
+    layer("eyes-shut", buildEyes(false)),
+    layer("mouth", buildMouth(false)),
+    layer("mouth-open", buildMouth(true)),
+    layer("hat", buildHat(cat)),
+  ].join("");
+
   return `
 <svg viewBox="0 0 ${COLS} ${ROWS}" width="${size}" height="${height}"
      xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges"
-     class="cat-sprite${animated}" aria-hidden="true" focusable="false">${background}${layer(
-       "tail",
-       buildTail(cat),
-     )}${layer("body", buildBody(cat))}${layer("eyes", buildEyes(true))}${layer(
-       "eyes-shut",
-       buildEyes(false),
-     )}${layer("hat", buildHat(cat))}</svg>`.trim();
+     class="cat-sprite${animated}" aria-hidden="true" focusable="false">${layers}</svg>`.trim();
 }

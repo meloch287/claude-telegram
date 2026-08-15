@@ -691,7 +691,8 @@ h2 {
 }
 
 /* Закрытые глаза лежат поверх открытых и появляются только на кадрах моргания. */
-.cat-sprite .cat-eyes-shut {
+.cat-sprite .cat-eyes-shut,
+.cat-sprite .cat-mouth-open {
   opacity: 0;
 }
 
@@ -715,6 +716,14 @@ h2 {
 
 .cat-animated .cat-eyes-shut {
   animation: cat-eyes-shut 5s step-end infinite;
+}
+
+.cat-animated .cat-mouth {
+  animation: cat-mouth-shut 5s step-end infinite;
+}
+
+.cat-animated .cat-mouth-open {
+  animation: cat-mouth-open 5s step-end infinite;
 }
 
 .cat-animated .cat-hat {
@@ -856,6 +865,46 @@ h2 {
   }
 }
 
+/* Рот открывается дважды за цикл и в другие моменты, чем моргание: если
+   всё совпадает, лицо дёргается разом и выглядит сломанным, а не живым. */
+@keyframes cat-mouth-shut {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  20% {
+    opacity: 0;
+  }
+  28.333% {
+    opacity: 1;
+  }
+  70% {
+    opacity: 0;
+  }
+  75% {
+    opacity: 1;
+  }
+}
+
+@keyframes cat-mouth-open {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  20% {
+    opacity: 1;
+  }
+  28.333% {
+    opacity: 0;
+  }
+  70% {
+    opacity: 1;
+  }
+  75% {
+    opacity: 0;
+  }
+}
+
 /* Кепка съезжает набок и возвращается — один раз за цикл, в середине.
    Съезд идёт тремя кадрами, чтобы читалось движение, а не подмена картинки. */
 @keyframes cat-hat {
@@ -892,11 +941,46 @@ h2 {
   .cat-animated .cat-tail,
   .cat-animated .cat-eyes,
   .cat-animated .cat-eyes-shut,
+  .cat-animated .cat-mouth,
+  .cat-animated .cat-mouth-open,
   .cat-animated .cat-hat {
     animation: none;
   }
 
-  .cat-sprite .cat-eyes-shut {
+  .cat-sprite .cat-eyes-shut,
+  .cat-sprite .cat-mouth-open {
     opacity: 0;
   }
+}
+
+/* Значок закрытого достижения приглушён, но узнаваем: показать, что предстоит
+   получить, полезнее, чем спрятать за заглушкой. Смысл при этом несёт слово
+   «Ещё не получено» рядом, а не одна лишь бледность. */
+.achievement--locked .achievement-icon svg {
+  opacity: 0.35;
+  filter: grayscale(1);
+}
+
+.achievement-icon svg {
+  display: block;
+}
+
+/* Дорожка без числа: процент подписки недоступен, и рисовать заполнение
+   «примерно столько» нельзя — это враньё ровно там, где ищут точность.
+   Полосатая штриховка читается как «данных нет», а не как «пусто». */
+.progress-track--unknown {
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--surface-sunken),
+    var(--surface-sunken) 4px,
+    var(--line) 4px,
+    var(--line) 8px
+  );
+}
+
+/* Собственный замер — не процент, поэтому и весом поменьше: он не должен
+   выглядеть как то самое число, которого пока нет. */
+.limit-percent--own {
+  color: var(--ink-muted);
+  font-weight: 600;
 }

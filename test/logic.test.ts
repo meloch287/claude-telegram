@@ -825,3 +825,58 @@ test("сторож: бережёт файлы, на которых держит�
   assert.equal(guard.findDanger("Write", { file_path: "src/index.ts" }), null);
   assert.equal(guard.findDanger("Read", { file_path: "/opt/claude-telegram/.env" }), null);
 });
+
+// Скользящие окна считаются по событиям с отметкой времени: из подённой
+// таблицы «сколько ушло за последние пять часов» не достать, а именно это
+// показывают шкалы лимитов.
+test("расход за окно: считает только то, что попало в окно", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const { mkdtempSync, rmSync, writeFileSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const { fileURLToPath } = await import("node:url");
+
+  const dir = mkdtempSync(join(tmpdir(), "window-"));
+  const dbPath = fileURLToPath(new URL("../src/db.ts", import.meta.url));
+  const script = join(dir, "проба.mjs");
+
+  writeFileSync(
+    script,
+    `
+    process.env.BOT_TOKEN = "1:T";
+    process.env.ENCRYPTION_KEY = Buffer.alloc(32, 2).toString("base64");
+    process.env.DATA_DIR = ${JSON.stringify(dir)};
+    process.env.WORKSPACE_ROOT = ${JSON.stringify(join(dir, "ws"))};
+
+    const db = await import(${JSON.stringify(dbPath)});
+    db.getOrCreateUser(1);
+
+    const { DatabaseSync } = await import("node:sqlite");
+    const raw = new DatabaseSync(${JSON.stringify(join(dir, "bot.db"))});
+    const insert = raw.prepare("INSERT INTO usage_events (user_id, at, tokens, cost_usd) VALUES (?, ?, ?, ?)");
+    const час = 3600 * 1000;
+    insert.run(1, Date.now() - час, 100, 0.1);           // внутри пяти часов
+    insert.run(1, Date.now() - 4 * час, 200, 0.2);       // внутри пяти часов
+    insert.run(1, Date.now() - 30 * час, 400, 0.4);      // только в неделе
+    insert.run(1, Date.now() - 20 * 24 * час, 800, 0.8); // старше всех окон
+    insert.run(2, Date.now() - час, 999, 9.9);           // чужой расход
+    raw.close();
+
+    console.log(JSON.stringify({
+      пять: db.usageSince(1, 5 * час).tokens,
+      неделя: db.usageSince(1, 7 * 24 * час).tokens,
+      убрано: db.pruneUsageEvents(),
+      послеЧистки: db.usageSince(1, 30 * 24 * час).tokens,
+    }));
+    `,
+  );
+
+  const out = execFileSync("npx", ["tsx", script], { encoding: "utf8" });
+  const result = JSON.parse(out.trim().split("\n").pop() ?? "{}");
+  rmSync(dir, { recursive: true, force: true });
+
+  assert.equal(result.пять, 300, "в пятичасовое окно попадают только свежие записи");
+  assert.equal(result.неделя, 700, "недельное окно шире, но двадцатидневную запись не берёт");
+  assert.equal(result.убрано, 1, "чистка убирает то, что старше недельного окна с запасом");
+  assert.equal(result.послеЧистки, 700, "чужой расход в чужие окна не попадает");
+});
