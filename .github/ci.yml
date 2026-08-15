@@ -1,0 +1,73 @@
+# Положить в .github/workflows/ci.yml. Здесь он лежит потому, что токен бота
+# не имеет права workflow: GitHub запрещает OAuth-приложениям создавать файлы
+# в .github/workflows. Активировать одной командой со своей машины:
+#
+#   git mv .github/ci.yml .github/workflows/ci.yml && git commit -m 'Включить CI' && git push
+#
+name: Проверки и деплой
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Два деплоя одновременно перетирали бы друг друга: второй пересобирает образ,
+# пока первый ещё поднимает контейнер.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    name: Типы и тесты
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Та же версия, что в образе: node:sqlite и его поведение зависят от неё.
+          node-version: 24
+          cache: npm
+
+      # --include=optional обязателен: нативный бинарь Claude Code приезжает
+      # опциональной зависимостью, без него SDK не найдёт исполняемый файл.
+      - run: npm ci --include=optional
+
+      - name: Типы
+        run: npm run typecheck
+
+      - name: Тесты
+        run: npm test
+
+  deploy:
+    name: Деплой на сервер
+    needs: checks
+    # Только main и только для пушей: PR из форка не должен получать доступ
+    # к секретам и к серверу.
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ключ и известный хост
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          # Ключ хоста заранее в секрете, а не ssh-keyscan на месте: иначе
+          # первый же посредник между раннером и сервером прошёл бы незамеченным.
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Выкатить
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes \
+            "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' < scripts/deploy.sh
