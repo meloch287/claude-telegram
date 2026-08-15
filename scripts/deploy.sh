@@ -14,6 +14,12 @@ CONTAINER=claude-telegram
 
 cd "$APP_DIR"
 
+# То же исключение, что и в autodeploy.sh: выкатку зовут и по ssh с раннера, и
+# из службы systemd, у которой нет HOME и глобального конфига git.
+export GIT_CONFIG_COUNT=1
+export GIT_CONFIG_KEY_0=safe.directory
+export GIT_CONFIG_VALUE_0="$APP_DIR"
+
 # Куда возвращаться, если новая версия не поднимется. Считаем до fetch: после
 # reset прошлый коммит уже не найти по имени ветки.
 PREVIOUS=$(git rev-parse HEAD)

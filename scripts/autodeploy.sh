@@ -27,6 +27,13 @@ source "$APP_DIR/scripts/notify-owner.sh"
 mkdir -p "$(dirname "$STATE_FILE")"
 cd "$APP_DIR" || exit 1
 
+# Файлы в /opt принадлежат чужому uid — их залили с макбука. Под systemd у
+# службы нет HOME, поэтому глобальный ~/.gitconfig не читается и git отказывает
+# с «dubious ownership». Объявляем каталог доверенным на время своих вызовов.
+export GIT_CONFIG_COUNT=1
+export GIT_CONFIG_KEY_0=safe.directory
+export GIT_CONFIG_VALUE_0="$APP_DIR"
+
 git fetch --prune -q origin "$BRANCH" || { echo "fetch не прошёл"; exit 1; }
 
 current=$(git rev-parse HEAD)
@@ -63,7 +70,7 @@ if [ "$code" -ne 0 ]; then
   notify "🔴 Проверки не прошли на ${short}: ${subject}
 
 Не выкатываю. Последние строки:
-$(tail -c 1500 "$log")"
+$(tail -n 20 "$log" | head -c 1500 | iconv -f UTF-8 -t UTF-8 -c)"
   rm -f "$log"
   exit 1
 fi
@@ -82,7 +89,7 @@ if [ "$deploy_code" -eq 0 ]; then
 else
   notify "‼️ Проверки прошли, но выкатка ${short} провалилась.
 
-$(tail -c 1500 "$deploy_log")"
+$(tail -n 20 "$deploy_log" | head -c 1500 | iconv -f UTF-8 -t UTF-8 -c)"
 fi
 rm -f "$deploy_log"
 exit "$deploy_code"
