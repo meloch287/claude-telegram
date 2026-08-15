@@ -1,7 +1,12 @@
 import { query, type Query, type SDKMessage, type SDKUserMessage, type PermissionMode } from "@anthropic-ai/claude-agent-sdk";
 import { MessageQueue } from "./queue.js";
 import { createPermissionBridge, flushChat, type PermissionBridgeHooks } from "./permissions.js";
-import { describeToolShort, chunk, formatUsd, formatDuration, esc, TELEGRAM_LIMIT } from "./render.js";
+import {
+  describeToolShort, chunk, formatUsd, formatDuration, esc,
+  splitCodeBlocks, codeBlockFileName,
+} from "./render.js";
+import { loadMcpServers } from "../mcp.js";
+import { snapshot, reportChanges, formatSize, type Snapshot } from "../bot/artifacts.js";
 import { credentialEnv, type Credential } from "../auth.js";
 import { activeProxyUrl } from "../proxy.js";
 import { config } from "../config.js";
@@ -19,6 +24,10 @@ export interface ConversationOutput {
   endStream(): Promise<void>;
   /** Пустой черновик: у клиента появляется встроенная заглушка «Thinking…». */
   startDraft(): Promise<void>;
+  /** Отдать файл с диска. */
+  document(path: string, caption?: string, fileName?: string): Promise<void>;
+  /** Отдать файлом текст, которого на диске нет. */
+  documentFromText(text: string, fileName: string, caption?: string): Promise<void>;
   typing(): Promise<void>;
   /** «Печатает…» на всё время работы: статус живёт 5 секунд и требует пульса. */
   startTyping(): void;
@@ -64,6 +73,14 @@ export interface RateLimitUpdate {
  * так же. Всё, что меняет файлы или запускает команды, уходит в кнопки.
  */
 const AUTO_APPROVED = ["Read", "Glob", "Grep", "TodoWrite", "WebSearch"];
+
+/**
+ * Скиллы и настройки берём из тех же источников, что обычный Claude Code:
+ * `user` — ~/.claude (скиллы и глобальные настройки), `project` — CLAUDE.md и
+ * .claude рабочей папки, `local` — личные правила проекта. Без этого поля SDK
+ * не читает ничего, и агент в боте отличался бы от агента в терминале.
+ */
+const SETTING_SOURCES = ["user", "project", "local"] as const;
 
 /**
  * Окружение подпроцесса. Лишний способ входа нужно именно удалить: если
@@ -141,6 +158,9 @@ export class Conversation {
   #lastTokens = 0;
   #lastCost = 0;
 
+  /** Состояние рабочей папки до задачи — чтобы понять, что агент создал. */
+  #before: Snapshot | null = null;
+
   constructor(deps: ConversationDeps) {
     this.#deps = deps;
     this.chatId = deps.chatId;
@@ -167,6 +187,13 @@ export class Conversation {
     this.#activity = [];
     this.#liveText = "";
     this.#lastText = text;
+    // Снимок до работы: по разнице после результата видно, какие файлы
+    // появились или изменились, и их можно вернуть в чат.
+    try {
+      this.#before = snapshot(this.#deps.cwd);
+    } catch {
+      this.#before = null;
+    }
     this.#queue.push({
       type: "user",
       message: { role: "user", content: text },
@@ -242,6 +269,9 @@ export class Conversation {
         canUseTool,
         ...(resumeSessionId ? { resume: resumeSessionId } : {}),
         systemPrompt: { type: "preset", preset: "claude_code", append: SYSTEM_APPEND },
+        // Скиллы, CLAUDE.md и правила проекта.
+        settingSources: [...SETTING_SOURCES],
+        mcpServers: loadMcpServers(),
         // Без этого SDK отдаёт только готовые сообщения, и в чате тишина всё
         // время, пока модель печатает.
         includePartialMessages: true,
@@ -310,6 +340,24 @@ export class Conversation {
         if (message.subtype === "init") {
           this.#sessionId = message.session_id;
           this.#deps.onSessionId(message.session_id);
+          return;
+        }
+        // Субагент — самая долгая часть работы, и без этого чат замирает на
+        // минуты без единого признака жизни.
+        if (message.subtype === "task_started") {
+          const started = message as unknown as { description?: string; subagent_type?: string };
+          const kind = started.subagent_type ? ` (${started.subagent_type})` : "";
+          this.#activity.push(`🤖 субагент${esc(kind)}: ${esc(started.description ?? "работает")}`);
+          await this.#renderActivity(true);
+          return;
+        }
+        if (message.subtype === "task_progress") {
+          const progress = message as unknown as { description?: string };
+          if (progress.description) {
+            this.#activity.push(`   ↳ ${esc(progress.description)}`);
+            await this.#renderActivity();
+          }
+          return;
         }
         return;
       }
@@ -334,7 +382,16 @@ export class Conversation {
             // Черновик живёт тридцать секунд и в историю не попадает, поэтому
             // готовый ответ обязательно досылаем обычным сообщением.
             await output.endStream();
-            for (const part of chunk(esc(full))) await output.send(part);
+            let fileIndex = 0;
+            for (const part of splitCodeBlocks(full)) {
+              if (part.kind === "file") {
+                fileIndex += 1;
+                const name = codeBlockFileName(part.language, fileIndex);
+                await output.documentFromText(part.body, name, `📄 <code>${esc(name)}</code>`);
+                continue;
+              }
+              for (const piece of chunk(esc(part.body))) await output.send(piece);
+            }
             this.#liveText = "";
           } else if (block.type === "tool_use") {
             this.#activity.push(
@@ -387,6 +444,8 @@ export class Conversation {
         if (message.subtype !== "success" && "result" in message && message.result) {
           await output.send(esc(String(message.result).slice(0, 1000)));
         }
+
+        await this.#offerArtifacts();
         return;
       }
 
@@ -395,11 +454,60 @@ export class Conversation {
     }
   }
 
+  /**
+   * Файлы, появившиеся за задачу. Раньше результат оставался на сервере, и
+   * забрать его можно было только через git.
+   */
+  async #offerArtifacts(): Promise<void> {
+    const before = this.#before;
+    this.#before = null;
+    if (!before) return;
+
+    let report;
+    try {
+      report = reportChanges(this.#deps.cwd, before);
+    } catch {
+      return;
+    }
+
+    // Массовая операция: клон, установка зависимостей, сборка. Слать это в чат
+    // бессмысленно, но и промолчать нельзя — пользователь должен знать, что в
+    // папке что-то большое произошло.
+    if (report.bulk) {
+      await this.#deps.output.send(
+        `📁 В проекте изменилось ${report.total} файлов — похоже на клон или сборку, в чат не тащу. Нужен конкретный: /file &lt;путь&gt;`,
+      );
+      return;
+    }
+
+    const files = report.files;
+    if (files.length === 0) return;
+
+    // Сыпать в чат десяток файлов подряд — шум. Один-два отдаём сразу,
+    // остальные перечисляем: забрать можно командой /file.
+    const send = files.slice(0, 2);
+    for (const file of send) {
+      await this.#deps.output.document(
+        file.absolute,
+        `${file.isNew ? "🆕" : "✏️"} <code>${esc(file.relative)}</code> · ${formatSize(file.size)}`,
+        file.relative.split("/").pop(),
+      );
+    }
+
+    const rest = files.slice(2);
+    if (rest.length > 0) {
+      const list = rest.map((f) => `• <code>${esc(f.relative)}</code> · ${formatSize(f.size)}`);
+      await this.#deps.output.send(
+        `Ещё изменилось:\n${list.join("\n")}\n\nЗабрать: /file &lt;путь&gt;`,
+      );
+    }
+  }
+
   #lastRender = 0;
-  async #renderActivity(): Promise<void> {
+  async #renderActivity(force = false): Promise<void> {
     // Telegram душит частые правки сообщений; полторы секунды — безопасный шаг.
     const now = Date.now();
-    if (now - this.#lastRender < 1500) return;
+    if (!force && now - this.#lastRender < 1500) return;
     this.#lastRender = now;
     const tail = this.#activity.slice(-6);
     const more = this.#activity.length - tail.length;

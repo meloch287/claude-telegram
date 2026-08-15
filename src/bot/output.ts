@@ -1,5 +1,5 @@
 import type { Api } from "grammy";
-import { GrammyError } from "grammy";
+import { GrammyError, InputFile } from "grammy";
 import type { ConversationOutput } from "../agent/conversation.js";
 import type { PendingPermission, PendingQuestion, PermissionBridgeHooks } from "../agent/permissions.js";
 import { permissionKeyboard, questionKeyboard } from "./keyboards.js";
@@ -104,6 +104,32 @@ export class TelegramOutput implements ConversationOutput {
     this.#draftId = null;
     this.#streamShown = "";
     this.#lastStreamEdit = 0;
+  }
+
+  /**
+   * Отдать файл. Так возвращаются результаты работы и длинные куски кода: в
+   * сообщении они всё равно не помещаются, а файл открывается и сохраняется.
+   */
+  async document(path: string, caption?: string, fileName?: string): Promise<void> {
+    try {
+      await this.#api.sendDocument(this.#chatId, new InputFile(path, fileName), {
+        ...(caption ? { caption, parse_mode: "HTML" as const } : {}),
+      });
+    } catch (error) {
+      console.error(`[output:${this.#chatId}] document failed:`, error);
+      await this.send(`⚠️ Не смог отправить <code>${esc(fileName ?? path)}</code>.`);
+    }
+  }
+
+  /** То же, но для содержимого, которого нет на диске. */
+  async documentFromText(text: string, fileName: string, caption?: string): Promise<void> {
+    try {
+      await this.#api.sendDocument(this.#chatId, new InputFile(Buffer.from(text, "utf8"), fileName), {
+        ...(caption ? { caption, parse_mode: "HTML" as const } : {}),
+      });
+    } catch (error) {
+      console.error(`[output:${this.#chatId}] document failed:`, error);
+    }
   }
 
   async status(html: string): Promise<void> {

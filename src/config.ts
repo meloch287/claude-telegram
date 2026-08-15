@@ -75,6 +75,17 @@ export const config = {
   proxyRequireCountry: optional("PROXY_REQUIRE_COUNTRY", ""),
   /** Токен GitHub: им клонируются приватные репозитории и работает gh. */
   githubToken: optional("GITHUB_TOKEN", ""),
+
+  /**
+   * Расшифровка голосовых. Адрес сервиса с интерфейсом OpenAI
+   * (POST /v1/audio/transcriptions). Пусто — бот честно скажет, что не настроено.
+   */
+  whisperUrl: optional("WHISPER_URL", ""),
+  whisperModel: optional("WHISPER_MODEL", ""),
+  whisperToken: optional("WHISPER_TOKEN", ""),
+
+  /** Файл с описанием MCP-серверов в формате Claude Code. */
+  mcpConfigPath: optional("MCP_CONFIG", ""),
 } as const;
 
 if (config.authMode === "owner" && !config.ownerApiKey) {

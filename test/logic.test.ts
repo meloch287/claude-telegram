@@ -13,7 +13,8 @@ const { encrypt, decrypt, maskKey, verifyInitData } = await import("../src/crypt
 const { MessageQueue } = await import("../src/agent/queue.js");
 const { catForTokens, nextCat, catProgress, CAT_LEVELS } = await import("../src/cats.js");
 const { sanitizeProject, workspaceFor } = await import("../src/bot/session.js");
-const { chunk, truncate } = await import("../src/agent/render.js");
+const { chunk, truncate, splitCodeBlocks, codeBlockFileName } = await import("../src/agent/render.js");
+const { snapshot, changedSince, formatSize } = await import("../src/bot/artifacts.js");
 
 test("шифрование ключей: круговой рейс", () => {
   const original = "sk-ant-api03-abcdefghijklmnopqrstuvwxyz";
@@ -283,4 +284,108 @@ test("токен из адреса репозитория не утекает в
   const masked = hideToken("fatal: не удалось https://ghp_SECRET123@github.com/user/repo");
   assert.ok(!masked.includes("ghp_SECRET123"));
   assert.ok(masked.includes("github.com/user/repo"));
+});
+
+// ── Длинный код уходит файлом ────────────────────────────────────────────────
+
+test("короткий блок кода остаётся в сообщении", () => {
+  const text = "Вот исправление:\n```ts\nconst a = 1;\n```\nГотово.";
+  const parts = splitCodeBlocks(text);
+  assert.equal(parts.length, 1);
+  assert.equal(parts[0]?.kind, "text");
+});
+
+test("длинный блок кода отделяется в файл", () => {
+  const body = "const x = 1;\n".repeat(200);
+  const parts = splitCodeBlocks(`Смотри:\n\`\`\`ts\n${body}\`\`\`\nВсё.`);
+  const kinds = parts.map((p) => p.kind);
+  assert.deepEqual(kinds, ["text", "file", "text"]);
+  assert.equal(parts[1]?.language, "ts");
+  assert.ok(parts[1]?.body.includes("const x = 1;"));
+});
+
+test("имя файла берётся из языка блока", () => {
+  assert.equal(codeBlockFileName("python", 1), "фрагмент-1.py");
+  assert.equal(codeBlockFileName("typescript", 2), "фрагмент-2.ts");
+  assert.equal(codeBlockFileName(undefined, 3), "фрагмент-3.txt");
+});
+
+// ── Файлы, созданные агентом ─────────────────────────────────────────────────
+
+test("новые и изменённые файлы находятся, нетронутые — нет", async () => {
+  const { mkdtempSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+
+  const root = mkdtempSync(join(tmpdir(), "артефакты-"));
+  writeFileSync(join(root, "старый.txt"), "было");
+  const before = snapshot(root);
+
+  writeFileSync(join(root, "новый.md"), "результат работы");
+  // Разрешение mtime на некоторых файловых системах — секунда, поэтому
+  // изменение помечаем явным временем, а не надеемся на часы.
+  const { utimesSync } = await import("node:fs");
+  utimesSync(join(root, "старый.txt"), new Date(), new Date(Date.now() + 5000));
+
+  const changed = changedSince(root, before);
+  const names = changed.map((f) => f.relative).sort();
+  assert.deepEqual(names, ["новый.md", "старый.txt"]);
+  // Новые идут первыми: они интереснее.
+  assert.equal(changed[0]?.relative, "новый.md");
+  assert.equal(changed[0]?.isNew, true);
+});
+
+test("зависимости в отпечаток не попадают", async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+
+  const root = mkdtempSync(join(tmpdir(), "артефакты-"));
+  mkdirSync(join(root, "node_modules"));
+  writeFileSync(join(root, "node_modules", "пакет.js"), "x");
+  writeFileSync(join(root, "мой.js"), "x");
+
+  const seen = [...snapshot(root).keys()];
+  assert.deepEqual(seen, ["мой.js"]);
+});
+
+test("размер файла читается по-русски", () => {
+  assert.equal(formatSize(512), "512 Б");
+  assert.equal(formatSize(2048), "2 КБ");
+  assert.equal(formatSize(3 * 1024 * 1024), "3.0 МБ");
+});
+
+// ── /file не выпускает за пределы проекта ────────────────────────────────────
+
+test("путь наружу рабочей папки отбивается", async () => {
+  const { resolve, sep } = await import("node:path");
+  const cwd = "/workspaces/пользователь/проект";
+  const inside = (requested: string) => {
+    const target = resolve(cwd, requested);
+    return target === cwd || target.startsWith(cwd + sep);
+  };
+
+  assert.equal(inside("отчёт.md"), true);
+  assert.equal(inside("вложенная/папка/файл.ts"), true);
+  assert.equal(inside("../../.env"), false);
+  assert.equal(inside("/etc/passwd"), false);
+  // Ловушка на префикс: соседняя папка начинается так же, но это не наша.
+  assert.equal(inside("../проект-чужой/секрет"), false);
+});
+
+test("массовая операция не выдаётся за результат работы", async () => {
+  const { mkdtempSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { reportChanges } = await import("../src/bot/artifacts.js");
+
+  const root = mkdtempSync(join(tmpdir(), "клон-"));
+  const before = snapshot(root);
+  // Клон репозитория выглядит именно так: много файлов разом.
+  for (let i = 0; i < 60; i += 1) writeFileSync(join(root, `файл-${i}.ts`), "x");
+
+  const report = reportChanges(root, before);
+  assert.equal(report.bulk, true);
+  assert.equal(report.total, 60);
+  assert.deepEqual(report.files, [], "при массовой операции файлы в чат не идут");
 });

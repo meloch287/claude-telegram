@@ -13,6 +13,16 @@ import type { PendingPermission, PendingQuestion } from "../agent/permissions.js
  */
 
 export function permissionKeyboard(pending: PendingPermission): InlineKeyboard {
+  // Утверждение плана — не «разрешение инструменту», а решение по существу.
+  // Слова «Разрешить ExitPlanMode» тут ничего не объясняют.
+  if (pending.toolName === "ExitPlanMode") {
+    return new InlineKeyboard()
+      .text("✅ План принят, работай", `p:${pending.id}:a`)
+      .row()
+      .text("✍️ Поправить план", `p:${pending.id}:c`)
+      .text("⏹️ Отмена", `p:${pending.id}:s`);
+  }
+
   const kb = new InlineKeyboard()
     .text("✅ Разрешить", `p:${pending.id}:a`)
     .text("🚫 Отклонить", `p:${pending.id}:d`)

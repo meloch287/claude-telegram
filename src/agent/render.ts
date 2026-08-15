@@ -108,21 +108,46 @@ export function describeToolDetailed(
     case "Write": {
       const path = str(input, "file_path") ?? "";
       const content = str(input, "content") ?? "";
-      return `Файл: ${code(path)}\nРазмер: ${content.length} символов\n\n${pre(truncate(content, 800))}`;
+      const lines = content.split("\n");
+      return (
+        `Файл: ${code(shortPath(path))}\n` +
+        `<b>${lines.length}</b> строк, ${content.length} символов\n\n` +
+        pre(truncate(lines.slice(0, 12).join("\n"), 700))
+      );
     }
     case "Edit": {
       const path = str(input, "file_path") ?? "";
-      const oldStr = str(input, "old_string") ?? "";
-      const newStr = str(input, "new_string") ?? "";
-      const diff = [
-        ...oldStr.split("\n").slice(0, 12).map((l) => `- ${l}`),
-        ...newStr.split("\n").slice(0, 12).map((l) => `+ ${l}`),
+      const oldLines = (str(input, "old_string") ?? "").split("\n");
+      const newLines = (str(input, "new_string") ?? "").split("\n");
+      // Полный дифф на телефоне разъезжается и тонет. Показываем сводку и
+      // несколько первых строк — этого хватает, чтобы решить, разрешать ли.
+      const head = [
+        ...oldLines.slice(0, 4).map((l) => `- ${truncate(l, 90)}`),
+        ...newLines.slice(0, 4).map((l) => `+ ${truncate(l, 90)}`),
       ].join("\n");
-      return `Файл: ${code(path)}\n\n${pre(truncate(diff, 900), "diff")}`;
+      const rest = oldLines.length + newLines.length - 8;
+      const tail = rest > 0 ? `\n… ещё ${rest} строк(и)` : "";
+      return (
+        `Файл: ${code(shortPath(path))}\n` +
+        `<b>−${oldLines.length}</b> / <b>+${newLines.length}</b> строк\n\n` +
+        pre(`${head}${tail}`, "diff")
+      );
     }
     case "Read": {
       const path = str(input, "file_path") ?? "";
       return `Прочитать ${code(path)}`;
+    }
+    case "ExitPlanMode": {
+      // План написан для чтения человеком: JSON-дамп здесь бесполезен.
+      const plan = str(input, "plan") ?? "";
+      return esc(truncate(plan, 3000));
+    }
+    case "Task": {
+      const description = str(input, "description") ?? "";
+      const type = str(input, "subagent_type");
+      const prompt = str(input, "prompt") ?? "";
+      const who = type ? ` (${esc(type)})` : "";
+      return `Запустить субагента${who}: <b>${esc(description)}</b>\n\n${pre(truncate(prompt, 700))}`;
     }
     case "WebFetch":
       return `Загрузить ${code(str(input, "url") ?? "")}`;
@@ -150,4 +175,52 @@ export function formatDuration(ms: number): string {
   if (seconds < 60) return `${seconds} с`;
   const minutes = Math.floor(seconds / 60);
   return `${minutes} мин ${seconds % 60} с`;
+}
+
+/**
+ * Длинный текст лучше отдать файлом, чем ломать о лимит сообщения: код в
+ * мобильном клиенте всё равно разъезжается, а файл открывается и сохраняется.
+ */
+export const SEND_AS_FILE_OVER = 1800;
+
+/** Имя для такого файла: по языку из ограждения, иначе просто txt. */
+export function codeBlockFileName(language: string | undefined, index: number): string {
+  const extensions: Record<string, string> = {
+    ts: "ts", typescript: "ts", js: "js", javascript: "js", py: "py", python: "py",
+    sh: "sh", bash: "sh", json: "json", yaml: "yml", yml: "yml", sql: "sql",
+    html: "html", css: "css", go: "go", rust: "rs", rs: "rs", java: "java",
+  };
+  const extension = extensions[(language ?? "").toLowerCase()] ?? "txt";
+  return `фрагмент-${index}.${extension}`;
+}
+
+export interface SplitPart {
+  kind: "text" | "file";
+  body: string;
+  language?: string;
+}
+
+/**
+ * Разбирает ответ на текст и длинные блоки кода. Короткие блоки остаются
+ * в сообщении: отдавать файлом три строки — издевательство.
+ */
+export function splitCodeBlocks(text: string): SplitPart[] {
+  const parts: SplitPart[] = [];
+  const fence = /```(\w+)?\n([\s\S]*?)```/g;
+  let last = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = fence.exec(text)) !== null) {
+    const [full, language, body] = match;
+    if (body !== undefined && body.length > SEND_AS_FILE_OVER) {
+      const before = text.slice(last, match.index).trim();
+      if (before) parts.push({ kind: "text", body: before });
+      parts.push({ kind: "file", body, language });
+      last = match.index + full.length;
+    }
+  }
+
+  const rest = text.slice(last).trim();
+  if (rest) parts.push({ kind: "text", body: rest });
+  return parts.length > 0 ? parts : [{ kind: "text", body: text }];
 }

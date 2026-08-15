@@ -1,4 +1,6 @@
-import { Bot, GrammyError, HttpError, InlineKeyboard, type CommandContext, type Context } from "grammy";
+import { Bot, GrammyError, HttpError, InlineKeyboard, InputFile, type CommandContext, type Context } from "grammy";
+import { statSync } from "node:fs";
+import { basename, resolve, sep } from "node:path";
 import { listSessions, type PermissionMode } from "@anthropic-ai/claude-agent-sdk";
 import { config } from "./config.js";
 import {
@@ -47,6 +49,8 @@ import { checkAchievements, renderUnlocked, unlockedIds } from "./achievements.j
 import { ACHIEVEMENTS, CAT_LEVELS, catForTokens, formatTokens, nextCat } from "./cats.js";
 import { esc, formatUsd } from "./agent/render.js";
 import { saveTelegramFile } from "./bot/attachments.js";
+import { transcribe, transcriptionConfigured, TranscriptionNotConfigured } from "./bot/voice.js";
+import { formatSize } from "./bot/artifacts.js";
 import { cloneRepository } from "./bot/repos.js";
 import { startMiniAppServer } from "./miniapp/server.js";
 import {
@@ -129,6 +133,70 @@ bot.callbackQuery(/^auth:(subscription|api)$/, async (ctx) => {
 bot.command("new", async (ctx) => {
   await resetSession(ctx.chat.id, ctx.from!.id);
   await ctx.reply("🧹 Прошлый чат закрыт. Следующее сообщение начнёт новый.");
+});
+
+/** Привычное имя из Claude Code — делает то же, что /new. */
+bot.command("clear", async (ctx) => {
+  await resetSession(ctx.chat.id, ctx.from!.id);
+  await ctx.reply("🧹 Контекст очищен. Следующее сообщение начнёт новый чат.");
+});
+
+/**
+ * Сжать контекст. Claude Code разбирает слэш-команды сам, если прислать их
+ * обычной репликой, — поэтому просто передаём её в живую сессию, а не
+ * изобретаем своё сжатие.
+ */
+bot.command("compact", async (ctx) => {
+  const session = getSession(ctx.chat.id);
+  if (!session) {
+    await ctx.reply("Сжимать нечего: живого чата сейчас нет.");
+    return;
+  }
+  const hint = ctx.match?.toString().trim() ?? "";
+  await ctx.reply("🗜️ Сжимаю контекст…");
+  await session.conversation.send(hint ? `/compact ${hint}` : "/compact");
+});
+
+/** Забрать файл из рабочей папки проекта. */
+bot.command("file", async (ctx) => {
+  const userId = ctx.from!.id;
+  const requested = ctx.match?.toString().trim() ?? "";
+  if (!requested) {
+    await ctx.reply("Укажи путь: <code>/file отчёт.md</code>", { parse_mode: "HTML" });
+    return;
+  }
+
+  const chatRow = getChat(ctx.chat.id);
+  const cwd = workspaceFor(userId, chatRow?.project ?? "default");
+  const target = resolve(cwd, requested);
+
+  // Выход за пределы рабочей папки закрыт: иначе /file ../../.env отдал бы
+  // ключи всем, у кого есть доступ к боту.
+  if (target !== cwd && !target.startsWith(cwd + sep)) {
+    await ctx.reply("⛔ Только файлы внутри проекта.");
+    return;
+  }
+
+  let info;
+  try {
+    info = statSync(target);
+  } catch {
+    await ctx.reply(`Не нашёл <code>${esc(requested)}</code>.`, { parse_mode: "HTML" });
+    return;
+  }
+  if (!info.isFile()) {
+    await ctx.reply("Это не файл.");
+    return;
+  }
+  if (info.size > 50 * 1024 * 1024) {
+    await ctx.reply(`Файл ${formatSize(info.size)} — Telegram не пропустит больше 50 МБ.`);
+    return;
+  }
+
+  await ctx.replyWithDocument(new InputFile(target, basename(target)), {
+    caption: `<code>${esc(requested)}</code> · ${formatSize(info.size)}`,
+    parse_mode: "HTML",
+  });
 });
 
 bot.command("stop", async (ctx) => {
@@ -545,6 +613,141 @@ bot.on(["message:photo", "message:document"], async (ctx) => {
   }
 });
 
+/**
+ * Голосовые. Раньше их просто не существовало для бота: отправишь — и тишина,
+ * будто он сломался. Теперь либо расшифровываем и работаем как с текстом, либо
+ * честно говорим, что расшифровка не подключена.
+ */
+bot.on(["message:voice", "message:audio"], async (ctx) => {
+  const userId = ctx.from.id;
+  const chatId = ctx.chat.id;
+
+  if (!getCredential(userId)) {
+    await sendStart(ctx);
+    return;
+  }
+
+  if (!transcriptionConfigured()) {
+    await ctx.reply(
+      "🎤 Голосовые пока не расшифровываю: не задан <code>WHISPER_URL</code>.\n\n" +
+        "Подключи любой сервис с интерфейсом OpenAI — и я начну их понимать. Пока напиши текстом.",
+      { parse_mode: "HTML" },
+    );
+    return;
+  }
+
+  const voice = ctx.message.voice ?? ctx.message.audio;
+  if (!voice) return;
+
+  const note = await ctx.reply("🎤 Слушаю…");
+  let text: string;
+  try {
+    const file = await ctx.api.getFile(voice.file_id);
+    if (!file.file_path) throw new Error("Telegram не отдал путь к файлу");
+    const url = `https://api.telegram.org/file/bot${config.botToken}/${file.file_path}`;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`не скачать голосовое: HTTP ${response.status}`);
+    const audio = Buffer.from(await response.arrayBuffer());
+    text = await transcribe(audio, file.file_path.split("/").pop() ?? "voice.ogg");
+  } catch (error) {
+    const message =
+      error instanceof TranscriptionNotConfigured
+        ? "расшифровка не настроена"
+        : error instanceof Error
+          ? error.message
+          : String(error);
+    await ctx.api.editMessageText(chatId, note.message_id, `⚠️ Не разобрал голосовое: ${message}`);
+    return;
+  }
+
+  // Показываем расшифровку: если распознало неверно, это видно сразу, а не по
+  // странному ответу агента.
+  await ctx.api.editMessageText(chatId, note.message_id, `🎤 <i>${esc(text)}</i>`, {
+    parse_mode: "HTML",
+  });
+
+  recordMessage(userId);
+  try {
+    const session = ensureSession({
+      api: ctx.api,
+      chatId,
+      userId,
+      notify: (html) => ctx.reply(html, { parse_mode: "HTML" }),
+    });
+    await session.conversation.send(text);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await ctx.reply(`⚠️ Не смог запустить агента: ${esc(message)}`, { parse_mode: "HTML" });
+  }
+});
+
+/**
+ * Кто написал пересланное сообщение.
+ *
+ * Без подписи агент видит текст без источника и отвечает не на то: «переведи»
+ * и «ответь ему» требуют знать, чья это реплика.
+ */
+function forwardAuthor(origin: NonNullable<Parameters<typeof describeOrigin>[0]>): string {
+  return describeOrigin(origin);
+}
+
+function describeOrigin(origin: {
+  type: string;
+  sender_user?: { first_name: string; last_name?: string; username?: string };
+  sender_user_name?: string;
+  sender_chat?: { title?: string };
+  chat?: { title?: string };
+}): string {
+  switch (origin.type) {
+    case "user": {
+      const user = origin.sender_user;
+      const name = [user?.first_name, user?.last_name].filter(Boolean).join(" ");
+      return user?.username ? `${name} (@${user.username})` : name || "кто-то";
+    }
+    case "hidden_user":
+      return origin.sender_user_name ?? "скрытый отправитель";
+    case "chat":
+      return origin.sender_chat?.title ?? "чат";
+    case "channel":
+      return origin.chat?.title ?? "канал";
+    default:
+      return "неизвестный источник";
+  }
+}
+
+/**
+ * Пересылки копятся секунду и уходят агенту одним куском.
+ *
+ * Telegram шлёт каждое пересланное сообщение отдельным обновлением, и без
+ * буфера пересылка переписки из пяти реплик запускала бы пять задач подряд,
+ * каждая со своим обрывком.
+ */
+const FORWARD_WINDOW_MS = 1200;
+const forwardBuffers = new Map<number, { lines: string[]; timer: NodeJS.Timeout }>();
+
+function bufferForward(
+  chatId: number,
+  line: string,
+  flush: (text: string, count: number) => Promise<void>,
+): void {
+  const existing = forwardBuffers.get(chatId);
+  if (existing) {
+    clearTimeout(existing.timer);
+    existing.lines.push(line);
+  }
+  const lines = existing?.lines ?? [line];
+  const timer = setTimeout(() => {
+    forwardBuffers.delete(chatId);
+    const body =
+      lines.length === 1
+        ? `Пересланное сообщение:\n\n${lines[0]}`
+        : `Пересланная переписка (${lines.length} сообщени(й)):\n\n${lines.join("\n\n")}`;
+    void flush(body, lines.length);
+  }, FORWARD_WINDOW_MS);
+  timer.unref?.();
+  forwardBuffers.set(chatId, { lines, timer });
+}
+
 bot.on("message:text", async (ctx) => {
   const userId = ctx.from.id;
   const chatId = ctx.chat.id;
@@ -586,7 +789,31 @@ bot.on("message:text", async (ctx) => {
     return;
   }
 
-  // 4. Обычная реплика агенту.
+  // 4. Пересылка: подписываем автора и копим серию в один кусок.
+  const origin = ctx.message.forward_origin;
+  if (origin) {
+    bufferForward(chatId, `[${forwardAuthor(origin)}]: ${text}`, async (body, count) => {
+      recordMessage(userId);
+      try {
+        const session = ensureSession({
+          api: ctx.api,
+          chatId,
+          userId,
+          notify: (html) => ctx.reply(html, { parse_mode: "HTML" }),
+        });
+        await ctx.reply(
+          count === 1 ? "📨 Принял пересланное." : `📨 Принял ${count} пересланных сообщений.`,
+        );
+        await session.conversation.send(body);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        await ctx.reply(`⚠️ Не смог запустить агента: ${esc(message)}`, { parse_mode: "HTML" });
+      }
+    });
+    return;
+  }
+
+  // 5. Обычная реплика агенту.
   // Чат без названия — новый. Называем его первой репликой: так в /resume и
   // /status видно, о чём он, а не безликий идентификатор сессии.
   const chatRow = getChat(chatId);
@@ -646,6 +873,9 @@ await bot.api.setMyCommands([
   { command: "menu", description: "главное меню" },
   { command: "resume", description: "прошлые чаты" },
   { command: "new", description: "начать заново" },
+  { command: "clear", description: "очистить контекст" },
+  { command: "compact", description: "сжать контекст" },
+  { command: "file", description: "забрать файл из проекта" },
   { command: "stop", description: "остановить агента" },
   { command: "mode", description: "режим разрешений" },
   { command: "model", description: "сменить модель" },
