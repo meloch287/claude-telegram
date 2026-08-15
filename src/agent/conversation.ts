@@ -72,7 +72,24 @@ export interface RateLimitUpdate {
  * Читающие инструменты одобряются молча — в терминале Claude Code ведёт себя
  * так же. Всё, что меняет файлы или запускает команды, уходит в кнопки.
  */
-const AUTO_APPROVED = ["Read", "Glob", "Grep", "TodoWrite", "WebSearch"];
+const AUTO_APPROVED = [
+  "Read",
+  "Glob",
+  "Grep",
+  "TodoWrite",
+  "WebSearch",
+  // Серверы MCP из mcp.json только читают: context7 отдаёт документацию
+  // библиотек, deepwiki — разбор публичных репозиториев. Спрашивать на каждый
+  // такой запрос — тот же шум, что и подтверждать Read.
+  //
+  // Имена перечислены поимённо, а не шаблоном: новый сервер должен сначала
+  // спросить разрешение, а не получить его молча по совпадению префикса.
+  "mcp__context7__query-docs",
+  "mcp__context7__resolve-library-id",
+  "mcp__deepwiki__ask_question",
+  "mcp__deepwiki__read_wiki_contents",
+  "mcp__deepwiki__read_wiki_structure",
+];
 
 /**
  * Скиллы и настройки берём из тех же источников, что обычный Claude Code:
