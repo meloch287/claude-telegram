@@ -37,9 +37,7 @@ const SCREENS: Record<ScreenId, Screen> = {
   menu: {
     render({ userId }) {
       const user = getOrCreateUser(userId);
-      const status = user.auth_kind
-        ? `Вход: ${describeKind(user.auth_kind)}`
-        : "Вход не выполнен";
+      const status = user.auth_kind ? `Вход: ${describeKind(user.auth_kind)}` : "Вход не выполнен";
 
       // Мини-апп живёт на кнопке меню Telegram, рядом с полем ввода.
       // Дублировать его инлайн-кнопкой незачем: она уезжает вверх с историей.
@@ -59,9 +57,7 @@ const SCREENS: Record<ScreenId, Screen> = {
     parent: "menu",
     render({ userId }) {
       const user = getOrCreateUser(userId);
-      const current = user.auth_kind
-        ? `Сейчас: ${describeKind(user.auth_kind)}\n\n`
-        : "";
+      const current = user.auth_kind ? `Сейчас: ${describeKind(user.auth_kind)}\n\n` : "";
 
       const keyboard = new InlineKeyboard()
         .text("🎫 Подписка Claude", "auth:subscription")

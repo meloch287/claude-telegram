@@ -1,4 +1,12 @@
-import { Bot, GrammyError, HttpError, InlineKeyboard, InputFile, type CommandContext, type Context } from "grammy";
+import {
+  Bot,
+  GrammyError,
+  HttpError,
+  InlineKeyboard,
+  InputFile,
+  type CommandContext,
+  type Context,
+} from "grammy";
 import { statSync, readdirSync } from "node:fs";
 import { basename, join, resolve, sep } from "node:path";
 import { listSessions, type PermissionMode } from "@anthropic-ai/claude-agent-sdk";
@@ -72,6 +80,12 @@ import {
   setActiveChannel,
   startChannelWatch,
 } from "./proxy.js";
+import { startFileLog, tailLog } from "./log.js";
+
+// Раньше всего остального: иначе первые же строки о выборе канала и о том,
+// что пошло не так на старте, в файл не попадут — а именно они нужны, когда
+// бот не поднялся.
+startFileLog();
 
 const bot = new Bot(config.botToken);
 
@@ -160,7 +174,8 @@ bot.callbackQuery("auth:logout", async (ctx) => {
   await resetSession(ctx.chat!.id, userId);
   await ctx.answerCallbackQuery("Доступ удалён");
   const view = renderScreen("auth", { userId, chatId: ctx.chat!.id });
-  await ctx.editMessageText(view.text, { parse_mode: "HTML", reply_markup: view.keyboard })
+  await ctx
+    .editMessageText(view.text, { parse_mode: "HTML", reply_markup: view.keyboard })
     .catch(() => undefined);
 });
 
@@ -438,7 +453,6 @@ bot.command("clone", async (ctx) => {
   }
 });
 
-
 // ── Git прямо из чата ────────────────────────────────────────────────────────
 // Клон уже был, но всё остальное приходилось просить агента словами. Эти четыре
 // команды закрывают обычный круг: посмотреть, закоммитить, отправить, открыть PR.
@@ -536,10 +550,9 @@ bot.command("commit", async (ctx) => {
 
     if (given) {
       const hash = await commitAll(repo, given);
-      await ctx.reply(
-        `✅ Коммит <code>${esc(hash)}</code>\n\n${esc(given)}\n\nОтправить: /push`,
-        { parse_mode: "HTML" },
-      );
+      await ctx.reply(`✅ Коммит <code>${esc(hash)}</code>\n\n${esc(given)}\n\nОтправить: /push`, {
+        parse_mode: "HTML",
+      });
       return;
     }
 
@@ -677,6 +690,39 @@ bot.command("project", async (ctx) => {
 });
 
 // ── Статистика и коты ────────────────────────────────────────────────────────
+
+/**
+ * Хвост собственного лога в чат.
+ *
+ * Только владельцу: в логе видно, кто и что писал боту, включая чужие чаты,
+ * если их когда-нибудь пустят. Первый в ALLOWED_USER_IDS и есть владелец.
+ */
+bot.command("logs", async (ctx) => {
+  const owner = config.allowedUserIds[0];
+  if (owner === undefined || ctx.from!.id !== owner) {
+    await ctx.reply("Лог отдаю только владельцу бота.");
+    return;
+  }
+
+  const asked = Number.parseInt(ctx.match?.toString().trim() ?? "", 10);
+  const lines = Number.isFinite(asked) ? Math.min(Math.max(asked, 1), 2000) : 60;
+  const tail = tailLog(lines);
+
+  if (!tail) {
+    await ctx.reply("Лог пока пуст — бот только что стартовал.");
+    return;
+  }
+
+  // В сообщение влезает немного, а хвост в двести строк уже не влезает совсем.
+  // Короткий отдаём текстом, чтобы читалось без скачивания; длинный — файлом.
+  if (tail.length <= 3500) {
+    await ctx.reply(`<pre>${esc(tail)}</pre>`, { parse_mode: "HTML" });
+    return;
+  }
+  await ctx.replyWithDocument(new InputFile(Buffer.from(tail, "utf8"), "bot.log"), {
+    caption: `Последние ${tail.split("\n").length} строк лога`,
+  });
+});
 
 bot.command("stats", async (ctx) => {
   const userId = ctx.from!.id;
@@ -831,7 +877,10 @@ bot.callbackQuery(/^p:([^:]+):(.+)$/, async (ctx) => {
   }
 
   const toolName = pending.toolName;
-  const decisions: Record<string, { label: string; kind: "allow" | "allow_always" | "deny" | "stop" }> = {
+  const decisions: Record<
+    string,
+    { label: string; kind: "allow" | "allow_always" | "deny" | "stop" }
+  > = {
     a: { label: "✅ Разрешено", kind: "allow" },
     w: { label: "♾️ Разрешено навсегда", kind: "allow_always" },
     d: { label: "🚫 Отклонено", kind: "deny" },
@@ -971,14 +1020,12 @@ bot.on(["message:photo", "message:document"], async (ctx) => {
 bot.on(["message:video", "message:video_note", "message:animation"], async (ctx) => {
   if (!(await requireLogin(ctx))) return;
 
-  const media =
-    ctx.message.video ?? ctx.message.video_note ?? ctx.message.animation;
+  const media = ctx.message.video ?? ctx.message.video_note ?? ctx.message.animation;
   if (!media) return;
 
   const chatRow = getChat(ctx.chat.id);
   const cwd = workspaceFor(ctx.from.id, chatRow?.project ?? "default");
-  const suggested =
-    ("file_name" in media && media.file_name) || `видео-${Date.now()}.mp4`;
+  const suggested = ("file_name" in media && media.file_name) || `видео-${Date.now()}.mp4`;
 
   let saved;
   try {
@@ -1280,6 +1327,7 @@ await bot.api.setMyCommands([
   { command: "stats", description: "расход и мой кот" },
   { command: "cats", description: "коты и достижения" },
   { command: "status", description: "канал выхода и лимиты" },
+  { command: "logs", description: "хвост лога (владельцу)" },
   { command: "logout", description: "удалить доступ" },
   { command: "help", description: "справка" },
 ]);
@@ -1292,8 +1340,11 @@ const choice = await chooseChannel(parsePool(config.proxyPool), {
 setActiveChannel(choice.active);
 for (const status of choice.checked) {
   const mark = status.reachable ? "✅" : "❌";
-  const code = status.httpStatus === null ? status.error ?? "нет ответа" : `HTTP ${status.httpStatus}`;
-  console.log(`${mark} ${status.candidate.label}: ${code}${status.country ? ` · ${status.country}` : ""}`);
+  const code =
+    status.httpStatus === null ? (status.error ?? "нет ответа") : `HTTP ${status.httpStatus}`;
+  console.log(
+    `${mark} ${status.candidate.label}: ${code}${status.country ? ` · ${status.country}` : ""}`,
+  );
 }
 if (choice.active) {
   console.log(`🌍 Выход: ${describeChannel(choice.active)}`);

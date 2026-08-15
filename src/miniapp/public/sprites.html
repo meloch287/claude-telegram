@@ -4,14 +4,45 @@
     <meta charset="utf-8" />
     <title>Спрайты котов — предпросмотр</title>
     <style>
-      body { background: #FAF9F5; color: #141413; font: 14px system-ui; margin: 0; padding: 24px; }
-      h1 { font: 600 20px Georgia, serif; }
-      .grid { display: flex; flex-wrap: wrap; gap: 20px; }
-      figure { margin: 0; text-align: center; }
-      figure img, figure div { display: block; }
-      .big { border: 1px solid #E2D8C8; border-radius: 10px; background: #fff; padding: 8px; }
-      figcaption { margin-top: 6px; font-size: 12px; max-width: 160px; }
-      .dark { background: #141413; }
+      body {
+        background: #faf9f5;
+        color: #141413;
+        font: 14px system-ui;
+        margin: 0;
+        padding: 24px;
+      }
+      h1 {
+        font:
+          600 20px Georgia,
+          serif;
+      }
+      .grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 20px;
+      }
+      figure {
+        margin: 0;
+        text-align: center;
+      }
+      figure img,
+      figure div {
+        display: block;
+      }
+      .big {
+        border: 1px solid #e2d8c8;
+        border-radius: 10px;
+        background: #fff;
+        padding: 8px;
+      }
+      figcaption {
+        margin-top: 6px;
+        font-size: 12px;
+        max-width: 160px;
+      }
+      .dark {
+        background: #141413;
+      }
     </style>
   </head>
   <body>
@@ -24,7 +55,10 @@
     <script type="module">
       import { catSvg, claudeStar } from "./cat-art.js";
       const profile = await (await fetch("/demo-profile.json")).json();
-      for (const [id, cls] of [["grid", "big"], ["grid-dark", "big dark"]]) {
+      for (const [id, cls] of [
+        ["grid", "big"],
+        ["grid-dark", "big dark"],
+      ]) {
         const box = document.getElementById(id);
         for (const cat of profile.cats) {
           const fig = document.createElement("figure");

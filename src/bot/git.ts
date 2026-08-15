@@ -34,7 +34,7 @@ export function gitEnv(): NodeJS.ProcessEnv {
     env.GIT_CONFIG_COUNT = "1";
     env.GIT_CONFIG_KEY_0 = "credential.https://github.com.helper";
     env.GIT_CONFIG_VALUE_0 =
-      '!f() { echo username=x-access-token; echo password=$GITHUB_TOKEN; }; f';
+      "!f() { echo username=x-access-token; echo password=$GITHUB_TOKEN; }; f";
   }
   return env;
 }
@@ -50,7 +50,9 @@ async function git(repo: string, args: string[], timeout = LOCAL_TIMEOUT_MS): Pr
     return stdout;
   } catch (error) {
     const parts = error as { stderr?: string; message?: string };
-    throw new Error(hideToken((parts.stderr || parts.message || String(error)).trim()));
+    throw new Error(hideToken((parts.stderr || parts.message || String(error)).trim()), {
+      cause: error,
+    });
   }
 }
 
@@ -184,6 +186,7 @@ export async function createPr(repo: string, title: string, body: string): Promi
   } catch (error) {
     const parts = error as { stderr?: string; message?: string };
     const text = hideToken((parts.stderr || parts.message || String(error)).trim());
+    const wrapped = new Error(text, { cause: error });
     // Самый частый случай: PR уже открыт. Тогда полезнее ссылка, а не ошибка.
     if (/already exists/i.test(text)) {
       const { stdout } = await run("gh", ["pr", "view", "--json", "url", "--jq", ".url"], {
@@ -193,7 +196,7 @@ export async function createPr(repo: string, title: string, body: string): Promi
       });
       return { url: stdout.trim() };
     }
-    throw new Error(text);
+    throw wrapped;
   }
 }
 
@@ -257,8 +260,16 @@ export async function suggestCommitMessage(
         }
       }
     }
-    const line = text.trim().split("\n").find((l) => l.trim().length > 0);
-    return line ? line.trim().replace(/^["'«»]|["'«»]$/g, "").slice(0, 200) : null;
+    const line = text
+      .trim()
+      .split("\n")
+      .find((l) => l.trim().length > 0);
+    return line
+      ? line
+          .trim()
+          .replace(/^["'«»]|["'«»]$/g, "")
+          .slice(0, 200)
+      : null;
   } catch (error) {
     console.error("не удалось предложить сообщение коммита:", (error as Error).message);
     return null;

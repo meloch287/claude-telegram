@@ -127,17 +127,57 @@ export interface Achievement {
 }
 
 export const ACHIEVEMENTS: Achievement[] = [
-  { id: "first_blood", name: "Первое слово", description: "Отправить боту первое сообщение", icon: "👋" },
-  { id: "first_tool", name: "Первый инструмент", description: "Разрешить агенту первый вызов инструмента", icon: "🔧" },
-  { id: "first_edit", name: "Правка пошла", description: "Одобрить первое изменение файла", icon: "✏️" },
-  { id: "first_bash", name: "Терминал открыт", description: "Разрешить первую команду в Bash", icon: "🖥️" },
-  { id: "first_deny", name: "Нет — тоже ответ", description: "Отклонить вызов инструмента", icon: "🛑" },
-  { id: "night_owl", name: "Ночная смена", description: "Написать боту между 02:00 и 05:00", icon: "🌙" },
-  { id: "streak_7", name: "Неделя подряд", description: "Пользоваться ботом 7 дней подряд", icon: "🔥" },
+  {
+    id: "first_blood",
+    name: "Первое слово",
+    description: "Отправить боту первое сообщение",
+    icon: "👋",
+  },
+  {
+    id: "first_tool",
+    name: "Первый инструмент",
+    description: "Разрешить агенту первый вызов инструмента",
+    icon: "🔧",
+  },
+  {
+    id: "first_edit",
+    name: "Правка пошла",
+    description: "Одобрить первое изменение файла",
+    icon: "✏️",
+  },
+  {
+    id: "first_bash",
+    name: "Терминал открыт",
+    description: "Разрешить первую команду в Bash",
+    icon: "🖥️",
+  },
+  {
+    id: "first_deny",
+    name: "Нет — тоже ответ",
+    description: "Отклонить вызов инструмента",
+    icon: "🛑",
+  },
+  {
+    id: "night_owl",
+    name: "Ночная смена",
+    description: "Написать боту между 02:00 и 05:00",
+    icon: "🌙",
+  },
+  {
+    id: "streak_7",
+    name: "Неделя подряд",
+    description: "Пользоваться ботом 7 дней подряд",
+    icon: "🔥",
+  },
   { id: "hundred_msgs", name: "Сотня", description: "Отправить 100 сообщений", icon: "💬" },
   { id: "million", name: "Миллион", description: "Потратить 1 000 000 токенов", icon: "🎯" },
   { id: "interrupter", name: "Стоп-кран", description: "Прервать агента на полпути", icon: "⏹️" },
-  { id: "polyglot", name: "Многостаночник", description: "Поработать в трёх разных проектах", icon: "🗂️" },
+  {
+    id: "polyglot",
+    name: "Многостаночник",
+    description: "Поработать в трёх разных проектах",
+    icon: "🗂️",
+  },
   { id: "max_cat", name: "Предел", description: "Дорасти до Квантового кота", icon: "🐈‍⬛" },
 ];
 

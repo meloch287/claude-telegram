@@ -1,0 +1,12 @@
+node_modules/
+dist/
+data/
+workspaces/
+claude-home/
+proxy/
+package-lock.json
+docs/cats/
+*.svg
+# Документы свёрстаны вручную: абзацы разбиты по смыслу, а не по ширине.
+# Prettier переносит их заново и ломает читаемость.
+*.md

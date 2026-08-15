@@ -1,7 +1,11 @@
 import type { Api } from "grammy";
 import { GrammyError, InputFile } from "grammy";
 import type { ConversationOutput } from "../agent/conversation.js";
-import type { PendingPermission, PendingQuestion, PermissionBridgeHooks } from "../agent/permissions.js";
+import type {
+  PendingPermission,
+  PendingQuestion,
+  PermissionBridgeHooks,
+} from "../agent/permissions.js";
 import { permissionKeyboard, questionKeyboard } from "./keyboards.js";
 import { describeToolDetailed, esc, toolIcon, TELEGRAM_LIMIT } from "../agent/render.js";
 
@@ -133,9 +137,13 @@ export class TelegramOutput implements ConversationOutput {
   /** То же, но для содержимого, которого нет на диске. */
   async documentFromText(text: string, fileName: string, caption?: string): Promise<void> {
     try {
-      await this.#api.sendDocument(this.#chatId, new InputFile(Buffer.from(text, "utf8"), fileName), {
-        ...(caption ? { caption, parse_mode: "HTML" as const } : {}),
-      });
+      await this.#api.sendDocument(
+        this.#chatId,
+        new InputFile(Buffer.from(text, "utf8"), fileName),
+        {
+          ...(caption ? { caption, parse_mode: "HTML" as const } : {}),
+        },
+      );
     } catch (error) {
       console.error(`[output:${this.#chatId}] document failed:`, error);
     }
@@ -154,7 +162,8 @@ export class TelegramOutput implements ConversationOutput {
         link_preview_options: { is_disabled: true },
       });
     } catch (error) {
-      if (!isBenignEditError(error)) console.error(`[output:${this.#chatId}] status failed:`, error);
+      if (!isBenignEditError(error))
+        console.error(`[output:${this.#chatId}] status failed:`, error);
       if (error instanceof GrammyError && error.description.includes("not found")) {
         this.#statusMessageId = null;
       }
@@ -291,7 +300,8 @@ export class TelegramOutput implements ConversationOutput {
         });
       }
     } catch (error) {
-      if (!isBenignEditError(error)) console.error(`[output:${this.#chatId}] disableKeyboard:`, error);
+      if (!isBenignEditError(error))
+        console.error(`[output:${this.#chatId}] disableKeyboard:`, error);
     }
   }
 }

@@ -163,10 +163,10 @@ const HATS = {
 
 /** Шея и грудь: шарф, бабочка, плащ. Ставится поверх корпуса. */
 const NECKWEAR = {
-  3: { row: 13, art: ["..r..r..", "..rrrr..", "..r..r.."] },   // бабочка
-  4: { row: 13, art: ["bbbbbbbb", "bb......", "bb......"] },   // шарф с концом
+  3: { row: 13, art: ["..r..r..", "..rrrr..", "..r..r.."] }, // бабочка
+  4: { row: 13, art: ["bbbbbbbb", "bb......", "bb......"] }, // шарф с концом
   8: { row: 13, art: ["y......y", ".y....y.", "..yyyy..", "...y...."] }, // ожерелье
-  9: { row: 13, art: ["ppppppppp", "ppppppppp", ".pppppppp"] },  // плащ
+  9: { row: 13, art: ["ppppppppp", "ppppppppp", ".pppppppp"] }, // плащ
   10: { row: 13, art: ["..yyyy...", "ppppppppp", "ppppppppp", ".pppppppp"] },
 };
 
@@ -189,7 +189,17 @@ function drawTail(grid, level, fur) {
 /** Искры вокруг — только у двух верхних уровней, как знак предела. */
 function drawSparkles(grid, level) {
   if (level < 9) return;
-  const spots = level === 9 ? [[3, 5], [18, 7]] : [[3, 4], [19, 6], [4, 15]];
+  const spots =
+    level === 9
+      ? [
+          [3, 5],
+          [18, 7],
+        ]
+      : [
+          [3, 4],
+          [19, 6],
+          [4, 15],
+        ];
   for (const [x, y] of spots) {
     if (y < 1 || y > ROWS - 2 || x < 1 || x > COLS - 2) continue;
     grid[y][x] = "y";
@@ -276,7 +286,8 @@ export function claudeStar(size, color = BRAND.clay) {
   const rects = [];
   star.forEach((row, y) =>
     [...row].forEach((cell, x) => {
-      if (cell === "c") rects.push(`<rect x="${x}" y="${y}" width="1" height="1" fill="${color}"/>`);
+      if (cell === "c")
+        rects.push(`<rect x="${x}" y="${y}" width="1" height="1" fill="${color}"/>`);
     }),
   );
   return `<svg viewBox="0 0 7 7" width="${size}" height="${size}" xmlns="http://www.w3.org/2000/svg"

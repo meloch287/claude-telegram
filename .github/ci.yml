@@ -35,6 +35,12 @@ jobs:
       # опциональной зависимостью, без него SDK не найдёт исполняемый файл.
       - run: npm ci --include=optional
 
+      - name: Формат
+        run: npm run format:check
+
+      - name: Линтер
+        run: npm run lint
+
       - name: Типы
         run: npm run typecheck
 

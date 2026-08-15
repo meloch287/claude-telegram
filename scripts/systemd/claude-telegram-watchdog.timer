@@ -1,0 +1,12 @@
+[Unit]
+Description=Проверять бота каждые две минуты
+
+[Timer]
+# После перезагрузки даём машине подняться: раньше проверять бессмысленно.
+OnBootSec=3min
+OnUnitActiveSec=2min
+AccuracySec=15s
+Persistent=false
+
+[Install]
+WantedBy=timers.target

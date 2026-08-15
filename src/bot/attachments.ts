@@ -46,7 +46,9 @@ export async function saveTelegramFile(
   mkdirSync(dir, { recursive: true });
 
   // Имя из file_path сохраняет расширение — по нему агент поймёт тип файла.
-  const extension = file.file_path.includes(".") ? file.file_path.slice(file.file_path.lastIndexOf(".")) : "";
+  const extension = file.file_path.includes(".")
+    ? file.file_path.slice(file.file_path.lastIndexOf("."))
+    : "";
   const name = safeName(suggestedName, `${Date.now()}${extension}`);
   const target = join(dir, name);
 

@@ -1,5 +1,5 @@
 import { mkdirSync } from "node:fs";
-import { join, resolve, sep } from "node:path";
+import { resolve, sep } from "node:path";
 import type { Api } from "grammy";
 import type { PermissionMode } from "@anthropic-ai/claude-agent-sdk";
 import { Conversation } from "../agent/conversation.js";
@@ -30,7 +30,8 @@ const LIMIT_NAMES: Record<string, string> = {
 
 function renderLimitWarning(limit: RateLimitUpdate): string {
   const name = LIMIT_NAMES[limit.limitType] ?? limit.limitType;
-  const percent = limit.utilization === undefined ? "" : ` — выбрано ${Math.round(limit.utilization)}%`;
+  const percent =
+    limit.utilization === undefined ? "" : ` — выбрано ${Math.round(limit.utilization)}%`;
   const resets = limit.resetsAt
     ? `\nОбнулится: ${new Date(limit.resetsAt * 1000).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}`
     : "";
@@ -120,11 +121,25 @@ export function ensureSession(options: EnsureOptions): ChatSession {
     onSessionId: (sessionId) => {
       const current = getChat(chatId);
       if (current?.session_id !== sessionId) recordSessionStart(userId);
-      saveChat({ chatId, userId, project, sessionId, title: current?.title ?? null, permissionMode });
+      saveChat({
+        chatId,
+        userId,
+        project,
+        sessionId,
+        title: current?.title ?? null,
+        permissionMode,
+      });
     },
     onResumeLost: () => {
       const current = getChat(chatId);
-      saveChat({ chatId, userId, project, sessionId: null, title: current?.title ?? null, permissionMode });
+      saveChat({
+        chatId,
+        userId,
+        project,
+        sessionId: null,
+        title: current?.title ?? null,
+        permissionMode,
+      });
     },
     onToolDecision: (toolName, allowed) => {
       recordToolDecision(userId, allowed);

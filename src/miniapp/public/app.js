@@ -95,7 +95,8 @@ function render(profile) {
 
   // Коты
   const openCount = cats.filter((c) => c.unlocked).length;
-  el("cats-note").textContent = `Открыто ${openCount} из ${cats.length}. Уровень растёт от потраченных токенов.`;
+  el("cats-note").textContent =
+    `Открыто ${openCount} из ${cats.length}. Уровень растёт от потраченных токенов.`;
 
   const grid = el("cat-grid");
   grid.replaceChildren();

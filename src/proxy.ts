@@ -228,7 +228,7 @@ export function startChannelWatch(
           return;
         }
         console.warn(
-          `⚠️  Канал отвалился: ${previous.candidate.label} — ${again.httpStatus === null ? again.error ?? "нет ответа" : `HTTP ${again.httpStatus}`}`,
+          `⚠️  Канал отвалился: ${previous.candidate.label} — ${again.httpStatus === null ? (again.error ?? "нет ответа") : `HTTP ${again.httpStatus}`}`,
         );
       }
 

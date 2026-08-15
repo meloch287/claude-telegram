@@ -177,7 +177,9 @@ const stmts = {
   setKey: db.prepare("UPDATE users SET api_key_enc = ?, auth_kind = ? WHERE user_id = ?"),
   setModel: db.prepare("UPDATE users SET model = ? WHERE user_id = ?"),
   bumpCounter: db.prepare("UPDATE users SET total_messages = total_messages + 1 WHERE user_id = ?"),
-  bumpSessions: db.prepare("UPDATE users SET total_sessions = total_sessions + 1 WHERE user_id = ?"),
+  bumpSessions: db.prepare(
+    "UPDATE users SET total_sessions = total_sessions + 1 WHERE user_id = ?",
+  ),
   bumpTools: db.prepare(
     "UPDATE users SET tools_allowed = tools_allowed + ?, tools_denied = tools_denied + ? WHERE user_id = ?",
   ),
@@ -214,7 +216,9 @@ const stmts = {
   unlockAchievement: db.prepare(
     "INSERT OR IGNORE INTO achievements (user_id, achievement, unlocked_at) VALUES (?, ?, ?)",
   ),
-  listAchievements: db.prepare("SELECT achievement, unlocked_at FROM achievements WHERE user_id = ?"),
+  listAchievements: db.prepare(
+    "SELECT achievement, unlocked_at FROM achievements WHERE user_id = ?",
+  ),
 
   upsertLimit: db.prepare(`
     INSERT INTO rate_limits (user_id, limit_type, status, utilization, resets_at, seen_at)
@@ -327,8 +331,7 @@ export function recordUsage(userId: number, tokens: number, costUsd: number): vo
 
 export function getUsageToday(userId: number): { tokens: number; cost_usd: number } {
   const row = stmts.getDayUsage.get(userId, today()) as
-    | { tokens: number; cost_usd: number }
-    | undefined;
+    { tokens: number; cost_usd: number } | undefined;
   return row ?? { tokens: 0, cost_usd: 0 };
 }
 

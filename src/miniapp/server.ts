@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
-import { extname, join, normalize, resolve } from "node:path";
+import { extname, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { config } from "../config.js";
 import { verifyInitData } from "../crypto.js";
@@ -146,8 +146,7 @@ export function startMiniAppServer(): void {
     }
 
     if (url.pathname === "/api/profile") {
-      const initData =
-        req.headers["x-telegram-init-data"];
+      const initData = req.headers["x-telegram-init-data"];
       const userId = authenticate(typeof initData === "string" ? initData : null);
       if (userId === null) {
         res.writeHead(401, { "content-type": "application/json" });

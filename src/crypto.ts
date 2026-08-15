@@ -1,4 +1,10 @@
-import { createCipheriv, createDecipheriv, randomBytes, timingSafeEqual, createHmac } from "node:crypto";
+import {
+  createCipheriv,
+  createDecipheriv,
+  randomBytes,
+  timingSafeEqual,
+  createHmac,
+} from "node:crypto";
 import { config } from "./config.js";
 
 const key = Buffer.from(config.encryptionKey, "base64");

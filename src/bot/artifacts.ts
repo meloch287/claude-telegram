@@ -11,7 +11,17 @@ import { join, relative, sep } from "node:path";
  */
 
 /** Внутрь этих каталогов не смотрим: интересны результаты, а не зависимости. */
-const SKIP = new Set([".git", "node_modules", ".venv", "venv", "__pycache__", "dist", "build", ".next", "target"]);
+const SKIP = new Set([
+  ".git",
+  "node_modules",
+  ".venv",
+  "venv",
+  "__pycache__",
+  "dist",
+  "build",
+  ".next",
+  "target",
+]);
 
 /** Больше десяти тысяч файлов — это репозиторий, а не результат работы. */
 const MAX_ENTRIES = 10_000;
@@ -95,7 +105,7 @@ export function reportChanges(root: string, before: Snapshot, limit = 10): Chang
     const previous = before.get(path);
     if (previous !== undefined && previous === mtime) continue;
     const absolute = join(root, path);
-    let size = 0;
+    let size: number;
     try {
       size = statSync(absolute).size;
     } catch {

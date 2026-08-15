@@ -94,10 +94,7 @@ export function describeToolShort(toolName: string, input: Record<string, unknow
 }
 
 /** Подробное описание для карточки разрешения — пользователь решает по нему. */
-export function describeToolDetailed(
-  toolName: string,
-  input: Record<string, unknown>,
-): string {
+export function describeToolDetailed(toolName: string, input: Record<string, unknown>): string {
   switch (toolName) {
     case "Bash": {
       const cmd = str(input, "command") ?? "";
@@ -186,9 +183,24 @@ export const SEND_AS_FILE_OVER = 1800;
 /** Имя для такого файла: по языку из ограждения, иначе просто txt. */
 export function codeBlockFileName(language: string | undefined, index: number): string {
   const extensions: Record<string, string> = {
-    ts: "ts", typescript: "ts", js: "js", javascript: "js", py: "py", python: "py",
-    sh: "sh", bash: "sh", json: "json", yaml: "yml", yml: "yml", sql: "sql",
-    html: "html", css: "css", go: "go", rust: "rs", rs: "rs", java: "java",
+    ts: "ts",
+    typescript: "ts",
+    js: "js",
+    javascript: "js",
+    py: "py",
+    python: "py",
+    sh: "sh",
+    bash: "sh",
+    json: "json",
+    yaml: "yml",
+    yml: "yml",
+    sql: "sql",
+    html: "html",
+    css: "css",
+    go: "go",
+    rust: "rs",
+    rs: "rs",
+    java: "java",
   };
   const extension = extensions[(language ?? "").toLowerCase()] ?? "txt";
   return `фрагмент-${index}.${extension}`;

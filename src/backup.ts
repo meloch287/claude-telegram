@@ -67,7 +67,9 @@ function runOnce(): void {
     const removed = prune();
     if (made) {
       const size = (statSync(made).size / 1024).toFixed(0);
-      console.log(`💾 Копия базы: ${made} (${size} КБ)${removed ? `, удалено старых: ${removed}` : ""}`);
+      console.log(
+        `💾 Копия базы: ${made} (${size} КБ)${removed ? `, удалено старых: ${removed}` : ""}`,
+      );
     }
   } catch (error) {
     // Провал копии не должен ронять бота: это фоновая гигиена, а не работа.

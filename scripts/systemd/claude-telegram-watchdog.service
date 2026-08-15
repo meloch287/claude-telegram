@@ -1,0 +1,12 @@
+[Unit]
+Description=Сторож бота claude-telegram
+# Без docker проверять нечего, а на старте машины он поднимается не мгновенно.
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/claude-telegram/scripts/watchdog.sh
+# Ненулевой код — это «бот нездоров», а не поломка сторожа. Пусть journal
+# показывает такие запуски как обычные, иначе таймер будет числиться failed.
+SuccessExitStatus=0 1

@@ -15,7 +15,10 @@
     "test": "tsx --test test/logic.test.ts",
     "miniapp": "tsx scripts/serve-miniapp.ts",
     "cats": "tsx scripts/render-cats.ts",
-    "keygen": "node --input-type=module -e \"import{randomBytes}from'node:crypto';console.log(randomBytes(32).toString('base64'))\""
+    "keygen": "node --input-type=module -e \"import{randomBytes}from'node:crypto';console.log(randomBytes(32).toString('base64'))\"",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.232",
@@ -23,8 +26,12 @@
     "undici": "^8.10.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^22.10.0",
+    "eslint": "^10.8.1",
+    "prettier": "^3.9.6",
     "tsx": "^4.19.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.67.0"
   }
 }

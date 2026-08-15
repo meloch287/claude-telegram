@@ -11,7 +11,8 @@ const { encrypt, decrypt, maskKey, verifyInitData } = await import("../src/crypt
 const { MessageQueue } = await import("../src/agent/queue.js");
 const { catForTokens, nextCat, catProgress, CAT_LEVELS } = await import("../src/cats.js");
 const { sanitizeProject, workspaceFor } = await import("../src/bot/session.js");
-const { chunk, truncate, splitCodeBlocks, codeBlockFileName } = await import("../src/agent/render.js");
+const { chunk, truncate, splitCodeBlocks, codeBlockFileName } =
+  await import("../src/agent/render.js");
 const { snapshot, changedSince, formatSize } = await import("../src/bot/artifacts.js");
 
 test("шифрование ключей: круговой рейс", () => {
@@ -76,7 +77,10 @@ test("initData: подделанный user отклоняется", () => {
     },
     BOT_TOKEN,
   );
-  const tampered = initData.replace(encodeURIComponent('{"id":42}'), encodeURIComponent('{"id":9}'));
+  const tampered = initData.replace(
+    encodeURIComponent('{"id":42}'),
+    encodeURIComponent('{"id":9}'),
+  );
   assert.equal(verifyInitData(tampered, BOT_TOKEN), null);
 });
 
@@ -224,12 +228,18 @@ test("пул: пустая строка и пустое окружение да�
 
 test("пул: порядок в строке задаёт приоритет", () => {
   const pool = parsePool("http://a:1,http://b:2", {});
-  assert.deepEqual(pool.map((c) => c.url), ["http://a:1", "http://b:2"]);
+  assert.deepEqual(
+    pool.map((c) => c.url),
+    ["http://a:1", "http://b:2"],
+  );
 });
 
 test("пул: прокси из окружения попадает в конец, а не теряется", () => {
   const pool = parsePool("http://a:1", { HTTPS_PROXY: "http://env:9" });
-  assert.deepEqual(pool.map((c) => c.url), ["http://a:1", "http://env:9"]);
+  assert.deepEqual(
+    pool.map((c) => c.url),
+    ["http://a:1", "http://env:9"],
+  );
 });
 
 test("пул: прокси из окружения не дублируется, если уже в списке", () => {
@@ -405,7 +415,10 @@ test("результат инструмента собирается из стр
   const { flattenToolResult } = await import("../src/agent/conversation.js");
   assert.equal(flattenToolResult("  вывод команды  "), "вывод команды");
   assert.equal(
-    flattenToolResult([{ type: "text", text: "первая" }, { type: "text", text: "вторая" }]),
+    flattenToolResult([
+      { type: "text", text: "первая" },
+      { type: "text", text: "вторая" },
+    ]),
     "первая\nвторая",
   );
   // Картинки и прочее в текст не превращаем — только выкидываем.
@@ -447,7 +460,11 @@ test("конфиг MCP читается и разворачивается цел
     file,
     JSON.stringify({
       mcpServers: {
-        сервер: { type: "http", url: "https://x/mcp", headers: { Authorization: "Bearer ${ТОКЕН}" } },
+        сервер: {
+          type: "http",
+          url: "https://x/mcp",
+          headers: { Authorization: "Bearer ${ТОКЕН}" },
+        },
       },
     }),
   );

@@ -42,6 +42,6 @@ export async function cloneRepository(url: string, cwd: string): Promise<string>
     return name;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(hideToken(message));
+    throw new Error(hideToken(message), { cause: error });
   }
 }

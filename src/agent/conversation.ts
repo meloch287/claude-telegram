@@ -1,9 +1,20 @@
-import { query, type Query, type SDKMessage, type SDKUserMessage, type PermissionMode } from "@anthropic-ai/claude-agent-sdk";
+import {
+  query,
+  type Query,
+  type SDKMessage,
+  type SDKUserMessage,
+  type PermissionMode,
+} from "@anthropic-ai/claude-agent-sdk";
 import { MessageQueue } from "./queue.js";
 import { createPermissionBridge, flushChat, type PermissionBridgeHooks } from "./permissions.js";
 import {
-  describeToolShort, chunk, formatUsd, formatDuration, esc,
-  splitCodeBlocks, codeBlockFileName,
+  describeToolShort,
+  chunk,
+  formatUsd,
+  formatDuration,
+  esc,
+  splitCodeBlocks,
+  codeBlockFileName,
 } from "./render.js";
 import { loadMcpServers } from "../mcp.js";
 import { snapshot, reportChanges, formatSize, type Snapshot } from "../bot/artifacts.js";
@@ -127,7 +138,7 @@ function buildEnv(credential: Credential): Record<string, string> {
     env.GIT_CONFIG_COUNT = "1";
     env.GIT_CONFIG_KEY_0 = "credential.https://github.com.helper";
     env.GIT_CONFIG_VALUE_0 =
-      '!f() { echo username=x-access-token; echo password=$GITHUB_TOKEN; }; f';
+      "!f() { echo username=x-access-token; echo password=$GITHUB_TOKEN; }; f";
   }
 
   const proxy = activeProxyUrl();
@@ -404,9 +415,11 @@ export class Conversation {
         }
         // Сжатие контекста: без отчёта /compact выглядит как зависание.
         if (message.subtype === "compact_boundary") {
-          const meta = (message as unknown as {
-            compact_metadata?: { trigger?: string; pre_tokens?: number; post_tokens?: number };
-          }).compact_metadata;
+          const meta = (
+            message as unknown as {
+              compact_metadata?: { trigger?: string; pre_tokens?: number; post_tokens?: number };
+            }
+          ).compact_metadata;
           const before = meta?.pre_tokens ?? 0;
           const after = meta?.post_tokens;
           const how = meta?.trigger === "auto" ? "сам" : "по просьбе";
@@ -497,9 +510,11 @@ export class Conversation {
       }
 
       case "assistant": {
-        const usage = (message as unknown as {
-          context_usage?: { percentage?: number; total_tokens?: number; raw_max_tokens?: number };
-        }).context_usage;
+        const usage = (
+          message as unknown as {
+            context_usage?: { percentage?: number; total_tokens?: number; raw_max_tokens?: number };
+          }
+        ).context_usage;
         if (usage && typeof usage.percentage === "number") {
           this.#context = {
             percentage: usage.percentage,
