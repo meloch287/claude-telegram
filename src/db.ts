@@ -26,7 +26,13 @@ CREATE TABLE IF NOT EXISTS users (
   total_messages INTEGER NOT NULL DEFAULT 0,
   total_sessions INTEGER NOT NULL DEFAULT 0,
   tools_allowed  INTEGER NOT NULL DEFAULT 0,
-  tools_denied   INTEGER NOT NULL DEFAULT 0
+  tools_denied   INTEGER NOT NULL DEFAULT 0,
+  -- Часть total_*, пришедшая из импорта старых транскриптов, а не наработанная
+  -- ботом. Денег за неё в total_cost_usd нет и быть не может: те сессии шли
+  -- мимо бота, и их стоимость взять неоткуда. Храним отдельно, чтобы в
+  -- статистике не сравнивались токены за всю жизнь с деньгами за два дня.
+  history_tokens   INTEGER NOT NULL DEFAULT 0,
+  history_messages INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS chats (
@@ -78,6 +84,8 @@ CREATE TABLE IF NOT EXISTS projects_seen (
 for (const [table, column, type] of [
   ["users", "auth_kind", "TEXT"],
   ["users", "model", "TEXT"],
+  ["users", "history_tokens", "INTEGER NOT NULL DEFAULT 0"],
+  ["users", "history_messages", "INTEGER NOT NULL DEFAULT 0"],
   ["chats", "title", "TEXT"],
 ] as const) {
   const existing = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
@@ -99,6 +107,40 @@ for (const [table, column, type] of [
   }
 }
 
+/**
+ * Разовая доводка баз, где импорт истории уже прошёл, а колонок под неё ещё не
+ * было. Токены делятся точно: живой расход всегда пишется и в users, и в
+ * usage_daily, поэтому разница между ними — ровно импортированное.
+ *
+ * С сообщениями точности нет: подённой разбивки по ним не ведётся. Всё, что
+ * накопилось до этой миграции, записывается в историю целиком. Ошибка — те
+ * несколько ответов, что бот успел дать до неё; на фоне двухсот тысяч
+ * импортированных это доли процента, а дальше счёт идёт раздельно.
+ */
+{
+  const stale = db
+    .prepare(
+      `SELECT u.user_id, u.total_tokens, u.total_messages,
+              COALESCE((SELECT SUM(tokens) FROM usage_daily d WHERE d.user_id = u.user_id), 0) AS live
+         FROM users u
+        WHERE u.history_tokens = 0 AND u.history_messages = 0 AND u.total_tokens > 0`,
+    )
+    .all() as { user_id: number; total_tokens: number; total_messages: number; live: number }[];
+
+  const fill = db.prepare(
+    "UPDATE users SET history_tokens = ?, history_messages = ? WHERE user_id = ?",
+  );
+  for (const row of stale) {
+    const imported = row.total_tokens - row.live;
+    // Расхождения нет — значит всё наработано ботом, историю не выдумываем.
+    if (imported <= 0) continue;
+    fill.run(imported, row.total_messages, row.user_id);
+    console.log(
+      `↺ Разделил статистику пользователя ${row.user_id}: импорт ${imported}, бот ${row.live}`,
+    );
+  }
+}
+
 export interface UserRow {
   user_id: number;
   api_key_enc: string | null;
@@ -114,6 +156,8 @@ export interface UserRow {
   total_sessions: number;
   tools_allowed: number;
   tools_denied: number;
+  history_tokens: number;
+  history_messages: number;
 }
 
 export interface ChatRow {
@@ -142,7 +186,9 @@ const stmts = {
   ),
   setStreak: db.prepare("UPDATE users SET last_active_day = ?, streak_days = ? WHERE user_id = ?"),
   addHistory: db.prepare(
-    "UPDATE users SET total_tokens = total_tokens + ?, total_messages = total_messages + ? WHERE user_id = ?",
+    `UPDATE users SET total_tokens = total_tokens + ?, total_messages = total_messages + ?,
+                      history_tokens = history_tokens + ?, history_messages = history_messages + ?
+      WHERE user_id = ?`,
   ),
 
   getChat: db.prepare("SELECT * FROM chats WHERE chat_id = ?"),
@@ -232,7 +278,7 @@ export function clearCredential(userId: number): void {
 /** Импорт истории из транскриптов Claude Code: разовая доливка счётчиков. */
 export function addHistoricalUsage(userId: number, tokens: number, messages: number): void {
   getOrCreateUser(userId);
-  stmts.addHistory.run(tokens, messages, userId);
+  stmts.addHistory.run(tokens, messages, tokens, messages, userId);
 }
 
 export function setModel(userId: number, model: string | null): void {

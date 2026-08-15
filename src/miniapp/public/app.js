@@ -14,7 +14,7 @@ function text(value) {
 }
 
 function render(profile) {
-  const { cat, cats, achievements, totals, today, model } = profile;
+  const { cat, cats, achievements, totals, today, model, bot, history } = profile;
 
   el("plan-line").textContent = `Модель ${model.label}`;
 
@@ -49,17 +49,35 @@ function render(profile) {
 
   renderLimits(profile.limits ?? []);
 
-  // Статистика
+  // Статистика бота: токены и деньги здесь про один и тот же период, поэтому
+  // их можно ставить рядом.
   const stats = [
-    [nf.format(totals.tokens), "токенов всего"],
-    [`$${totals.costUsd.toFixed(2)}`, "потрачено"],
-    [nf.format(totals.messages), "сообщений"],
+    [nf.format(bot.tokens), "токенов в боте"],
+    [`${bot.costUsd.toFixed(2)}`, "стоило бы по API"],
+    [nf.format(bot.messages), "сообщений"],
     [nf.format(totals.sessions), "сессий"],
     [nf.format(totals.toolsAllowed), "инструментов разрешено"],
     [nf.format(totals.toolsDenied), "отклонено"],
     [nf.format(totals.streakDays), "дней подряд"],
     [nf.format(today.tokens), "токенов сегодня"],
   ];
+  // Импорт старых транскриптов: токены есть, денег нет и взять их неоткуда —
+  // те сессии шли мимо бота. Прячем строку у тех, кто ничего не импортировал.
+  const historyNote = el("history-note");
+  if (history.tokens > 0) {
+    historyNote.hidden = false;
+    historyNote.textContent =
+      `Плюс импортировано из старых сессий: ${nf.format(history.tokens)} токенов ` +
+      `и ${nf.format(history.messages)} ответов. Стоимость по ним не считается — ` +
+      `те сессии шли мимо бота. Кот растёт от общей суммы.`;
+  } else {
+    historyNote.hidden = true;
+  }
+
+  el("cache-note").textContent =
+    "Чтение кэша в счёт не идёт: оно дешевле обычного токена в десять раз и " +
+    "больше его в сотни, так что общий счёт перестал бы что-либо значить.";
+
   const statsList = el("stats");
   statsList.replaceChildren();
   for (const [value, label] of stats) {

@@ -697,9 +697,15 @@ bot.command("stats", async (ctx) => {
         ? `До «${esc(next.name)}»: ${formatTokens(next.threshold - user.total_tokens)} токенов`
         : "Максимальный уровень достигнут",
       "",
-      `Всего: ${formatTokens(user.total_tokens)} токенов · ${formatUsd(user.total_cost_usd)}`,
+      // Токены и деньги ставим рядом только там, где они про один период:
+      // импортированная история идёт отдельной строкой, стоимости у неё нет.
+      `В боте: ${formatTokens(user.total_tokens - user.history_tokens)} токенов · ${formatUsd(user.total_cost_usd)}`,
+      ...(user.history_tokens > 0
+        ? [`Импортировано: ${formatTokens(user.history_tokens)} токенов (без стоимости)`]
+        : []),
+      `Всего с историей: ${formatTokens(user.total_tokens)} токенов`,
       `Сегодня: ${formatTokens(today.tokens)} токенов`,
-      `Сообщений: ${user.total_messages} · сессий: ${user.total_sessions}`,
+      `Сообщений: ${user.total_messages - user.history_messages} · сессий: ${user.total_sessions}`,
       `Инструментов разрешено: ${user.tools_allowed} · отклонено: ${user.tools_denied}`,
       `Серия дней подряд: ${user.streak_days}`,
     ].join("\n"),

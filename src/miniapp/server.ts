@@ -59,6 +59,20 @@ function profilePayload(userId: number) {
       streakDays: user.streak_days,
     },
     today: { tokens: today.tokens },
+    /**
+     * Расход бота отдельно от импортированной истории: деньги известны только
+     * за то, что бот сделал сам, и рядом с токенами за всю жизнь выглядели бы
+     * ошибкой. Кот по-прежнему считается по сумме — она в totals.
+     */
+    bot: {
+      tokens: user.total_tokens - user.history_tokens,
+      messages: user.total_messages - user.history_messages,
+      costUsd: Number(user.total_cost_usd.toFixed(4)),
+    },
+    history: {
+      tokens: user.history_tokens,
+      messages: user.history_messages,
+    },
     cat: {
       level: cat.level,
       id: cat.id,

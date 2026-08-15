@@ -291,5 +291,14 @@
       "resetsAt": 1787077881481,
       "seenAt": 1786726581481
     }
-  ]
+  ],
+  "bot": {
+    "tokens": 420000,
+    "messages": 187,
+    "costUsd": 12.4831
+  },
+  "history": {
+    "tokens": 0,
+    "messages": 0
+  }
 }

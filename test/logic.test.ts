@@ -545,3 +545,58 @@ test("поиск репозитория: корень, подпапка, нес�
 
   rmSync(root, { recursive: true, force: true });
 });
+
+// Доводка статистики выполняется один раз при открытии базы, поэтому проверять
+// её приходится в отдельном процессе: db.ts — синглтон, второй раз в этом же
+// процессе он не переинициализируется.
+test("разделение статистики: импорт отделяется от расхода бота", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const { mkdtempSync, rmSync, writeFileSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const { fileURLToPath } = await import("node:url");
+
+  const dir = mkdtempSync(join(tmpdir(), "split-"));
+  const dbPath = fileURLToPath(new URL("../src/db.ts", import.meta.url));
+  const script = join(dir, "проба.mjs");
+
+  writeFileSync(
+    script,
+    `
+    process.env.BOT_TOKEN = "1:T";
+    process.env.ENCRYPTION_KEY = Buffer.alloc(32, 1).toString("base64");
+    process.env.DATA_DIR = ${JSON.stringify(dir)};
+    process.env.WORKSPACE_ROOT = ${JSON.stringify(join(dir, "ws"))};
+
+    const { DatabaseSync } = await import("node:sqlite");
+    const seed = new DatabaseSync(${JSON.stringify(join(dir, "bot.db"))});
+    seed.exec("CREATE TABLE users (user_id INTEGER PRIMARY KEY, api_key_enc TEXT, auth_kind TEXT, model TEXT, onboarded INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, last_active_day TEXT, streak_days INTEGER NOT NULL DEFAULT 0, total_tokens INTEGER NOT NULL DEFAULT 0, total_cost_usd REAL NOT NULL DEFAULT 0, total_messages INTEGER NOT NULL DEFAULT 0, total_sessions INTEGER NOT NULL DEFAULT 0, tools_allowed INTEGER NOT NULL DEFAULT 0, tools_denied INTEGER NOT NULL DEFAULT 0)");
+    seed.exec("CREATE TABLE usage_daily (user_id INTEGER NOT NULL, day TEXT NOT NULL, tokens INTEGER NOT NULL DEFAULT 0, cost_usd REAL NOT NULL DEFAULT 0, PRIMARY KEY (user_id, day))");
+    seed.prepare("INSERT INTO users (user_id, created_at, total_tokens, total_messages) VALUES (?,?,?,?)").run(5, Date.now(), 1000000, 900);
+    seed.prepare("INSERT INTO usage_daily VALUES (?,?,?,?)").run(5, "2026-08-14", 2500, 0.5);
+    // Второй пользователь наработал всё сам: истории у него быть не должно.
+    seed.prepare("INSERT INTO users (user_id, created_at, total_tokens, total_messages) VALUES (?,?,?,?)").run(6, Date.now(), 700, 3);
+    seed.prepare("INSERT INTO usage_daily VALUES (?,?,?,?)").run(6, "2026-08-14", 700, 0.1);
+    seed.close();
+
+    const db = await import(${JSON.stringify(dbPath)});
+    const a = db.getOrCreateUser(5);
+    const b = db.getOrCreateUser(6);
+    console.log(JSON.stringify({
+      импорт: a.history_tokens,
+      бот: a.total_tokens - a.history_tokens,
+      всего: a.total_tokens,
+      свой: b.history_tokens,
+    }));
+    `,
+  );
+
+  const out = execFileSync("npx", ["tsx", script], { encoding: "utf8" });
+  const result = JSON.parse(out.trim().split("\n").pop() ?? "{}");
+  rmSync(dir, { recursive: true, force: true });
+
+  assert.equal(result.импорт, 997_500, "импортом считается всё, чего нет в подённом расходе");
+  assert.equal(result.бот, 2_500, "боту достаётся ровно то, что он записал по дням");
+  assert.equal(result.всего, 1_000_000, "сумма не должна меняться: кот считается по ней");
+  assert.equal(result.свой, 0, "у того, кто наработал всё сам, истории нет");
+});
