@@ -43,7 +43,10 @@ notify() {
     || echo "не удалось отправить сообщение" >&2
 }
 
-health=$(docker inspect --format '{{.State.Health.Status}}' "$CONTAINER" 2>/dev/null || echo "нет контейнера")
+# Пропавший контейнер отдаёт пустую строку, а не текст: подставляем свой,
+# иначе в сообщение владельцу уезжает пустота вместо причины.
+health=$(docker inspect --format '{{.State.Health.Status}}' "$CONTAINER" 2>/dev/null | tr -d '\n')
+[ -z "$health" ] && health="нет контейнера или healthcheck"
 
 state=ok
 fails=0
