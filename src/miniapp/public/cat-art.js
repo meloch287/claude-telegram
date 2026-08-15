@@ -43,12 +43,20 @@ const OUTFIT = {
   b: "#7A5236", // коричневый: берет, шарф
   s: "#8C9BA8", // сталь: каска, визор
   w: "#FAF9F5", // крем: надпись на кепке, блики
+  h: "#FAF9F5", // щёки: тот же крем, но вполсилы — см. TRANSLUCENT
 };
 
 export const COLS = 24;
 export const ROWS = 20;
 
 const EMPTY = ".";
+
+/**
+ * Ключи, которые рисуются вполсилы. Щёки сплошным кремом выглядели наклейкой
+ * поверх морды; полупрозрачные читаются как румянец на самой шкуре, и тон
+ * подстраивается под любого кота сам.
+ */
+const TRANSLUCENT = { h: 0.45 };
 
 // Раскладка. Всё остальное расставлено относительно этих чисел, а не вписано
 // в спрайты руками, — иначе любая правка пропорций ломает половину деталей.
@@ -185,8 +193,8 @@ function buildBody(cat) {
   // Щёки двумя подушками по бокам и нос между ними. Раньше здесь была светлая
   // плита во всю ширину — она читалась как заплатка, а не как морда.
 
-  rect(grid, X0 + 3, MUZZLE_ROW, X0 + 4, MUZZLE_ROW + 1, "w");
-  rect(grid, X1 - 4, MUZZLE_ROW, X1 - 3, MUZZLE_ROW + 1, "w");
+  rect(grid, X0 + 2, MUZZLE_ROW, X0 + 3, MUZZLE_ROW + 1, "h");
+  rect(grid, X1 - 3, MUZZLE_ROW, X1 - 2, MUZZLE_ROW + 1, "h");
   rect(grid, CENTRE, MUZZLE_ROW - 1, CENTRE + 1, MUZZLE_ROW - 1, "i");
 
   // Лапы: четыре тумбы по две клетки. Просветы 1–2–1: средний шире, поэтому
@@ -261,7 +269,9 @@ function gridRects(grid, palette) {
       }
       let run = 1;
       while (x + run < COLS && row[x + run] === key) run += 1;
-      rects.push(`<rect x="${x}" y="${y}" width="${run}" height="1" fill="${fill}"/>`);
+      const alpha = TRANSLUCENT[key];
+      const opacity = alpha === undefined ? "" : ` fill-opacity="${alpha}"`;
+      rects.push(`<rect x="${x}" y="${y}" width="${run}" height="1" fill="${fill}"${opacity}/>`);
       x += run;
     }
   }
