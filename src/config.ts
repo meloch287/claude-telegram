@@ -87,7 +87,7 @@ export const config = {
   whisperViaProxy: optional("WHISPER_VIA_PROXY", "") === "1",
 
   /** Файл с описанием MCP-серверов в формате Claude Code. */
-  mcpConfigPath: optional("MCP_CONFIG", ""),
+  mcpConfigPath: optional("MCP_CONFIG", resolve(process.cwd(), "mcp.json")),
 } as const;
 
 if (config.authMode === "owner" && !config.ownerApiKey) {

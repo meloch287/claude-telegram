@@ -424,3 +424,63 @@ test("длинный вывод команды режется с начала, �
   assert.ok(!rendered.includes("строка 0\n"), "начало должно быть срезано");
   assert.ok(rendered.includes("начало срезано"), "обрезка должна быть явной");
 });
+
+// ── MCP-конфигурация ─────────────────────────────────────────────────────────
+
+test("переменные окружения подставляются в конфиг MCP", async () => {
+  const { expandVars } = await import("../src/mcp.js");
+  const env = { GITHUB_TOKEN: "ghp_секрет", EMPTY: "" };
+  assert.equal(expandVars("Bearer ${GITHUB_TOKEN}", env), "Bearer ghp_секрет");
+  assert.equal(expandVars("https://api/${GITHUB_TOKEN}/x", env), "https://api/ghp_секрет/x");
+  // Ненайденная переменная не должна уехать в запрос как есть.
+  assert.equal(expandVars("Bearer ${НЕТ_ТАКОЙ}", env), "Bearer ");
+  assert.equal(expandVars("без переменных", env), "без переменных");
+});
+
+test("конфиг MCP читается и разворачивается целиком", async () => {
+  const { mkdtempSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { loadMcpServers } = await import("../src/mcp.js");
+
+  const dir = mkdtempSync(join(tmpdir(), "mcp-"));
+  const file = join(dir, "mcp.json");
+  writeFileSync(
+    file,
+    JSON.stringify({
+      mcpServers: {
+        сервер: { type: "http", url: "https://x/mcp", headers: { Authorization: "Bearer ${ТОКЕН}" } },
+      },
+    }),
+  );
+
+  const servers = loadMcpServers(file, { ТОКЕН: "тайна" });
+  const server = servers["сервер"] as { headers?: Record<string, string> };
+  assert.equal(server.headers?.Authorization, "Bearer тайна");
+});
+
+test("сломанный конфиг MCP не роняет бота", async () => {
+  const { mkdtempSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { loadMcpServers } = await import("../src/mcp.js");
+
+  const dir = mkdtempSync(join(tmpdir(), "mcp-"));
+  const file = join(dir, "битый.json");
+  writeFileSync(file, "{ это не json");
+  assert.deepEqual(loadMcpServers(file, {}), {});
+  // Отсутствующий файл — тоже не повод падать.
+  assert.deepEqual(loadMcpServers(join(dir, "нет.json"), {}), {});
+});
+
+test("настоящий mcp.json проекта валиден", async () => {
+  const { loadMcpServers } = await import("../src/mcp.js");
+  const servers = loadMcpServers("mcp.json", {});
+  const names = Object.keys(servers).sort();
+  assert.deepEqual(names, ["context7", "deepwiki"]);
+  for (const name of names) {
+    const server = servers[name] as { type?: string; url?: string };
+    assert.equal(server.type, "http", `${name} должен ходить по http`);
+    assert.ok(server.url?.startsWith("https://"), `${name} должен быть по https`);
+  }
+});
