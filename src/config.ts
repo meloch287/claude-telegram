@@ -83,6 +83,8 @@ export const config = {
   whisperUrl: optional("WHISPER_URL", ""),
   whisperModel: optional("WHISPER_MODEL", ""),
   whisperToken: optional("WHISPER_TOKEN", ""),
+  /** Слать голос через тот же прокси, что и запросы к Anthropic. Обычно не нужно. */
+  whisperViaProxy: optional("WHISPER_VIA_PROXY", "") === "1",
 
   /** Файл с описанием MCP-серверов в формате Claude Code. */
   mcpConfigPath: optional("MCP_CONFIG", ""),

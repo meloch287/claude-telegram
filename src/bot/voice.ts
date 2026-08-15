@@ -34,11 +34,16 @@ export async function transcribe(audio: Buffer, fileName: string): Promise<strin
   const headers: Record<string, string> = {};
   if (config.whisperToken) headers.Authorization = `Bearer ${config.whisperToken}`;
 
-  // Сервис может стоять снаружи и быть недоступен напрямую — тогда через тот же
-  // канал, что и остальное.
-  const proxy = activeProxyUrl();
+  // По умолчанию идём напрямую, а не через канал до Anthropic.
+  //
+  // Прокси нужен только самому Anthropic: с российского сервера он отдаёт 403.
+  // Сервис расшифровки выбирает владелец установки, и он обычно доступен без
+  // обхода — проверено на api.polza.ai: HTTP 200 напрямую. Гнать голос через
+  // Германию было бы лишним крюком, а для российского сервиса ещё и риском.
+  // Если сервис всё же закрыт, включается WHISPER_VIA_PROXY=1.
   const init: RequestInit = { method: "POST", body: form, headers };
-  if (proxy && !/^https?:\/\/(localhost|127\.|\[?::1)/.test(config.whisperUrl)) {
+  const proxy = activeProxyUrl();
+  if (config.whisperViaProxy && proxy) {
     const { ProxyAgent } = await import("undici");
     (init as { dispatcher?: unknown }).dispatcher = new ProxyAgent(proxy);
   }
