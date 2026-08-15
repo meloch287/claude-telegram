@@ -398,14 +398,10 @@ void main();
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const PLOT_HEIGHT = 88;
-/** Потолок ширины столбца. Дальше растёт не столбец, а воздух между столбцами:
-    широкие блоки читаются тяжело и спорят со спокойной типографикой вокруг. */
-const BAR_MAX = 14;
-/** Минимальный просвет — на случай, если дней станет заметно больше. */
-const BAR_GAP_MIN = 3;
+const BAR_GAP = 2;
 const CORNER = 4;
 /** Высота засечки для дня без работы. */
-const EMPTY_STUB = 3;
+const EMPTY_STUB = 2;
 
 let chartDays = [];
 
@@ -454,10 +450,7 @@ function drawChart() {
   const svg = el("chart-svg");
   const width = el("chart").clientWidth || 320;
   const count = chartDays.length;
-  // Сперва ограничиваем столбец, остаток раздаём промежуткам поровну — так
-  // ритм остаётся ровным на любой ширине экрана.
-  const barWidth = Math.max(3, Math.min(BAR_MAX, (width - BAR_GAP_MIN * (count - 1)) / count));
-  const gap = count > 1 ? Math.max(BAR_GAP_MIN, (width - barWidth * count) / (count - 1)) : 0;
+  const barWidth = Math.max(3, (width - BAR_GAP * (count - 1)) / count);
   const peak = Math.max(...chartDays.map((d) => d.tokens));
   const peakIndex = chartDays.findIndex((d) => d.tokens === peak);
   // Место под подпись пика: без запаса она вылезала бы за верх картинки.
@@ -476,7 +469,7 @@ function drawChart() {
     `Точные числа по дням есть в таблице ниже.`;
 
   chartDays.forEach((day, index) => {
-    const x = index * (barWidth + gap);
+    const x = index * (barWidth + BAR_GAP);
     const isEmpty = day.tokens === 0;
     // Минимум три пикселя у непустого дня: иначе слабый день неотличим от нуля.
     const height = isEmpty ? EMPTY_STUB : Math.max(3, Math.round((day.tokens / peak) * usable));
@@ -497,7 +490,7 @@ function drawChart() {
       class: "hit",
       x: x.toFixed(2),
       y: 0,
-      width: (barWidth + gap).toFixed(2),
+      width: (barWidth + BAR_GAP).toFixed(2),
       height: PLOT_HEIGHT,
       tabindex: "-1",
     });
