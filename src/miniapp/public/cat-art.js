@@ -7,7 +7,7 @@
  * морда с открытым ртом, усы по бокам, четыре лапы снизу, хвост справа.
  * Заливка сплошная, без обводки — силуэт держится сам, за счёт крупной клетки.
  *
- * Сетка 22×20:
+ * Сетка 24×20:
  *
  *   ряды 0–4     головной убор
  *   ряды 3–4     уши
@@ -16,7 +16,7 @@
  *   ряд  10      усы
  *   ряды 11–12   морда и рот
  *   ряды 15–17   лапы
- *   колонки 16+  хвост
+ *   колонки 19+  хвост
  *
  * Рисунок разложен по слоям — тело, глаза, хвост, убор — и каждый слой
  * выезжает отдельной группой. Иначе анимация не сделать: мигать должны только
@@ -45,7 +45,7 @@ const OUTFIT = {
   w: "#FAF9F5", // крем: надпись на кепке, блики
 };
 
-export const COLS = 22;
+export const COLS = 24;
 export const ROWS = 20;
 
 const EMPTY = ".";
@@ -53,7 +53,7 @@ const EMPTY = ".";
 // Раскладка. Всё остальное расставлено относительно этих чисел, а не вписано
 // в спрайты руками, — иначе любая правка пропорций ломает половину деталей.
 const X0 = 5;
-const X1 = 16;
+const X1 = 18;
 const HEAD_TOP = 5;
 const BODY_BOTTOM = 14;
 const EAR_TOP = 3;
@@ -96,12 +96,12 @@ function stamp(grid, sprite, topRow, anchorX) {
  * У кепки на околыше четыре светлых клетки — та самая надпись с референса.
  */
 const HATS = {
-  2: ["...rrrrrr...", "..rrrrrrrr..", "..rwrwrwrw..", "rrrrrrrrrrrr", "rrrrrrrrrrrr"],
+  2: ["....rrrrrr....", "...rrrrrrrr...", "...rwrwrwrw...", "rrrrrrrrrrrrrr", "rrrrrrrrrrrrrr"],
   3: ["..kkkkkk..", "..kkkkkk..", "..rrrrrr..", ".kkkkkkkk.", "kkkkkkkkkk"],
   4: ["....b.....", "..bbbbbb..", ".bbbbbbbb.", ".bbbbbbbb.", "..bbbbbb.."],
-  5: ["............", "...rrrrrr...", "..rrrrrrrr..", "rrrrrrrrrrrr", "r..........r"],
-  6: [".....ss.....", "...ssssss...", "..ssssssss..", "ssssssssssss", "ssssssssssss"],
-  7: ["............", "...kkkkkk...", "..kkkkkkkk..", "ssssssssssss", "ssssssssssss"],
+  5: ["..............", "....rrrrrr....", "...rrrrrrrr...", "rrrrrrrrrrrrrr", "r............r"],
+  6: ["......ss......", "....ssssss....", "...ssssssss...", "ssssssssssssss", "ssssssssssssss"],
+  7: ["..............", "....kkkkkk....", "...kkkkkkkk...", "ssssssssssssss", "ssssssssssssss"],
   8: ["..........", ".y.y.y.y..", ".yyyyyyy..", ".yyykyyy..", ".yyyyyyy.."],
   9: ["..y.y.y...", ".y.y.y.y..", ".yyyyyyy..", ".yyykyyy..", ".yyyyyyy.."],
   10: [".......ppp", ".....pppp.", "...ppypp..", "..pppppp..", ".pppppppp."],
@@ -112,8 +112,8 @@ const NECKWEAR = {
   3: { row: 13, art: ["..r..r..", "..rrrr..", "...rr..."] },
   4: { row: 13, art: ["bbbbbbbb", "b......b", "b......."] },
   8: { row: 13, art: ["y......y", ".y....y.", "..yyyy.."] },
-  9: { row: 13, art: ["pppppppppp", "pppppppppp"] },
-  10: { row: 13, art: ["..yyyyyy..", "pppppppppp", "pppppppppp"] },
+  9: { row: 13, art: ["pppppppppppp", "pppppppppppp"] },
+  10: { row: 13, art: ["...yyyyyy...", "pppppppppppp", "pppppppppppp"] },
 };
 
 /**
@@ -187,8 +187,10 @@ function buildBody(cat) {
   rect(grid, X1 - 4, MUZZLE_ROW, X1 - 4, MUZZLE_ROW, "i");
 
   // Лапы: четыре тумбы по две клетки. Просветы 1–2–1: средний шире, поэтому
-  // видно переднюю и заднюю пары, а не забор из восьми палок.
-  for (const x of [X0, X0 + 3, X1 - 4, X1 - 1]) {
+  // видно переднюю и заднюю пары, а не забор из восьми палок. По клетке
+  // корпуса остаётся слева и справа от крайних лап — иначе бока выглядят
+  // срезанными ровно по ноге.
+  for (const x of [X0 + 1, X0 + 4, X1 - 5, X1 - 2]) {
     rect(grid, x, LEG_TOP, x + 1, ROWS - 3, "f");
   }
 

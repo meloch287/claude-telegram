@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { extname, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -121,14 +122,19 @@ function profilePayload(userId: number) {
   };
 }
 
-async function serveStatic(pathname: string): Promise<{ body: Buffer; type: string } | null> {
+async function serveStatic(
+  pathname: string,
+): Promise<{ body: Buffer; type: string; etag: string } | null> {
   const relative = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
   // normalize + префиксная проверка: без них `../../etc/passwd` уехал бы наружу.
   const target = resolve(PUBLIC_DIR, normalize(relative));
   if (target !== PUBLIC_DIR && !target.startsWith(PUBLIC_DIR + "/")) return null;
   try {
     const body = await readFile(target);
-    return { body, type: MIME[extname(target)] ?? "application/octet-stream" };
+    // Метка по содержимому, а не по времени файла: пересборка образа меняет
+    // время у всего сразу, и браузер зря перекачивал бы неизменившееся.
+    const etag = `"${createHash("sha1").update(body).digest("base64url").slice(0, 16)}"`;
+    return { body, type: MIME[extname(target)] ?? "application/octet-stream", etag };
   } catch {
     return null;
   }
@@ -171,9 +177,21 @@ export function startMiniAppServer(): void {
       res.end("Не найдено");
       return;
     }
+    // Совпала метка — значит файл тот же, отдаём 304 без тела.
+    if (req.headers["if-none-match"] === asset.etag) {
+      res.writeHead(304, { etag: asset.etag, "cache-control": "no-cache" });
+      res.end();
+      return;
+    }
+
     res.writeHead(200, {
       "content-type": asset.type,
-      "cache-control": "public, max-age=300",
+      // no-cache — это не «не кешируй», а «спроси перед использованием».
+      // Прежние пять минут в WebView Telegram превращались в часы: правка
+      // доезжала до сервера, а пользователь видел старую картинку и считал,
+      // что ничего не изменилось. Перепроверка стоит один 304 на файл.
+      "cache-control": "no-cache",
+      etag: asset.etag,
       // Мини-апп встраивается только в Telegram; чужие фреймы не нужны.
       "content-security-policy":
         "default-src 'self'; script-src 'self' https://telegram.org; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors https://web.telegram.org https://telegram.org",
