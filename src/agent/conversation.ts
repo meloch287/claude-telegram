@@ -149,6 +149,9 @@ export class Conversation {
   #busy = false;
   #activity: string[] = [];
   #liveText = "";
+  #liveThinking = "";
+  /** tool_use_id → имя инструмента: результаты приходят отдельными сообщениями. */
+  #toolNames = new Map<string, string>();
   #lastText: string | null = null;
   #resumeSessionId: string | null;
   #closed = false;
@@ -160,6 +163,14 @@ export class Conversation {
 
   /** Состояние рабочей папки до задачи — чтобы понять, что агент создал. */
   #before: Snapshot | null = null;
+
+  /**
+   * Последняя известная заполненность контекста.
+   *
+   * SDK кладёт её на сообщения агента даром, поэтому запоминаем: отдельный
+   * запрос ходит в API и может не ответить, а показать что-то надо всегда.
+   */
+  #context: { percentage: number; total: number; max: number } | null = null;
 
   constructor(deps: ConversationDeps) {
     this.#deps = deps;
@@ -186,6 +197,8 @@ export class Conversation {
     this.#busy = true;
     this.#activity = [];
     this.#liveText = "";
+    this.#liveThinking = "";
+    this.#toolNames.clear();
     this.#lastText = text;
     // Снимок до работы: по разнице после результата видно, какие файлы
     // появились или изменились, и их можно вернуть в чат.
@@ -222,6 +235,27 @@ export class Conversation {
     this.#deps.permissionMode = mode;
     if (!this.#query) return;
     await this.#query.setPermissionMode(mode);
+  }
+
+  /** Насколько заполнено окно контекста. null — узнать не удалось. */
+  async contextUsage(): Promise<{ percentage: number; total: number; max: number } | null> {
+    if (!this.#query) return this.#context;
+    try {
+      const response = await this.#query.getContextUsage();
+      const usage = (response as { context_usage?: unknown }).context_usage ?? response;
+      const u = usage as { percentage?: number; total_tokens?: number; raw_max_tokens?: number };
+      if (typeof u.percentage !== "number") return this.#context;
+      this.#context = {
+        percentage: u.percentage,
+        total: u.total_tokens ?? 0,
+        max: u.raw_max_tokens ?? 0,
+      };
+      return this.#context;
+    } catch {
+      // Запрос ходит в API и может не ответить. Тогда отдаём последнее, что
+      // приезжало с сообщениями агента, — это лучше, чем «не знаю».
+      return this.#context;
+    }
   }
 
   async setModel(model: string): Promise<void> {
@@ -351,6 +385,61 @@ export class Conversation {
           await this.#renderActivity(true);
           return;
         }
+        // Сжатие контекста: без отчёта /compact выглядит как зависание.
+        if (message.subtype === "compact_boundary") {
+          const meta = (message as unknown as {
+            compact_metadata?: { trigger?: string; pre_tokens?: number; post_tokens?: number };
+          }).compact_metadata;
+          const before = meta?.pre_tokens ?? 0;
+          const after = meta?.post_tokens;
+          const how = meta?.trigger === "auto" ? "сам" : "по просьбе";
+          const sizes =
+            after === undefined
+              ? `было ${formatTokensShort(before)}`
+              : `${formatTokensShort(before)} → ${formatTokensShort(after)}`;
+          await output.send(`🗜️ Контекст сжат (${how}): ${sizes}. Нить разговора сохранена.`);
+          return;
+        }
+
+        // Фоновая задача завершилась. Она может доигрывать уже после ответа,
+        // и без этого сообщения результат просто терялся.
+        if (message.subtype === "task_notification") {
+          const task = message as unknown as {
+            status?: string;
+            summary?: string;
+            output_file?: string;
+          };
+          const mark = task.status === "completed" ? "✅" : task.status === "failed" ? "❌" : "⏹️";
+          const where = task.output_file ? `\n\nВывод: <code>${esc(task.output_file)}</code>` : "";
+          await output.send(
+            `${mark} Фоновая задача: ${esc(task.summary ?? task.status ?? "завершилась")}${where}`,
+          );
+          return;
+        }
+
+        if (message.subtype === "background_tasks_changed") {
+          const payload = message as unknown as {
+            tasks?: { description: string }[];
+          };
+          const tasks = payload.tasks ?? [];
+          if (tasks.length > 0) {
+            const list = tasks.map((t) => `• ${esc(t.description)}`).join("\n");
+            await output.send(`⏳ В фоне сейчас:\n${list}`);
+          }
+          return;
+        }
+
+        // Обрыв связи с API. Через прокси это не редкость, и молчание тут
+        // неотличимо от зависшего бота.
+        if (message.subtype === "api_retry") {
+          const retry = message as unknown as { attempt?: number; max_retries?: number };
+          this.#activity.push(
+            `🔄 связь оборвалась, переподключаюсь (${retry.attempt ?? 1} из ${retry.max_retries ?? 1})`,
+          );
+          await this.#renderActivity(true);
+          return;
+        }
+
         if (message.subtype === "task_progress") {
           const progress = message as unknown as { description?: string };
           if (progress.description) {
@@ -366,16 +455,42 @@ export class Conversation {
         // Кусочки текста по мере генерации: из них и собирается живой ответ.
         const event = message.event as {
           type?: string;
-          delta?: { type?: string; text?: string };
+          delta?: { type?: string; text?: string; thinking?: string };
         };
-        if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
+        if (event.type !== "content_block_delta") return;
+
+        if (event.delta?.type === "text_delta") {
           this.#liveText += event.delta.text ?? "";
           await output.stream(this.#liveText);
+          return;
+        }
+
+        // Рассуждение до ответа. Раньше оно пропадало, и долгая пауза выглядела
+        // как зависший бот. В черновик оно идёт до первого куска ответа —
+        // ровно как в терминале, где видно, что модель думает.
+        if (event.delta?.type === "thinking_delta") {
+          this.#liveThinking += event.delta.thinking ?? "";
+          if (!this.#liveText) {
+            // Целиком рассуждение в чат не тащим: важен признак жизни и о чём
+            // сейчас мысль, а не весь поток.
+            await output.stream(`💭 ${this.#liveThinking.slice(-600)}`);
+          }
         }
         return;
       }
 
       case "assistant": {
+        const usage = (message as unknown as {
+          context_usage?: { percentage?: number; total_tokens?: number; raw_max_tokens?: number };
+        }).context_usage;
+        if (usage && typeof usage.percentage === "number") {
+          this.#context = {
+            percentage: usage.percentage,
+            total: usage.total_tokens ?? 0,
+            max: usage.raw_max_tokens ?? 0,
+          };
+        }
+
         for (const block of message.message.content) {
           if (block.type === "text" && block.text.trim()) {
             const full = block.text.trim();
@@ -394,10 +509,46 @@ export class Conversation {
             }
             this.#liveText = "";
           } else if (block.type === "tool_use") {
+            this.#toolNames.set(block.id, block.name);
             this.#activity.push(
               describeToolShort(block.name, (block.input ?? {}) as Record<string, unknown>),
             );
             await this.#renderActivity();
+          }
+        }
+        return;
+      }
+
+      // Результаты инструментов. Показываем не всё: вывод Read или Grep занял бы
+      // экран без пользы. Но ошибка и вывод команды — это то, ради чего человек
+      // и смотрит в чат.
+      case "user": {
+        const content = message.message.content;
+        if (typeof content === "string" || !Array.isArray(content)) return;
+        for (const block of content) {
+          if (typeof block !== "object" || block === null) continue;
+          const result = block as {
+            type?: string;
+            tool_use_id?: string;
+            is_error?: boolean;
+            content?: unknown;
+          };
+          if (result.type !== "tool_result") continue;
+
+          const toolName = this.#toolNames.get(result.tool_use_id ?? "") ?? "";
+          const text = flattenToolResult(result.content);
+          if (!text) continue;
+
+          if (result.is_error) {
+            await output.send(
+              `⚠️ <b>${esc(toolName || "инструмент")}</b> вернул ошибку:\n${preBlock(text, 900)}`,
+            );
+            continue;
+          }
+          // Вывод команд показываем: упавшие тесты и ошибки сборки иначе не
+          // доходят вовсе — остаётся только пересказ агента.
+          if (toolName === "Bash") {
+            await output.send(`🖥️ ${preBlock(text, 900)}`);
           }
         }
         return;
@@ -534,6 +685,28 @@ function totalTokens(message: Extract<SDKMessage, { type: "result" }>): number {
     total += usage.inputTokens + usage.outputTokens;
   }
   return total;
+}
+
+/** Содержимое tool_result бывает строкой и массивом блоков. */
+export function flattenToolResult(content: unknown): string {
+  if (typeof content === "string") return content.trim();
+  if (!Array.isArray(content)) return "";
+  const parts: string[] = [];
+  for (const block of content) {
+    if (typeof block === "string") parts.push(block);
+    else if (typeof block === "object" && block !== null) {
+      const b = block as { type?: string; text?: string };
+      if (b.type === "text" && b.text) parts.push(b.text);
+    }
+  }
+  return parts.join("\n").trim();
+}
+
+/** Вывод команды в моноширинном блоке, обрезанный с хвоста, а не с головы. */
+export function preBlock(text: string, limit: number): string {
+  const trimmed =
+    text.length <= limit ? text : `…(начало срезано)\n${text.slice(text.length - limit)}`;
+  return `<pre>${esc(trimmed)}</pre>`;
 }
 
 function formatTokensShort(n: number): string {

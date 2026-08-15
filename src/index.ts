@@ -1,6 +1,6 @@
 import { Bot, GrammyError, HttpError, InlineKeyboard, InputFile, type CommandContext, type Context } from "grammy";
-import { statSync } from "node:fs";
-import { basename, resolve, sep } from "node:path";
+import { statSync, readdirSync } from "node:fs";
+import { basename, join, resolve, sep } from "node:path";
 import { listSessions, type PermissionMode } from "@anthropic-ai/claude-agent-sdk";
 import { config } from "./config.js";
 import {
@@ -71,6 +71,38 @@ bot.use(async (ctx, next) => {
     await ctx.reply("Этот бот приватный.");
     return;
   }
+  await next();
+});
+
+/**
+ * В группе бот не должен отвечать на каждую реплику.
+ *
+ * Белый список закрывает доступ, но не болтливость: в общем чате двух
+ * совладельцев бот иначе влезал бы в любой разговор. Поэтому в группах он
+ * отзывается только на обращение — упоминание, ответ на его сообщение или
+ * команду.
+ */
+bot.use(async (ctx, next) => {
+  const chat = ctx.chat;
+  if (!chat || chat.type === "private") {
+    await next();
+    return;
+  }
+
+  const message = ctx.message;
+  if (!message) {
+    await next();
+    return;
+  }
+
+  const text = message.text ?? message.caption ?? "";
+  const username = ctx.me.username;
+  const addressed =
+    text.startsWith("/") ||
+    (username && text.includes(`@${username}`)) ||
+    message.reply_to_message?.from?.id === ctx.me.id;
+
+  if (!addressed) return;
   await next();
 });
 
@@ -199,6 +231,35 @@ bot.command("file", async (ctx) => {
   });
 });
 
+/** Насколько заполнено окно контекста — чтобы понимать, когда пора /compact. */
+bot.command("context", async (ctx) => {
+  const session = getSession(ctx.chat.id);
+  if (!session) {
+    await ctx.reply("Живого чата нет — контекст пустой.");
+    return;
+  }
+  const usage = await session.conversation.contextUsage();
+  if (!usage) {
+    await ctx.reply("Не смог узнать заполненность контекста в этой сессии.");
+    return;
+  }
+
+  // Полоса нагляднее числа, но само число оставляем: по нему принимают решение.
+  const filled = Math.min(10, Math.round(usage.percentage / 10));
+  const bar = "█".repeat(filled) + "░".repeat(10 - filled);
+  const hint =
+    usage.percentage >= 80
+      ? "\n\nПора сжимать: /compact"
+      : usage.percentage >= 50
+        ? "\n\nЕщё есть запас."
+        : "";
+  await ctx.reply(
+    `<b>Контекст</b>\n<code>${bar}</code> ${usage.percentage}%\n` +
+      `${usage.total.toLocaleString("ru-RU")} из ${usage.max.toLocaleString("ru-RU")} токенов${hint}`,
+    { parse_mode: "HTML" },
+  );
+});
+
 bot.command("stop", async (ctx) => {
   const session = getSession(ctx.chat.id);
   if (!session) {
@@ -221,9 +282,30 @@ bot.command("resume", async (ctx) => {
   const project = chatRow?.project ?? "default";
   const cwd = workspaceFor(userId, project);
 
+  // «/resume все» — чаты из всех проектов пользователя. Без этого чат,
+  // начатый в другом проекте, найти было нельзя вовсе.
+  const wantsAll = /^(все|всё|all)$/i.test(ctx.match?.toString().trim() ?? "");
+
   let sessions;
   try {
-    sessions = await listSessions({ dir: cwd, limit: 10 });
+    if (wantsAll) {
+      const root = resolve(config.workspaceRoot, String(userId));
+      const projects = readdirSync(root, { withFileTypes: true })
+        .filter((e) => e.isDirectory())
+        .map((e) => e.name);
+      const found = await Promise.all(
+        projects.map(async (name) => {
+          const list = await listSessions({ dir: join(root, name), limit: 10 }).catch(() => []);
+          return list.map((item) => ({ ...item, project: name }));
+        }),
+      );
+      sessions = found
+        .flat()
+        .sort((a, b) => Number(new Date(b.lastModified)) - Number(new Date(a.lastModified)))
+        .slice(0, 10);
+    } else {
+      sessions = await listSessions({ dir: cwd, limit: 10 });
+    }
   } catch (error) {
     await ctx.reply(`⚠️ Не смог прочитать список чатов: ${esc(String(error).slice(0, 200))}`, {
       parse_mode: "HTML",
@@ -233,7 +315,9 @@ bot.command("resume", async (ctx) => {
 
   if (sessions.length === 0) {
     await ctx.reply(
-      `В проекте <code>${esc(project)}</code> прошлых чатов нет. Напиши что-нибудь — начнётся первый.`,
+      wantsAll
+        ? "Прошлых чатов нет ни в одном проекте. Напиши что-нибудь — начнётся первый."
+        : `В проекте <code>${esc(project)}</code> прошлых чатов нет. Напиши что-нибудь — начнётся первый.`,
       { parse_mode: "HTML" },
     );
     return;
@@ -249,14 +333,18 @@ bot.command("resume", async (ctx) => {
       minute: "2-digit",
     });
     const title = (s.customTitle || s.summary || s.firstPrompt || "без названия").slice(0, 48);
-    lines.push(`${index + 1}. <b>${esc(title)}</b>\n    ${when}`);
+    const where = "project" in s ? ` · ${esc(String(s.project))}` : "";
+    lines.push(`${index + 1}. <b>${esc(title)}</b>\n    ${when}${where}`);
     kb.text(`${index + 1}. ${title.slice(0, 28)}`, `rs:${s.sessionId}`).row();
   });
 
-  await ctx.reply(
-    `Чаты проекта <code>${esc(project)}</code>:\n\n${lines.join("\n")}`,
-    { parse_mode: "HTML", reply_markup: kb },
-  );
+  const heading = wantsAll
+    ? "Чаты по всем проектам:"
+    : `Чаты проекта <code>${esc(project)}</code> (все — <code>/resume все</code>):`;
+  await ctx.reply(`${heading}\n\n${lines.join("\n")}`, {
+    parse_mode: "HTML",
+    reply_markup: kb,
+  });
 });
 
 bot.callbackQuery(/^rs:(.+)$/, async (ctx) => {
@@ -558,6 +646,39 @@ bot.callbackQuery(/^q:([^:]+):(\d+)$/, async (ctx) => {
 // ── Обычные сообщения ────────────────────────────────────────────────────────
 
 /**
+ * Отдать реплику агенту. Один путь на все виды сообщений: текст, голос, файл,
+ * пересылку — иначе обработка ошибок разъезжается по копиям.
+ */
+async function runTask(ctx: Context, prompt: string): Promise<boolean> {
+  const userId = ctx.from?.id;
+  const chatId = ctx.chat?.id;
+  if (userId === undefined || chatId === undefined) return false;
+
+  recordMessage(userId);
+  try {
+    const session = ensureSession({
+      api: ctx.api,
+      chatId,
+      userId,
+      notify: (html) => ctx.reply(html, { parse_mode: "HTML" }),
+    });
+    await session.conversation.send(prompt);
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await ctx.reply(`⚠️ Не смог запустить агента: ${esc(message)}`, { parse_mode: "HTML" });
+    return false;
+  }
+}
+
+/** Проверка входа: без неё любой обработчик молча ничего не делает. */
+async function requireLogin(ctx: Context): Promise<boolean> {
+  if (getCredential(ctx.from!.id)) return true;
+  await sendStart(ctx);
+  return false;
+}
+
+/**
  * Фото и документы. Файл кладём в папку проекта, агенту передаём путь и подпись:
  * «вот скриншот, объясняю» работает как обычная задача, только с картинкой.
  */
@@ -598,19 +719,7 @@ bot.on(["message:photo", "message:document"], async (ctx) => {
     ? `${caption}\n\nФайл лежит здесь: ${saved.path}`
     : `Пользователь прислал файл: ${saved.path}. Посмотри на него и скажи, что видишь.`;
 
-  recordMessage(userId);
-  try {
-    const session = ensureSession({
-      api: ctx.api,
-      chatId,
-      userId,
-      notify: (html) => ctx.reply(html, { parse_mode: "HTML" }),
-    });
-    await session.conversation.send(prompt);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    await ctx.reply(`⚠️ Не смог запустить агента: ${esc(message)}`, { parse_mode: "HTML" });
-  }
+  await runTask(ctx, prompt);
 });
 
 /**
@@ -618,6 +727,76 @@ bot.on(["message:photo", "message:document"], async (ctx) => {
  * будто он сломался. Теперь либо расшифровываем и работаем как с текстом, либо
  * честно говорим, что расшифровка не подключена.
  */
+/**
+ * Видео, видеокружки и гифки. Смотреть их агент не умеет, поэтому честно
+ * сохраняем файл и говорим, где он лежит: дальше человек скажет, что с ним
+ * делать. Молчать нельзя — это выглядит как поломка.
+ */
+bot.on(["message:video", "message:video_note", "message:animation"], async (ctx) => {
+  if (!(await requireLogin(ctx))) return;
+
+  const media =
+    ctx.message.video ?? ctx.message.video_note ?? ctx.message.animation;
+  if (!media) return;
+
+  const chatRow = getChat(ctx.chat.id);
+  const cwd = workspaceFor(ctx.from.id, chatRow?.project ?? "default");
+  const suggested =
+    ("file_name" in media && media.file_name) || `видео-${Date.now()}.mp4`;
+
+  let saved;
+  try {
+    saved = await saveTelegramFile(ctx.api, media.file_id, cwd, suggested);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await ctx.reply(`⚠️ Не смог принять видео: ${esc(message)}`, { parse_mode: "HTML" });
+    return;
+  }
+
+  const caption = ctx.message.caption?.trim();
+  await ctx.reply(
+    `🎬 Сохранил <code>${esc(saved.name)}</code>. Смотреть видео я не умею, но файл на месте — скажи, что с ним делать.`,
+    { parse_mode: "HTML" },
+  );
+
+  await runTask(
+    ctx,
+    caption
+      ? `${caption}\n\nВидеофайл лежит здесь: ${saved.path}`
+      : `Пользователь прислал видеофайл: ${saved.path}. Содержимое посмотреть нельзя — при необходимости используй инструменты (например, ffmpeg через Bash).`,
+  );
+});
+
+/**
+ * Стикеры, геопозиция, контакты, опросы. Смысл в них есть, просто он не
+ * текстовый — переводим в текст и отдаём как обычную реплику.
+ */
+bot.on(["message:sticker", "message:location", "message:contact", "message:poll"], async (ctx) => {
+  if (!(await requireLogin(ctx))) return;
+
+  const message = ctx.message;
+  let prompt: string;
+
+  if (message.sticker) {
+    const emoji = message.sticker.emoji ?? "";
+    prompt = `Пользователь прислал стикер ${emoji} (набор «${message.sticker.set_name ?? "без набора"}»).`;
+  } else if (message.location) {
+    const { latitude, longitude } = message.location;
+    prompt = `Пользователь прислал геопозицию: ${latitude}, ${longitude}.`;
+  } else if (message.contact) {
+    const contact = message.contact;
+    const name = [contact.first_name, contact.last_name].filter(Boolean).join(" ");
+    prompt = `Пользователь прислал контакт: ${name}, телефон ${contact.phone_number}.`;
+  } else if (message.poll) {
+    const options = message.poll.options.map((o) => `- ${o.text}`).join("\n");
+    prompt = `Пользователь прислал опрос «${message.poll.question}»:\n${options}`;
+  } else {
+    return;
+  }
+
+  await runTask(ctx, prompt);
+});
+
 bot.on(["message:voice", "message:audio"], async (ctx) => {
   const userId = ctx.from.id;
   const chatId = ctx.chat.id;
@@ -666,19 +845,7 @@ bot.on(["message:voice", "message:audio"], async (ctx) => {
     parse_mode: "HTML",
   });
 
-  recordMessage(userId);
-  try {
-    const session = ensureSession({
-      api: ctx.api,
-      chatId,
-      userId,
-      notify: (html) => ctx.reply(html, { parse_mode: "HTML" }),
-    });
-    await session.conversation.send(text);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    await ctx.reply(`⚠️ Не смог запустить агента: ${esc(message)}`, { parse_mode: "HTML" });
-  }
+  await runTask(ctx, text);
 });
 
 /**
@@ -793,22 +960,10 @@ bot.on("message:text", async (ctx) => {
   const origin = ctx.message.forward_origin;
   if (origin) {
     bufferForward(chatId, `[${forwardAuthor(origin)}]: ${text}`, async (body, count) => {
-      recordMessage(userId);
-      try {
-        const session = ensureSession({
-          api: ctx.api,
-          chatId,
-          userId,
-          notify: (html) => ctx.reply(html, { parse_mode: "HTML" }),
-        });
-        await ctx.reply(
-          count === 1 ? "📨 Принял пересланное." : `📨 Принял ${count} пересланных сообщений.`,
-        );
-        await session.conversation.send(body);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        await ctx.reply(`⚠️ Не смог запустить агента: ${esc(message)}`, { parse_mode: "HTML" });
-      }
+      await ctx.reply(
+        count === 1 ? "📨 Принял пересланное." : `📨 Принял ${count} пересланных сообщений.`,
+      );
+      await runTask(ctx, body);
     });
     return;
   }
@@ -829,24 +984,24 @@ bot.on("message:text", async (ctx) => {
     await ctx.reply(`💬 Новый чат: <b>${esc(text.slice(0, 60))}</b>`, { parse_mode: "HTML" });
   }
 
-  recordMessage(userId);
   const unlocked = checkAchievements(userId, { type: "message", hour: new Date().getHours() });
-
-  try {
-    const session = ensureSession({
-      api: ctx.api,
-      chatId,
-      userId,
-      notify: (html) => ctx.reply(html, { parse_mode: "HTML" }),
-    });
-    await session.conversation.send(text);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    await ctx.reply(`⚠️ Не смог запустить агента: ${esc(message)}`, { parse_mode: "HTML" });
-    return;
-  }
-
+  if (!(await runTask(ctx, text))) return;
   if (unlocked.length > 0) await ctx.reply(renderUnlocked(unlocked), { parse_mode: "HTML" });
+});
+
+/**
+ * Всё, для чего обработчика нет.
+ *
+ * Стоит последним и ловит остаток: игры, платежи, служебные события. Молчание
+ * на сообщение неотличимо от поломки, поэтому лучше честно сказать, что не
+ * понял, чем сделать вид, что ничего не приходило.
+ */
+bot.on("message", async (ctx) => {
+  if (!getCredential(ctx.from.id)) return;
+  await ctx.reply(
+    "🤷 Такое я пока не разбираю. Понимаю текст, голос, фото, документы, видео, " +
+      "стикеры, геопозицию, контакты и опросы — а ещё пересылки.",
+  );
 });
 
 // ── Ошибки и завершение ──────────────────────────────────────────────────────
@@ -876,6 +1031,7 @@ await bot.api.setMyCommands([
   { command: "clear", description: "очистить контекст" },
   { command: "compact", description: "сжать контекст" },
   { command: "file", description: "забрать файл из проекта" },
+  { command: "context", description: "насколько заполнен контекст" },
   { command: "stop", description: "остановить агента" },
   { command: "mode", description: "режим разрешений" },
   { command: "model", description: "сменить модель" },

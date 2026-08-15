@@ -109,9 +109,18 @@ export class TelegramOutput implements ConversationOutput {
   /**
    * Отдать файл. Так возвращаются результаты работы и длинные куски кода: в
    * сообщении они всё равно не помещаются, а файл открывается и сохраняется.
+   *
+   * Картинки уходят фотографией: график или скриншот, присланный документом,
+   * не показывает превью, и чтобы его увидеть, надо скачивать файл.
    */
   async document(path: string, caption?: string, fileName?: string): Promise<void> {
     try {
+      if (isImage(path)) {
+        await this.#api.sendPhoto(this.#chatId, new InputFile(path, fileName), {
+          ...(caption ? { caption, parse_mode: "HTML" as const } : {}),
+        });
+        return;
+      }
       await this.#api.sendDocument(this.#chatId, new InputFile(path, fileName), {
         ...(caption ? { caption, parse_mode: "HTML" as const } : {}),
       });
@@ -285,6 +294,16 @@ export class TelegramOutput implements ConversationOutput {
       if (!isBenignEditError(error)) console.error(`[output:${this.#chatId}] disableKeyboard:`, error);
     }
   }
+}
+
+/**
+ * Картинка ли это.
+ *
+ * SVG сюда не входит намеренно: Telegram его как фото не принимает, поэтому он
+ * должен уйти документом, а не потеряться на ошибке отправки.
+ */
+export function isImage(path: string): boolean {
+  return /\.(png|jpe?g|gif|webp)$/i.test(path);
 }
 
 function stripTags(html: string): string {

@@ -389,3 +389,38 @@ test("массовая операция не выдаётся за резуль�
   assert.equal(report.total, 60);
   assert.deepEqual(report.files, [], "при массовой операции файлы в чат не идут");
 });
+
+test("картинки уходят фотографией, остальное документом", async () => {
+  const { isImage } = await import("../src/bot/output.js");
+  assert.equal(isImage("график.png"), true);
+  assert.equal(isImage("/путь/скриншот.JPEG"), true);
+  assert.equal(isImage("анимация.gif"), true);
+  assert.equal(isImage("отчёт.pdf"), false);
+  assert.equal(isImage("код.ts"), false);
+  // Telegram не принимает SVG как фото — он должен уйти документом.
+  assert.equal(isImage("схема.svg"), false);
+});
+
+// ── Вывод инструментов ───────────────────────────────────────────────────────
+
+test("результат инструмента собирается из строки и из блоков", async () => {
+  const { flattenToolResult } = await import("../src/agent/conversation.js");
+  assert.equal(flattenToolResult("  вывод команды  "), "вывод команды");
+  assert.equal(
+    flattenToolResult([{ type: "text", text: "первая" }, { type: "text", text: "вторая" }]),
+    "первая\nвторая",
+  );
+  // Картинки и прочее в текст не превращаем — только выкидываем.
+  assert.equal(flattenToolResult([{ type: "image", source: {} }]), "");
+  assert.equal(flattenToolResult(undefined), "");
+});
+
+test("длинный вывод команды режется с начала, а не с конца", async () => {
+  const { preBlock } = await import("../src/agent/conversation.js");
+  // У команд важен хвост: ошибка и итог печатаются последними.
+  const output = [...Array(200)].map((_, i) => `строка ${i}`).join("\n");
+  const rendered = preBlock(output, 300);
+  assert.ok(rendered.includes("строка 199"), "конец вывода должен остаться");
+  assert.ok(!rendered.includes("строка 0\n"), "начало должно быть срезано");
+  assert.ok(rendered.includes("начало срезано"), "обрезка должна быть явной");
+});
