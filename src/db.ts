@@ -83,6 +83,15 @@ CREATE TABLE IF NOT EXISTS usage_events (
 
 CREATE INDEX IF NOT EXISTS usage_events_by_user_at ON usage_events (user_id, at);
 
+-- Доступ, выданный из чата командой /admin. Список из .env этим не отменяется:
+-- он остаётся последним рубежом на случай, если базу потеряли или испортили.
+CREATE TABLE IF NOT EXISTS allowed_users (
+  user_id  INTEGER PRIMARY KEY,
+  note     TEXT,
+  added_by INTEGER NOT NULL,
+  added_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS projects_seen (
   user_id INTEGER NOT NULL,
   project TEXT    NOT NULL,
@@ -254,6 +263,12 @@ const stmts = {
       seen_at = excluded.seen_at
   `),
   listLimits: db.prepare("SELECT * FROM rate_limits WHERE user_id = ? ORDER BY limit_type"),
+  listAllowed: db.prepare("SELECT * FROM allowed_users ORDER BY added_at"),
+  allowUser: db.prepare(
+    "INSERT INTO allowed_users (user_id, note, added_by, added_at) VALUES (?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET note = excluded.note",
+  ),
+  disallowUser: db.prepare("DELETE FROM allowed_users WHERE user_id = ?"),
+  isAllowed: db.prepare("SELECT user_id FROM allowed_users WHERE user_id = ?"),
   addEvent: db.prepare(
     "INSERT INTO usage_events (user_id, at, tokens, cost_usd) VALUES (?, ?, ?, ?)",
   ),
@@ -494,4 +509,35 @@ export function pruneUsageEvents(): number {
   const edge = Date.now() - 8 * 24 * 60 * 60 * 1000;
   const result = stmts.prunEvents.run(edge);
   return Number(result.changes ?? 0);
+}
+
+/**
+ * Кому разрешено пользоваться ботом сверх списка из .env.
+ *
+ * Живёт в базе, а не в переменной окружения: добавлять человека перезапуском
+ * контейнера — не дело. Список из .env остаётся главным и всегда действует,
+ * даже если базу потерять; отсюда же его нельзя отозвать.
+ */
+export interface AllowedUserRow {
+  user_id: number;
+  note: string | null;
+  added_by: number;
+  added_at: number;
+}
+
+export function listAllowedUsers(): AllowedUserRow[] {
+  return stmts.listAllowed.all() as unknown as AllowedUserRow[];
+}
+
+export function allowUser(userId: number, addedBy: number, note: string | null): void {
+  stmts.allowUser.run(userId, note, addedBy, Date.now());
+}
+
+export function disallowUser(userId: number): boolean {
+  const result = stmts.disallowUser.run(userId);
+  return Number(result.changes ?? 0) > 0;
+}
+
+export function isUserAllowedInDb(userId: number): boolean {
+  return stmts.isAllowed.get(userId) !== undefined;
 }

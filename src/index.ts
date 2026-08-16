@@ -17,6 +17,10 @@ import {
   getCredential,
   getOrCreateUser,
   getUsageToday,
+  allowUser,
+  disallowUser,
+  isUserAllowedInDb,
+  listAllowedUsers,
   listRateLimits,
   usageSince,
   recordMessage,
@@ -65,10 +69,8 @@ import { formatSize } from "./bot/artifacts.js";
 import { cloneRepository } from "./bot/repos.js";
 import {
   commitAll,
-  createPr,
   diff as gitDiff,
   findRepos,
-  push,
   status,
   suggestCommitMessage,
   type RepoStatus,
@@ -92,12 +94,32 @@ startFileLog();
 
 const bot = new Bot(config.botToken);
 
+/** Владелец — первый в списке из .env. Он один распоряжается доступом. */
+function ownerId(): number | undefined {
+  return config.allowedUserIds[0];
+}
+
+/**
+ * Кому можно пользоваться ботом: список из .env плюс выданные из чата.
+ *
+ * Список из .env главный и неотзываемый — он остаётся последним рубежом, если
+ * базу потеряли или испортили. Выданное командой /admin лежит в базе и
+ * отзывается там же.
+ */
+function isAllowed(userId: number): boolean {
+  if (config.allowedUserIds.length === 0) return true;
+  if (config.allowedUserIds.includes(userId)) return true;
+  return isUserAllowedInDb(userId);
+}
+
 /** Доступ. Без белого списка бот отдаёт шелл кому угодно, поэтому проверка идёт первой. */
 bot.use(async (ctx, next) => {
   const userId = ctx.from?.id;
   if (userId === undefined) return;
-  if (config.allowedUserIds.length > 0 && !config.allowedUserIds.includes(userId)) {
-    await ctx.reply("Этот бот приватный.");
+  if (!isAllowed(userId)) {
+    // Свой номер человеку виден: владельцу он нужен, чтобы добавить его,
+    // а посторонний узнаёт только то, что и так знает про себя.
+    await ctx.reply(`Этот бот приватный. Твой номер: ${userId}`);
     return;
   }
   await next();
@@ -195,28 +217,6 @@ bot.callbackQuery(/^auth:(subscription|api)$/, async (ctx) => {
 bot.command("new", async (ctx) => {
   await resetSession(ctx.chat.id, ctx.from!.id);
   await ctx.reply("🧹 Прошлый чат закрыт. Следующее сообщение начнёт новый.");
-});
-
-/** Привычное имя из Claude Code — делает то же, что /new. */
-bot.command("clear", async (ctx) => {
-  await resetSession(ctx.chat.id, ctx.from!.id);
-  await ctx.reply("🧹 Контекст очищен. Следующее сообщение начнёт новый чат.");
-});
-
-/**
- * Сжать контекст. Claude Code разбирает слэш-команды сам, если прислать их
- * обычной репликой, — поэтому просто передаём её в живую сессию, а не
- * изобретаем своё сжатие.
- */
-bot.command("compact", async (ctx) => {
-  const session = getSession(ctx.chat.id);
-  if (!session) {
-    await ctx.reply("Сжимать нечего: живого чата сейчас нет.");
-    return;
-  }
-  const hint = ctx.match?.toString().trim() ?? "";
-  await ctx.reply("🗜️ Сжимаю контекст…");
-  await session.conversation.send(hint ? `/compact ${hint}` : "/compact");
 });
 
 /** Забрать файл из рабочей папки проекта. */
@@ -622,56 +622,6 @@ bot.callbackQuery(/^gc:(\d+):(y|n)$/, async (ctx) => {
   }
 });
 
-bot.command("push", async (ctx) => {
-  const repo = await resolveRepo(ctx);
-  if (!repo) return;
-
-  const note = await ctx.reply("⏳ Отправляю…");
-  try {
-    await push(repo);
-    const state = await status(repo);
-    await ctx.api.editMessageText(
-      ctx.chat.id,
-      note.message_id,
-      `📤 Отправлено в <code>${esc(state.remote ?? state.branch)}</code>.`,
-      { parse_mode: "HTML" },
-    );
-  } catch (error) {
-    await ctx.api.editMessageText(
-      ctx.chat.id,
-      note.message_id,
-      `⚠️ ${esc((error as Error).message.slice(0, 500))}`,
-      { parse_mode: "HTML" },
-    );
-  }
-});
-
-bot.command("pr", async (ctx) => {
-  const repo = await resolveRepo(ctx);
-  if (!repo) return;
-
-  const title = ctx.match?.toString().trim() ?? "";
-  const note = await ctx.reply("⏳ Отправляю ветку и открываю pull request…");
-  try {
-    const state = await status(repo);
-    // Без заголовка отдаём gh --fill-first: он возьмёт первый коммит ветки.
-    const result = await createPr(repo, title || state.branch, "");
-    await ctx.api.editMessageText(
-      ctx.chat.id,
-      note.message_id,
-      `🔀 Pull request: ${esc(result.url)}`,
-      { parse_mode: "HTML" },
-    );
-  } catch (error) {
-    await ctx.api.editMessageText(
-      ctx.chat.id,
-      note.message_id,
-      `⚠️ ${esc((error as Error).message.slice(0, 500))}`,
-      { parse_mode: "HTML" },
-    );
-  }
-});
-
 bot.command("project", async (ctx) => {
   const userId = ctx.from!.id;
   const arg = ctx.match?.toString().trim() ?? "";
@@ -725,6 +675,117 @@ bot.command("logs", async (ctx) => {
   await ctx.replyWithDocument(new InputFile(Buffer.from(tail, "utf8"), "bot.log"), {
     caption: `Последние ${tail.split("\n").length} строк лога`,
   });
+});
+
+// ── Доступ к боту ────────────────────────────────────────────────────────────
+
+/**
+ * Управление списком тех, кому можно пользоваться ботом.
+ *
+ * Только владельцу: доступ сюда — это доступ к шеллу на машине, и раздавать
+ * его должен один человек, а не всякий, кого уже пустили.
+ */
+bot.command("admin", async (ctx) => {
+  const owner = ownerId();
+  if (owner === undefined || ctx.from!.id !== owner) {
+    await ctx.reply("Списком доступа распоряжается только владелец бота.");
+    return;
+  }
+
+  const arg = ctx.match?.toString().trim() ?? "";
+  const [действие, кто, ...остальное] = arg.split(/\s+/);
+
+  if (действие === "add" || действие === "del") {
+    const id = Number(кто);
+    if (!Number.isInteger(id) || id <= 0) {
+      await ctx.reply(
+        "Нужен числовой номер пользователя.\n\n" +
+          "Его видно в ответе бота, когда человек ему напишет: бот отвечает " +
+          "«этот бот приватный» и называет номер.",
+      );
+      return;
+    }
+    if (действие === "add") {
+      if (id === owner) {
+        await ctx.reply("Ты и так владелец — тебя добавлять некуда.");
+        return;
+      }
+      allowUser(id, owner, остальное.join(" ") || null);
+      await ctx.reply(`✅ Пустил <code>${id}</code>. Пусть напишет боту.`, { parse_mode: "HTML" });
+      return;
+    }
+    if (config.allowedUserIds.includes(id)) {
+      await ctx.reply(
+        "Этого не отозвать отсюда: он записан в ALLOWED_USER_IDS в .env. " +
+          "Убери его там и перезапусти бота.",
+      );
+      return;
+    }
+    await ctx.reply(
+      disallowUser(id) ? `🚫 Отозвал доступ у <code>${id}</code>.` : "Такого в списке и не было.",
+      { parse_mode: "HTML" },
+    );
+    return;
+  }
+
+  await showAccessList(ctx);
+});
+
+/** Кто сейчас в списке: неотзываемые из .env и выданные из чата — с кнопками. */
+async function showAccessList(ctx: CommandContext<Context> | Context): Promise<void> {
+  const fromEnv = config.allowedUserIds;
+  const fromDb = listAllowedUsers();
+
+  const lines = ["<b>Доступ к боту</b>", ""];
+  lines.push("<i>Из .env — отсюда не отзываются:</i>");
+  if (fromEnv.length === 0) {
+    lines.push("⚠️ список пуст — бот отвечает кому угодно");
+  } else {
+    fromEnv.forEach((id, index) => {
+      lines.push(`<code>${id}</code>${index === 0 ? " — владелец" : ""}`);
+    });
+  }
+
+  lines.push("", "<i>Выданы из чата:</i>");
+  if (fromDb.length === 0) {
+    lines.push("никого");
+  } else {
+    for (const row of fromDb) {
+      const when = new Date(row.added_at).toLocaleDateString("ru-RU");
+      lines.push(`<code>${row.user_id}</code>${row.note ? ` — ${esc(row.note)}` : ""} · с ${when}`);
+    }
+  }
+
+  lines.push(
+    "",
+    "<code>/admin add НОМЕР [заметка]</code> — пустить",
+    "<code>/admin del НОМЕР</code> — отозвать",
+    "",
+    "Номер человека бот называет ему сам, когда тот пишет в закрытый бот.",
+  );
+
+  const keyboard = new InlineKeyboard();
+  for (const row of fromDb) {
+    keyboard.text(`🚫 ${row.note || row.user_id}`, `adm:del:${row.user_id}`).row();
+  }
+
+  await ctx.reply(lines.join("\n"), {
+    parse_mode: "HTML",
+    reply_markup: fromDb.length > 0 ? keyboard : undefined,
+  });
+}
+
+bot.callbackQuery(/^adm:del:(\d+)$/, async (ctx) => {
+  const owner = ownerId();
+  if (owner === undefined || ctx.from.id !== owner) {
+    await ctx.answerCallbackQuery("Только владельцу");
+    return;
+  }
+  const id = Number(ctx.match[1]);
+  const убран = disallowUser(id);
+  await ctx.answerCallbackQuery(убран ? "Доступ отозван" : "Его уже не было");
+  await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => undefined);
+  await showAccessList(ctx);
 });
 
 bot.command("stats", async (ctx) => {
@@ -1348,8 +1409,6 @@ await bot.api.setMyCommands([
   { command: "menu", description: "главное меню" },
   { command: "resume", description: "прошлые чаты" },
   { command: "new", description: "начать заново" },
-  { command: "clear", description: "очистить контекст" },
-  { command: "compact", description: "сжать контекст" },
   { command: "file", description: "забрать файл из проекта" },
   { command: "context", description: "насколько заполнен контекст" },
   { command: "stop", description: "остановить агента" },
@@ -1358,13 +1417,12 @@ await bot.api.setMyCommands([
   { command: "clone", description: "забрать репозиторий" },
   { command: "diff", description: "что изменилось в коде" },
   { command: "commit", description: "закоммитить изменения" },
-  { command: "push", description: "отправить на GitHub" },
-  { command: "pr", description: "открыть pull request" },
   { command: "project", description: "переключить проект" },
   { command: "stats", description: "расход и мой кот" },
   { command: "cats", description: "коты и достижения" },
   { command: "status", description: "канал выхода и лимиты" },
   { command: "logs", description: "хвост лога (владельцу)" },
+  { command: "admin", description: "кому можно пользоваться ботом (владельцу)" },
   { command: "logout", description: "удалить доступ" },
   { command: "help", description: "справка" },
 ]);

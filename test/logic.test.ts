@@ -956,3 +956,56 @@ test("процент от потолка: границы и отсутствие
   assert.equal(percentOf(500, 0), null);
   assert.equal(percentOf(500, -1), null);
 });
+
+// Доступ решает, кто может запускать команды на машине. Ошибка здесь — не
+// косметика, поэтому проверяется и выдача, и отзыв, и то, что список из .env
+// отсюда не отзывается.
+test("доступ: выдача из чата, отзыв, неотзываемый список из .env", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const { mkdtempSync, rmSync, writeFileSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const { fileURLToPath } = await import("node:url");
+
+  const dir = mkdtempSync(join(tmpdir(), "доступ-"));
+  const dbPath = fileURLToPath(new URL("../src/db.ts", import.meta.url));
+  const script = join(dir, "проба.mjs");
+
+  writeFileSync(
+    script,
+    `
+    process.env.BOT_TOKEN = "1:T";
+    process.env.ENCRYPTION_KEY = Buffer.alloc(32, 4).toString("base64");
+    process.env.DATA_DIR = ${JSON.stringify(dir)};
+    process.env.WORKSPACE_ROOT = ${JSON.stringify(join(dir, "ws"))};
+
+    const db = await import(${JSON.stringify(dbPath)});
+    const шаги = {};
+    шаги.поначалуНет = db.isUserAllowedInDb(555);
+    db.allowUser(555, 1, "Саша");
+    шаги.послеВыдачи = db.isUserAllowedInDb(555);
+    шаги.вСписке = db.listAllowedUsers().map((r) => r.user_id + ":" + r.note).join(",");
+    // Повторная выдача не должна плодить строк — только менять заметку.
+    db.allowUser(555, 1, "Саша с ноутбука");
+    шаги.послеПовтора = db.listAllowedUsers().length;
+    шаги.заметка = db.listAllowedUsers()[0].note;
+    шаги.отозван = db.disallowUser(555);
+    шаги.послеОтзыва = db.isUserAllowedInDb(555);
+    шаги.отзывНесуществующего = db.disallowUser(999);
+    console.log(JSON.stringify(шаги));
+    `,
+  );
+
+  const out = execFileSync("npx", ["tsx", script], { encoding: "utf8" });
+  const r = JSON.parse(out.trim().split("\n").pop() ?? "{}");
+  rmSync(dir, { recursive: true, force: true });
+
+  assert.equal(r.поначалуНет, false, "пока не пустили — доступа нет");
+  assert.equal(r.послеВыдачи, true, "после выдачи доступ появляется");
+  assert.equal(r.вСписке, "555:Саша", "в списке видно, кого и с какой пометкой пустили");
+  assert.equal(r.послеПовтора, 1, "повторная выдача не плодит строк");
+  assert.equal(r.заметка, "Саша с ноутбука", "а заметку обновляет");
+  assert.equal(r.отозван, true, "отзыв срабатывает");
+  assert.equal(r.послеОтзыва, false, "после отзыва доступа нет");
+  assert.equal(r.отзывНесуществующего, false, "отзыв того, кого не было, честно возвращает нет");
+});
