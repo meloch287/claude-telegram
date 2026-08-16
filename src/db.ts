@@ -334,6 +334,23 @@ export function addHistoricalUsage(userId: number, tokens: number, messages: num
   stmts.addHistory.run(tokens, messages, tokens, messages, userId);
 }
 
+/**
+ * Доступ, по которому работает пользователь.
+ *
+ * Свой ключ, если он есть. Иначе — владельца: приглашённый через /admin
+ * работает по его подписке и вводить ничего не должен. Это не лазейка, а суть
+ * приглашения — пустить в бота и значит пустить к своей подписке.
+ *
+ * Владельцу подставлять нечего: если у него ключа нет, работать не с чем.
+ */
+export function credentialFor(userId: number): Credential | null {
+  const own = getCredential(userId);
+  if (own) return own;
+  const owner = config.allowedUserIds[0];
+  if (owner === undefined || owner === userId) return null;
+  return getCredential(owner);
+}
+
 export function setModel(userId: number, model: string | null): void {
   stmts.setModel.run(model, userId);
 }

@@ -1009,3 +1009,61 @@ test("доступ: выдача из чата, отзыв, неотзываем
   assert.equal(r.послеОтзыва, false, "после отзыва доступа нет");
   assert.equal(r.отзывНесуществующего, false, "отзыв того, кого не было, честно возвращает нет");
 });
+
+// Приглашённый работает по подписке владельца. Ошибка здесь либо запирает
+// человека на экране входа, либо, наоборот, пускает чужого к чужой подписке.
+test("общий доступ: приглашённый берёт ключ владельца, чужой — ничего", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const { mkdtempSync, rmSync, writeFileSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const { fileURLToPath } = await import("node:url");
+
+  const dir = mkdtempSync(join(tmpdir(), "общий-"));
+  const dbPath = fileURLToPath(new URL("../src/db.ts", import.meta.url));
+  const script = join(dir, "проба.mjs");
+
+  writeFileSync(
+    script,
+    `
+    process.env.BOT_TOKEN = "1:T";
+    process.env.ENCRYPTION_KEY = Buffer.alloc(32, 6).toString("base64");
+    process.env.DATA_DIR = ${JSON.stringify(dir)};
+    process.env.WORKSPACE_ROOT = ${JSON.stringify(join(dir, "ws"))};
+    // Владелец — первый в списке.
+    process.env.ALLOWED_USER_IDS = "111,222";
+
+    const db = await import(${JSON.stringify(dbPath)});
+    db.getOrCreateUser(111);
+    db.setCredential(111, { kind: "subscription", secret: "sk-ant-oat01-владелец" });
+
+    const шаги = {};
+    шаги.уВладельцаСвой = db.credentialFor(111)?.secret;
+    // 222 в списке из .env, своего ключа нет — работает по ключу владельца.
+    шаги.уПриглашённого = db.credentialFor(222)?.secret;
+
+    // Свой ключ перебивает общий: расход пойдёт по нему.
+    db.getOrCreateUser(222);
+    db.setCredential(222, { kind: "api", secret: "sk-ant-api03-свой-собственный" });
+    шаги.послеСвоего = db.credentialFor(222)?.secret;
+
+    console.log(JSON.stringify(шаги));
+    `,
+  );
+
+  const out = execFileSync("npx", ["tsx", script], { encoding: "utf8" });
+  const r = JSON.parse(out.trim().split("\n").pop() ?? "{}");
+  rmSync(dir, { recursive: true, force: true });
+
+  assert.equal(r.уВладельцаСвой, "sk-ant-oat01-владелец", "владелец работает по своему ключу");
+  assert.equal(
+    r.уПриглашённого,
+    "sk-ant-oat01-владелец",
+    "приглашённому подставляется ключ владельца — ради этого его и приглашали",
+  );
+  assert.equal(
+    r.послеСвоего,
+    "sk-ant-api03-свой-собственный",
+    "свой ключ перебивает общий: расход пойдёт по нему",
+  );
+});

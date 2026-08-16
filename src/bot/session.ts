@@ -6,7 +6,7 @@ import { Conversation } from "../agent/conversation.js";
 import { TelegramOutput } from "./output.js";
 import { config } from "../config.js";
 import {
-  getCredential,
+  credentialFor,
   getChat,
   getOrCreateUser,
   recordSessionStart,
@@ -96,7 +96,7 @@ export function ensureSession(options: EnsureOptions): ChatSession {
   const project = chatRow?.project ?? "default";
   const cwd = workspaceFor(userId, project);
 
-  const credential = getCredential(userId);
+  const credential = credentialFor(userId);
   if (!credential) throw new Error("Не выполнен вход: /start");
 
   const output = new TelegramOutput(api, chatId);

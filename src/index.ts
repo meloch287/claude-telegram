@@ -13,8 +13,9 @@ import { listSessions, type PermissionMode } from "@anthropic-ai/claude-agent-sd
 import { config } from "./config.js";
 import {
   clearCredential,
-  getChat,
   getCredential,
+  getChat,
+  credentialFor,
   getOrCreateUser,
   getUsageToday,
   allowUser,
@@ -169,10 +170,20 @@ bot.command("help", async (ctx) => {
 
 bot.command("logout", async (ctx) => {
   const userId = ctx.from!.id;
+  // Убираем только свой ключ. Приглашённому убирать нечего: он работает по
+  // подписке владельца, и «доступ удалён» ввело бы его в заблуждение —
+  // отозвать его может только владелец через /admin.
+  const свой = getCredential(userId) !== null;
   clearCredential(userId);
   stopAwaiting(userId);
   await resetSession(ctx.chat.id, userId);
-  await ctx.reply("Доступ удалён из базы. Войти заново — /start");
+  await ctx.reply(
+    свой
+      ? "Доступ удалён из базы. Войти заново — /start"
+      : credentialFor(userId)
+        ? "Своего ключа у тебя и не было: работаешь по подписке владельца. Отозвать её может только он."
+        : "Удалять нечего — входа не было.",
+  );
 });
 
 /**
@@ -559,7 +570,7 @@ bot.command("commit", async (ctx) => {
       return;
     }
 
-    const credential = getCredential(ctx.from!.id);
+    const credential = credentialFor(ctx.from!.id);
     if (!credential) {
       await ctx.reply("Сначала войди: /start");
       return;
@@ -1056,7 +1067,7 @@ async function runTask(ctx: Context, prompt: string): Promise<boolean> {
 
 /** Проверка входа: без неё любой обработчик молча ничего не делает. */
 async function requireLogin(ctx: Context): Promise<boolean> {
-  if (getCredential(ctx.from!.id)) return true;
+  if (credentialFor(ctx.from!.id)) return true;
   await sendStart(ctx);
   return false;
 }
@@ -1069,7 +1080,7 @@ bot.on(["message:photo", "message:document"], async (ctx) => {
   const userId = ctx.from.id;
   const chatId = ctx.chat.id;
 
-  if (!getCredential(userId)) {
+  if (!credentialFor(userId)) {
     await sendStart(ctx);
     return;
   }
@@ -1182,7 +1193,7 @@ bot.on(["message:voice", "message:audio"], async (ctx) => {
   const userId = ctx.from.id;
   const chatId = ctx.chat.id;
 
-  if (!getCredential(userId)) {
+  if (!credentialFor(userId)) {
     await sendStart(ctx);
     return;
   }
@@ -1332,7 +1343,7 @@ bot.on("message:text", async (ctx) => {
   }
 
   // 3. Вход не выполнен.
-  if (!getCredential(userId)) {
+  if (!credentialFor(userId)) {
     await sendStart(ctx);
     return;
   }
@@ -1378,7 +1389,7 @@ bot.on("message:text", async (ctx) => {
  * понял, чем сделать вид, что ничего не приходило.
  */
 bot.on("message", async (ctx) => {
-  if (!getCredential(ctx.from.id)) return;
+  if (!credentialFor(ctx.from.id)) return;
   await ctx.reply(
     "🤷 Такое я пока не разбираю. Понимаю текст, голос, фото, документы, видео, " +
       "стикеры, геопозицию, контакты и опросы — а ещё пересылки.",

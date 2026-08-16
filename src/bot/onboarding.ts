@@ -1,6 +1,12 @@
 import type { Context } from "grammy";
 import { config } from "../config.js";
-import { getOrCreateUser, setCredential, markOnboarded } from "../db.js";
+import {
+  credentialFor,
+  getCredential,
+  getOrCreateUser,
+  setCredential,
+  markOnboarded,
+} from "../db.js";
 import { detectKind, describeKind, maskSecret, type AuthKind } from "../auth.js";
 import { renderScreen } from "./screens.js";
 
@@ -21,7 +27,28 @@ export function stopAwaiting(userId: number): void {
 
 /** Стартовый экран — то же меню, что и по /menu, плюс предупреждение о доступе. */
 export async function sendStart(ctx: Context): Promise<void> {
-  const view = renderScreen("menu", { userId: ctx.from!.id, chatId: ctx.chat!.id });
+  const userId = ctx.from!.id;
+
+  // Приглашённого не спрашиваем ни о каком ключе: он работает по подписке
+  // владельца, и экран входа для него — тупик. Раньше бот встречал его
+  // просьбой прислать токен, а на «привет» отвечал «не похоже на токен».
+  if (!getCredential(userId) && credentialFor(userId)) {
+    getOrCreateUser(userId);
+    markOnboarded(userId);
+    // Если он до этого успел попасть на экран входа, снимаем ожидание токена:
+    // иначе следующее «привет» бот снова разберёт как ключ.
+    stopAwaiting(userId);
+    await ctx.reply(
+      "👋 Ты в списке — можно работать.\n\n" +
+        "Вход настраивать не нужно: бот ходит по подписке владельца. Просто напиши " +
+        "задачу словами, а я возьмусь.\n\n" +
+        "Свой ключ можно поставить и отдельно — /menu, вход. Тогда расход пойдёт по нему.",
+      { parse_mode: "HTML" },
+    );
+    return;
+  }
+
+  const view = renderScreen("menu", { userId, chatId: ctx.chat!.id });
   const openAccess =
     config.allowedUserIds.length === 0
       ? `\n\n⚠️ Бот открыт всем. Твой id: <code>${ctx.from?.id}</code> — впиши в <code>ALLOWED_USER_IDS</code>.`
