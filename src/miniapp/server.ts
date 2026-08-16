@@ -12,6 +12,7 @@ import {
   listRateLimits,
   coopMembers,
   payerFor,
+  quotaLeft,
   usageByDay,
   usageSince,
 } from "../db.js";
@@ -187,6 +188,8 @@ function profilePayload(userId: number) {
     })),
     achievements: ACHIEVEMENTS.map((a) => ({ ...a, unlocked: unlocked.has(a.id) })),
     botUsername,
+    // Своя квота: null — ограничения нет, и это умолчание.
+    quota: quotaLeft(userId),
     limits: buildLimits(userId),
     /**
      * Кооп: кто работает на одной подписке. Показываем только своих —
@@ -206,6 +209,9 @@ function profilePayload(userId: number) {
         // Через бота — без импортированной истории: сравнивать людей по чужому
         // импорту бессмысленно, у кого-то его просто нет.
         tokensInBot: member.total_tokens - member.history_tokens,
+        // Квота соседа видна всем в компании: это не тайна, а общая договорённость
+        // о том, кто сколько берёт.
+        quota: quotaLeft(member.user_id),
         messages: member.total_messages - member.history_messages,
         cat: {
           level: cat.level,

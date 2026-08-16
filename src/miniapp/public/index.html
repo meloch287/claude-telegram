@@ -81,6 +81,19 @@
           Кооп показывается только тем, кто делит подписку: одинокому владельцу
           таблица из одной строки не нужна.
         -->
+        <!-- Своя квота: только тем, кому её поставили. -->
+        <section aria-labelledby="quota-heading" id="quota" hidden>
+          <h2 id="quota-heading">Суточная квота</h2>
+          <div class="limit-head">
+            <span class="limit-name" id="quota-name">Сегодня</span>
+            <span class="limit-percent" id="quota-value"></span>
+          </div>
+          <div class="progress-track" id="quota-track" aria-labelledby="quota-name">
+            <div class="progress-fill" id="quota-fill"></div>
+          </div>
+          <p class="section-note" id="quota-left"></p>
+        </section>
+
         <section aria-labelledby="coop-heading" id="coop-section" hidden>
           <h2 id="coop-heading">Кооп</h2>
           <p class="section-note" id="coop-note"></p>

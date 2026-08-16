@@ -367,7 +367,8 @@
         "name": "Кот-рефакторщик",
         "palette": ["#7B9A6D", "#4F6B45", "#141413"],
         "accessory": "beret"
-      }
+      },
+      "quota": null
     },
     {
       "id": 2,
@@ -383,6 +384,11 @@
         "name": "Кот-читатель",
         "palette": ["#8A8781", "#5E5B56", "#141413"],
         "accessory": "cap"
+      },
+      "quota": {
+        "limit": 200000,
+        "used": 41200,
+        "left": 158800
       }
     },
     {
@@ -399,8 +405,14 @@
         "name": "Котёнок-стажёр",
         "palette": ["#D97757", "#A84F32", "#141413"],
         "accessory": null
+      },
+      "quota": {
+        "limit": 50000,
+        "used": 8600,
+        "left": 41400
       }
     }
   ],
-  "botUsername": "ClaudeBOT"
+  "botUsername": "ClaudeBOT",
+  "quota": null
 }

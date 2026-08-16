@@ -51,6 +51,7 @@ function render(profile) {
   renderLimits(profile.limits ?? []);
   renderChart(profile.usageByDay ?? []);
   renderCoop(profile.coop ?? []);
+  renderQuota(profile.quota ?? null);
 
   // Статистика бота: токены и деньги здесь про один и тот же период, поэтому
   // их можно ставить рядом.
@@ -693,7 +694,11 @@ function renderCoop(members) {
 
     const under = document.createElement("span");
     under.className = "coop-sub";
-    under.append(text(`${member.cat.name} · уровень ${member.cat.level}`));
+    // Квота идёт сразу под именем: она важнее уровня кота, когда упираешься.
+    const квота = member.quota
+      ? ` · сегодня ${nf.format(member.quota.used)} из ${nf.format(member.quota.limit)}`
+      : "";
+    under.append(text(`${member.cat.name} · уровень ${member.cat.level}${квота}`));
 
     body.append(name, under);
 
@@ -710,4 +715,42 @@ function renderCoop(members) {
     li.append(art, body, value);
     list.append(li);
   }
+}
+
+/**
+ * Своя суточная квота. Показывается только тем, кому её поставили: у
+ * большинства ограничения нет, и пустая шкала «0 из ∞» была бы шумом.
+ */
+function renderQuota(quota) {
+  const box = el("quota");
+  if (!quota) {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+
+  const percent = Math.min(100, Math.round((quota.used / quota.limit) * 100));
+  el("quota-value").textContent = `${nf.format(quota.used)} из ${nf.format(quota.limit)}`;
+
+  const track = el("quota-track");
+  track.setAttribute("role", "progressbar");
+  track.setAttribute("aria-valuemin", "0");
+  track.setAttribute("aria-valuemax", "100");
+  track.setAttribute("aria-valuenow", String(percent));
+  track.setAttribute(
+    "aria-valuetext",
+    quota.left > 0
+      ? `${percent} процентов суточной квоты, осталось ${nf.format(quota.left)} токенов`
+      : "суточная квота исчерпана",
+  );
+
+  const fill = el("quota-fill");
+  fill.style.width = `${percent}%`;
+  // Состояние передаётся словом ниже, а цвет только поддерживает его.
+  fill.className = `progress-fill progress-fill--${quota.left > 0 ? "allowed" : "rejected"}`;
+
+  el("quota-left").textContent =
+    quota.left > 0
+      ? `Осталось ${nf.format(quota.left)} токенов до конца суток.`
+      : "Квота на сегодня исчерпана — обнулится завтра.";
 }

@@ -24,6 +24,8 @@ import {
   isUserAllowedInDb,
   listAllowedUsers,
   listRateLimits,
+  quotaLeft,
+  setQuota,
   usageSince,
   recordMessage,
   saveChat,
@@ -815,6 +817,52 @@ bot.command("admin", async (ctx) => {
   const arg = ctx.match?.toString().trim() ?? "";
   const [действие, кто, ...остальное] = arg.split(/\s+/);
 
+  if (действие === "quota" || действие === "квота") {
+    const id = Number(кто);
+    if (!Number.isInteger(id) || id <= 0) {
+      await ctx.reply("Нужен номер: <code>/admin quota НОМЕР 200000</code>", {
+        parse_mode: "HTML",
+      });
+      return;
+    }
+    if (inviterOf(id) !== userId && userId !== ownerId()) {
+      await ctx.reply("Квоту ставит тот, кто звал.");
+      return;
+    }
+    const слово = (остальное[0] ?? "").toLowerCase();
+    // Ноль и «нет» снимают ограничение: отдельная команда для снятия была бы
+    // лишней, а ноль читается однозначно.
+    const снять = слово === "0" || слово === "нет" || слово === "off";
+    const число = снять ? null : Number(слово.replace(/[\s_]/g, ""));
+    if (!снять && (!Number.isFinite(число) || (число as number) <= 0)) {
+      await ctx.reply(
+        "Сколько токенов в сутки? <code>/admin quota НОМЕР 200000</code>\n" +
+          "Снять ограничение — <code>/admin quota НОМЕР 0</code>",
+        { parse_mode: "HTML" },
+      );
+      return;
+    }
+    if (!setQuota(id, число)) {
+      await ctx.reply("Такого в списке нет.");
+      return;
+    }
+    await bot.api
+      .sendMessage(
+        id,
+        снять
+          ? "🔓 Ограничение снято: можно работать без суточного предела."
+          : `📊 Тебе поставили суточную квоту: ${formatTokens(число as number)} токенов в день.`,
+      )
+      .catch(() => undefined);
+    await ctx.reply(
+      снять
+        ? `🔓 Снял ограничение с <code>${id}</code>.`
+        : `📊 Квота <code>${id}</code>: ${formatTokens(число as number)} токенов в сутки.`,
+      { parse_mode: "HTML" },
+    );
+    return;
+  }
+
   if (действие === "add" || действие === "del") {
     const id = Number(кто);
     if (!Number.isInteger(id) || id <= 0) {
@@ -907,8 +955,16 @@ async function showAccessList(
       const when = new Date(row.added_at).toLocaleDateString("ru-RU");
       const чей = общий && row.added_by !== userId ? ` · позвал ${row.added_by}` : "";
       const свой = getCredential(row.user_id) ? " · работает по своему ключу" : "";
+      // Квоту показываем вместе с тем, сколько уже съедено сегодня: голое
+      // ограничение без расхода ничего не говорит.
+      const остаток = quotaLeft(row.user_id);
+      const квота = остаток
+        ? ` · сегодня ${formatTokens(остаток.used)} из ${formatTokens(остаток.limit)}`
+        : свой
+          ? ""
+          : " · без ограничения";
       lines.push(
-        `<code>${row.user_id}</code>${row.note ? ` — ${esc(row.note)}` : ""} · с ${when}${чей}${свой}`,
+        `<code>${row.user_id}</code>${row.note ? ` — ${esc(row.note)}` : ""} · с ${when}${чей}${свой}${квота}`,
       );
     }
   }
@@ -917,6 +973,7 @@ async function showAccessList(
     "",
     "<code>/admin add НОМЕР [заметка]</code> — позвать",
     "<code>/admin del НОМЕР</code> — отозвать",
+    "<code>/admin quota НОМЕР 200000</code> — суточная квота, 0 снимает",
     "",
     "Позванный работает по твоей подписке, но статистика и кот у него свои.",
     "Свой номер бот называет человеку сам, когда тот пишет в закрытый бот.",
@@ -1196,6 +1253,15 @@ async function runTask(ctx: Context, prompt: string, вслух = false): Promis
   const userId = ctx.from?.id;
   const chatId = ctx.chat?.id;
   if (userId === undefined || chatId === undefined) return false;
+
+  const остаток = quotaLeft(userId);
+  if (остаток && остаток.left <= 0) {
+    await ctx.reply(
+      `📊 Суточная квота исчерпана: ${formatTokens(остаток.used)} из ${formatTokens(остаток.limit)} токенов.\n\n` +
+        "Она обнулится завтра. Или попроси того, кто тебя позвал, поднять предел.",
+    );
+    return false;
+  }
 
   recordMessage(userId);
   try {

@@ -1145,3 +1145,70 @@ test("озвучка: код и разметка не читаются вслу�
   assert.equal(forSpeech("две\n\n\nстроки   рядом"), "две строки рядом");
   assert.equal(forSpeech("   "), "");
 });
+
+// Квота решает, работает человек или нет. Ошибка тут либо запирает того, кому
+// ничего не ставили, либо пропускает того, кто уже выбрал своё.
+test("квоты: только приглашённым, ноль снимает, свой ключ не ограничивается", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const { mkdtempSync, rmSync, writeFileSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const { fileURLToPath } = await import("node:url");
+
+  const dir = mkdtempSync(join(tmpdir(), "квота-"));
+  const dbPath = fileURLToPath(new URL("../src/db.ts", import.meta.url));
+  const script = join(dir, "проба.mjs");
+
+  writeFileSync(
+    script,
+    `
+    process.env.BOT_TOKEN = "1:T";
+    process.env.ENCRYPTION_KEY = Buffer.alloc(32, 9).toString("base64");
+    process.env.DATA_DIR = ${JSON.stringify(dir)};
+    process.env.WORKSPACE_ROOT = ${JSON.stringify(join(dir, "ws"))};
+
+    const db = await import(${JSON.stringify(dbPath)});
+    db.getOrCreateUser(1);
+    db.setCredential(1, { kind: "subscription", secret: "ключ" });
+    db.allowUser(2, 1, "гость");
+    db.getOrCreateUser(2);
+
+    const шаги = {};
+    шаги.поУмолчанию = db.quotaFor(2);
+    db.setQuota(2, 1000);
+    шаги.послеУстановки = db.quotaFor(2);
+
+    db.recordUsage(2, 400, 0.1);
+    const после = db.quotaLeft(2);
+    шаги.использовано = после.used;
+    шаги.осталось = после.left;
+
+    // Перебор не уводит остаток в минус: «осталось минус двести» читать нельзя.
+    db.recordUsage(2, 900, 0.2);
+    шаги.послеПеребора = db.quotaLeft(2).left;
+
+    db.setQuota(2, null);
+    шаги.послеСнятия = db.quotaLeft(2);
+
+    // У кого свой ключ — тому чужая мера не указ.
+    db.allowUser(3, 1, "со своим");
+    db.getOrCreateUser(3);
+    db.setCredential(3, { kind: "api", secret: "свой" });
+    db.setQuota(3, 500);
+    шаги.уСвоего = db.quotaFor(3);
+    console.log(JSON.stringify(шаги));
+    `,
+  );
+
+  const out = execFileSync("npx", ["tsx", script], { encoding: "utf8" });
+  const r = JSON.parse(out.trim().split("\n").pop() ?? "{}");
+  rmSync(dir, { recursive: true, force: true });
+
+  assert.equal(r.поУмолчанию, null, "по умолчанию ограничения нет");
+  assert.equal(r.послеУстановки, 1000, "квота ставится");
+  assert.equal(r.использовано, 400, "расход считается свой, за сутки");
+  assert.equal(r.осталось, 600, "остаток — разница");
+  assert.equal(r.послеПеребора, 0, "перебор не уводит остаток в минус");
+  assert.equal(r.послеСнятия, null, "ноль снимает ограничение");
+  assert.equal(r.уСвоего, null, "у кого свой ключ, того чужая квота не касается");
+});

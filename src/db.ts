@@ -109,6 +109,9 @@ for (const [table, column, type] of [
   ["users", "history_tokens", "INTEGER NOT NULL DEFAULT 0"],
   // Имя нужно только для таблицы коопа: номер вместо имени там читать нельзя.
   ["users", "display_name", "TEXT"],
+  // Суточная квота приглашённого в токенах. NULL — без ограничения, и это
+  // умолчание: позвали человека работать, а не считать ему каждый шаг.
+  ["allowed_users", "quota_tokens", "INTEGER"],
   ["users", "history_messages", "INTEGER NOT NULL DEFAULT 0"],
   ["chats", "title", "TEXT"],
 ] as const) {
@@ -272,6 +275,7 @@ const stmts = {
     "INSERT INTO allowed_users (user_id, note, added_by, added_at) VALUES (?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET note = excluded.note",
   ),
   disallowUser: db.prepare("DELETE FROM allowed_users WHERE user_id = ?"),
+  setQuota: db.prepare("UPDATE allowed_users SET quota_tokens = ? WHERE user_id = ?"),
   isAllowed: db.prepare("SELECT user_id FROM allowed_users WHERE user_id = ?"),
   getAllowed: db.prepare("SELECT * FROM allowed_users WHERE user_id = ?"),
   addEvent: db.prepare(
@@ -576,6 +580,8 @@ export interface AllowedUserRow {
   note: string | null;
   added_by: number;
   added_at: number;
+  /** Сколько токенов в сутки. null — без ограничения. */
+  quota_tokens: number | null;
 }
 
 /** Кого пустил конкретный человек. Без аргумента — весь список, для владельца. */
@@ -597,6 +603,36 @@ export function allowUser(userId: number, addedBy: number, note: string | null):
 export function disallowUser(userId: number): boolean {
   const result = stmts.disallowUser.run(userId);
   return Number(result.changes ?? 0) > 0;
+}
+
+/**
+ * Суточная квота приглашённого. null — без ограничения.
+ *
+ * Считается только для позванных: у кого свой ключ, тот сам себе хозяин, и
+ * ограничивать его чужой мерой не за что.
+ */
+export function quotaFor(userId: number): number | null {
+  if (getCredential(userId)) return null;
+  const row = stmts.getAllowed.get(userId) as unknown as AllowedUserRow | undefined;
+  return row?.quota_tokens ?? null;
+}
+
+/** Ставит или снимает квоту. null снимает. */
+export function setQuota(userId: number, tokens: number | null): boolean {
+  const result = stmts.setQuota.run(tokens, userId);
+  return Number(result.changes ?? 0) > 0;
+}
+
+/**
+ * Осталось ли у человека сегодня. Возвращает null, если квоты нет вовсе.
+ * Расход берётся свой, за сутки: окна подписки всё равно сбрасываются, и
+ * «сколько сегодня» понятнее любой скользящей меры.
+ */
+export function quotaLeft(userId: number): { limit: number; used: number; left: number } | null {
+  const limit = quotaFor(userId);
+  if (limit === null || limit <= 0) return null;
+  const used = getUsageToday(userId).tokens;
+  return { limit, used, left: Math.max(0, limit - used) };
 }
 
 export function isUserAllowedInDb(userId: number): boolean {
