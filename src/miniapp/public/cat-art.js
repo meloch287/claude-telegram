@@ -113,7 +113,9 @@ const HATS = {
 const NECKWEAR = {
   3: { row: 13, art: ["..r..r..", "..rrrr..", "...rr..."] },
   4: { row: 13, art: ["bbbbbbbb", "b......b", "b......."] },
-  8: { row: 13, art: ["y......y", ".y....y.", "..yyyy.."] },
+  // Цепочка сидит на строку ниже прочих украшений: на груди она смотрелась
+  // ошейником, а не подвеской.
+  8: { row: 14, art: ["y......y", ".y....y.", "..yyyy.."] },
   9: { row: 13, art: ["pppppppppppp", "pppppppppppp"] },
   10: { row: 13, art: ["...yyyyyy...", "pppppppppppp", "pppppppppppp"] },
 };
