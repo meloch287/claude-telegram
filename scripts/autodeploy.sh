@@ -111,13 +111,28 @@ git worktree prune
 git worktree add -q --detach "$WORK_DIR" "$target" || { echo "worktree не создан"; exit 1; }
 
 log=$(mktemp)
-docker run --rm \
-  -v "$WORK_DIR:/проверка" -w /проверка \
-  -e NODE_ENV=development \
-  "$NODE_IMAGE" \
-  bash -lc "npm ci --include=optional && npm run format:check && npm run lint && npm run lint:sh && npm run typecheck && npm test" \
-  > "$log" 2>&1
-code=$?
+code=0
+# Две попытки: npm ci ходит в сеть, и обрыв там означает «не повезло», а не
+# «код плохой». Без повтора один такой обрыв вешал коммит до следующего пуша —
+# на этом уже дважды спотыкались.
+for attempt in 1 2; do
+  docker run --rm \
+    -v "$WORK_DIR:/проверка" -w /проверка \
+    -e NODE_ENV=development \
+    "$NODE_IMAGE" \
+    bash -lc "npm ci --include=optional && npm run format:check && npm run lint && npm run lint:sh && npm run typecheck && npm test" \
+    > "$log" 2>&1
+  code=$?
+  [ "$code" -eq 0 ] && break
+  # Повторяем только сетевое: провал самих проверок со второго раза не пройдёт,
+  # а время и токены на него тратить незачем.
+  if grep -qiE "npm error network|ETIMEDOUT|ECONNRESET|EAI_AGAIN|socket hang up" "$log"; then
+    echo "попытка $attempt: сеть подвела, пробую ещё раз"
+    sleep 15
+    continue
+  fi
+  break
+done
 
 git worktree remove --force "$WORK_DIR" 2>/dev/null
 
