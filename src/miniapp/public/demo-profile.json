@@ -351,5 +351,55 @@
       "tokens": 14402,
       "costUsd": 1.8
     }
+  ],
+  "coop": [
+    {
+      "id": 1,
+      "name": "Саша",
+      "isYou": true,
+      "isPayer": true,
+      "tokens": 249237,
+      "tokensInBot": 249237,
+      "messages": 19,
+      "cat": {
+        "level": 4,
+        "id": "refactor",
+        "name": "Кот-рефакторщик",
+        "palette": ["#7B9A6D", "#4F6B45", "#141413"],
+        "accessory": "beret"
+      }
+    },
+    {
+      "id": 2,
+      "name": "Никита",
+      "isYou": false,
+      "isPayer": false,
+      "tokens": 41200,
+      "tokensInBot": 41200,
+      "messages": 7,
+      "cat": {
+        "level": 2,
+        "id": "reader",
+        "name": "Кот-читатель",
+        "palette": ["#8A8781", "#5E5B56", "#141413"],
+        "accessory": "cap"
+      }
+    },
+    {
+      "id": 3,
+      "name": "Лена",
+      "isYou": false,
+      "isPayer": false,
+      "tokens": 8600,
+      "tokensInBot": 8600,
+      "messages": 3,
+      "cat": {
+        "level": 1,
+        "id": "intern",
+        "name": "Котёнок-стажёр",
+        "palette": ["#D97757", "#A84F32", "#141413"],
+        "accessory": null
+      }
+    }
   ]
 }

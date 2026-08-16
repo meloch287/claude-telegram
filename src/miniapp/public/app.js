@@ -50,6 +50,7 @@ function render(profile) {
 
   renderLimits(profile.limits ?? []);
   renderChart(profile.usageByDay ?? []);
+  renderCoop(profile.coop ?? []);
 
   // Статистика бота: токены и деньги здесь про один и тот же период, поэтому
   // их можно ставить рядом.
@@ -632,3 +633,75 @@ window.addEventListener("resize", () => {
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(drawChart, 150);
 });
+
+/* ── Кооп ─────────────────────────────────────────────────────────────────
+   Таблица тех, кто работает на одной подписке. Сортируется по расходу в боте,
+   а не по общему: у владельца обычно есть импортированная история, и сравнивать
+   с ней тех, кто пришёл вчера, бессмысленно. */
+
+function renderCoop(members) {
+  const section = el("coop-section");
+  // Одному таблица не нужна: он и так знает, сколько потратил.
+  if (!members || members.length < 2) {
+    section.hidden = true;
+    return;
+  }
+  section.hidden = false;
+
+  const total = members.reduce((sum, m) => sum + m.tokensInBot, 0);
+  el("coop-note").textContent =
+    `${members.length} на одной подписке, вместе ${nf.format(total)} токенов через бота. ` +
+    `Кот у каждого свой — он растёт от собственного расхода.`;
+
+  const list = el("coop");
+  list.replaceChildren();
+
+  const порядок = [...members].sort((a, b) => b.tokensInBot - a.tokensInBot);
+  for (const member of порядок) {
+    const li = document.createElement("li");
+    li.className = `coop-row${member.isYou ? " coop-row--you" : ""}`;
+
+    const art = document.createElement("div");
+    art.className = "coop-cat";
+    art.innerHTML = catSvg(member.cat, 44);
+
+    const body = document.createElement("div");
+    body.className = "coop-body";
+
+    const name = document.createElement("span");
+    name.className = "coop-name";
+    name.append(text(member.name || `id ${member.id}`));
+    if (member.isYou) {
+      const you = document.createElement("span");
+      you.className = "coop-tag";
+      you.append(text("ты"));
+      name.append(you);
+    }
+    if (member.isPayer) {
+      // Кто платит — видно словом, а не только порядком в списке.
+      const payer = document.createElement("span");
+      payer.className = "coop-tag coop-tag--payer";
+      payer.append(text("подписка"));
+      name.append(payer);
+    }
+
+    const under = document.createElement("span");
+    under.className = "coop-sub";
+    under.append(text(`${member.cat.name} · уровень ${member.cat.level}`));
+
+    body.append(name, under);
+
+    const value = document.createElement("div");
+    value.className = "coop-value";
+    const tokens = document.createElement("span");
+    tokens.className = "coop-tokens";
+    tokens.append(text(nf.format(member.tokensInBot)));
+    const label = document.createElement("span");
+    label.className = "coop-label";
+    label.append(text("токенов"));
+    value.append(tokens, label);
+
+    li.append(art, body, value);
+    list.append(li);
+  }
+}

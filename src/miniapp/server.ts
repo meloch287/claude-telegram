@@ -10,6 +10,8 @@ import {
   getUsageToday,
   listAchievements,
   listRateLimits,
+  coopMembers,
+  payerFor,
   usageByDay,
   usageSince,
 } from "../db.js";
@@ -175,6 +177,34 @@ function profilePayload(userId: number) {
     })),
     achievements: ACHIEVEMENTS.map((a) => ({ ...a, unlocked: unlocked.has(a.id) })),
     limits: buildLimits(userId),
+    /**
+     * Кооп: кто работает на одной подписке. Показываем только своих —
+     * плательщика и позванных им. Чужие подписки друг друга не видят.
+     *
+     * Кот у каждого свой: он считается от собственного расхода, а не от общего.
+     * Поэтому таблица честная — видно, кто сколько потратил, а не кто чей гость.
+     */
+    coop: coopMembers(userId).map((member) => {
+      const cat = catForTokens(member.total_tokens);
+      return {
+        id: member.user_id,
+        name: member.display_name,
+        isYou: member.user_id === userId,
+        isPayer: member.user_id === payerFor(userId),
+        tokens: member.total_tokens,
+        // Через бота — без импортированной истории: сравнивать людей по чужому
+        // импорту бессмысленно, у кого-то его просто нет.
+        tokensInBot: member.total_tokens - member.history_tokens,
+        messages: member.total_messages - member.history_messages,
+        cat: {
+          level: cat.level,
+          id: cat.id,
+          name: cat.name,
+          palette: cat.palette,
+          accessory: cat.accessory,
+        },
+      };
+    }),
   };
 }
 

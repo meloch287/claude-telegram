@@ -27,6 +27,7 @@ import {
   usageSince,
   recordMessage,
   saveChat,
+  setDisplayName,
   setModel,
   closeDb,
 } from "./db.js";
@@ -118,6 +119,13 @@ function isAllowed(userId: number): boolean {
 bot.use(async (ctx, next) => {
   const userId = ctx.from?.id;
   if (userId === undefined) return;
+  // Имя пригодится в таблице коопа. Пишем на каждом сообщении: человек может
+  // его сменить, и прошлогоднее показывало бы соседям не того.
+  if (isAllowed(userId)) {
+    const имя = [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(" ");
+    setDisplayName(userId, имя || ctx.from?.username || null);
+  }
+
   if (!isAllowed(userId)) {
     // Свой номер человеку виден: владельцу он нужен, чтобы добавить его,
     // а посторонний узнаёт только то, что и так знает про себя.

@@ -107,6 +107,8 @@ for (const [table, column, type] of [
   ["users", "auth_kind", "TEXT"],
   ["users", "model", "TEXT"],
   ["users", "history_tokens", "INTEGER NOT NULL DEFAULT 0"],
+  // Имя нужно только для таблицы коопа: номер вместо имени там читать нельзя.
+  ["users", "display_name", "TEXT"],
   ["users", "history_messages", "INTEGER NOT NULL DEFAULT 0"],
   ["chats", "title", "TEXT"],
 ] as const) {
@@ -180,6 +182,7 @@ export interface UserRow {
   tools_denied: number;
   history_tokens: number;
   history_messages: number;
+  display_name: string | null;
 }
 
 export interface ChatRow {
@@ -198,6 +201,7 @@ const stmts = {
   markOnboarded: db.prepare("UPDATE users SET onboarded = 1 WHERE user_id = ?"),
   setKey: db.prepare("UPDATE users SET api_key_enc = ?, auth_kind = ? WHERE user_id = ?"),
   setModel: db.prepare("UPDATE users SET model = ? WHERE user_id = ?"),
+  setDisplayName: db.prepare("UPDATE users SET display_name = ? WHERE user_id = ?"),
   bumpCounter: db.prepare("UPDATE users SET total_messages = total_messages + 1 WHERE user_id = ?"),
   bumpSessions: db.prepare(
     "UPDATE users SET total_sessions = total_sessions + 1 WHERE user_id = ?",
@@ -352,6 +356,35 @@ export function credentialFor(userId: number): Credential | null {
   const inviter = inviterOf(userId);
   if (inviter === null || inviter === userId) return null;
   return getCredential(inviter);
+}
+
+/**
+ * Имя для таблицы коопа. Обновляется на каждом сообщении: человек может его
+ * сменить, и держать в базе прошлогоднее — значит показывать соседям не того.
+ */
+export function setDisplayName(userId: number, name: string | null): void {
+  stmts.setDisplayName.run(name, userId);
+}
+
+/**
+ * Кто платит за работу этого человека: он сам, если ключ свой, иначе тот, кто
+ * позвал. Вокруг плательщика и собирается кооп.
+ */
+export function payerFor(userId: number): number {
+  if (getCredential(userId)) return userId;
+  return inviterOf(userId) ?? userId;
+}
+
+/** Все, кто работает на одной подписке: плательщик и позванные им. */
+export function coopMembers(userId: number): UserRow[] {
+  const payer = payerFor(userId);
+  const ids = [payer, ...listAllowedUsers(payer).map((r) => r.user_id)];
+  const rows: UserRow[] = [];
+  for (const id of ids) {
+    const row = stmts.getUser.get(id) as unknown as UserRow | undefined;
+    if (row) rows.push(row);
+  }
+  return rows;
 }
 
 export function setModel(userId: number, model: string | null): void {

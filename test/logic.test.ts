@@ -1072,3 +1072,60 @@ test("кооп: свой ключ, ключ пригласившего, цепо
   assert.equal(r.ктоПозвал444, 333, "видно, кто кого позвал");
   assert.equal(r.ктоПозвал222, null, "кого не звали — у того и пригласившего нет");
 });
+
+// Кооп собирается вокруг того, кто платит. Ошибка здесь показала бы человеку
+// чужую компанию — то есть чужие имена и расход.
+test("кооп: собирается вокруг плательщика, чужие подписки не смешиваются", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const { mkdtempSync, rmSync, writeFileSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const { fileURLToPath } = await import("node:url");
+
+  const dir = mkdtempSync(join(tmpdir(), "состав-"));
+  const dbPath = fileURLToPath(new URL("../src/db.ts", import.meta.url));
+  const script = join(dir, "проба.mjs");
+
+  writeFileSync(
+    script,
+    `
+    process.env.BOT_TOKEN = "1:T";
+    process.env.ENCRYPTION_KEY = Buffer.alloc(32, 8).toString("base64");
+    process.env.DATA_DIR = ${JSON.stringify(dir)};
+    process.env.WORKSPACE_ROOT = ${JSON.stringify(join(dir, "ws"))};
+
+    const db = await import(${JSON.stringify(dbPath)});
+    // Первая компания: 10 платит, 11 и 12 позваны.
+    db.getOrCreateUser(10);
+    db.setCredential(10, { kind: "subscription", secret: "ключ-10" });
+    db.allowUser(11, 10, "Никита");
+    db.allowUser(12, 10, "Лена");
+    db.getOrCreateUser(11);
+    db.getOrCreateUser(12);
+    // Вторая компания, ничем не связанная с первой.
+    db.getOrCreateUser(20);
+    db.setCredential(20, { kind: "api", secret: "ключ-20" });
+    db.allowUser(21, 20, "Чужой");
+    db.getOrCreateUser(21);
+
+    const id = (rows) => rows.map((r) => r.user_id).sort((a, b) => a - b).join(",");
+    console.log(JSON.stringify({
+      уПлательщика: id(db.coopMembers(10)),
+      уПозванного: id(db.coopMembers(11)),
+      уЧужого: id(db.coopMembers(21)),
+      платитЗа11: db.payerFor(11),
+      платитЗа10: db.payerFor(10),
+    }));
+    `,
+  );
+
+  const out = execFileSync("npx", ["tsx", script], { encoding: "utf8" });
+  const r = JSON.parse(out.trim().split("\n").pop() ?? "{}");
+  rmSync(dir, { recursive: true, force: true });
+
+  assert.equal(r.уПлательщика, "10,11,12", "плательщик видит себя и всех позванных");
+  assert.equal(r.уПозванного, "10,11,12", "позванный видит ту же компанию, а не только себя");
+  assert.equal(r.уЧужого, "20,21", "чужая подписка — чужая компания");
+  assert.equal(r.платитЗа11, 10, "за позванного платит тот, кто позвал");
+  assert.equal(r.платитЗа10, 10, "за себя платит сам, раз ключ свой");
+});

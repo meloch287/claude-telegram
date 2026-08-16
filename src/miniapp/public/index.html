@@ -75,6 +75,16 @@
           помечен role="img" с подписью, а под ним лежит таблица для тех, кто
           читает экраном, — цифры не должны существовать только в картинке.
         -->
+        <!--
+          Кооп показывается только тем, кто делит подписку: одинокому владельцу
+          таблица из одной строки не нужна.
+        -->
+        <section aria-labelledby="coop-heading" id="coop-section" hidden>
+          <h2 id="coop-heading">Кооп</h2>
+          <p class="section-note" id="coop-note"></p>
+          <ol class="coop" id="coop" role="list"></ol>
+        </section>
+
         <section aria-labelledby="chart-heading">
           <h2 id="chart-heading">Расход по дням</h2>
           <p class="section-note" id="chart-note"></p>
