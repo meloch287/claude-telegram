@@ -100,6 +100,8 @@ export function ensureSession(options: EnsureOptions): ChatSession {
   if (!credential) throw new Error("Не выполнен вход: /start");
 
   const output = new TelegramOutput(api, chatId);
+  // Кнопкам под ответом нужно знать, где искать репозиторий.
+  output.projectDir = cwd;
   const permissionMode = (chatRow?.permission_mode ?? "default") as PermissionMode;
 
   const conversation = new Conversation({

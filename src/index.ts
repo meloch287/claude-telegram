@@ -550,8 +550,8 @@ bot.command("clone", async (ctx) => {
  * Ищет репозиторий в папке текущего проекта и объясняет, если нашлось не одно.
  * Возвращает null, если работать не с чем — сообщение пользователю уже ушло.
  */
-async function resolveRepo(ctx: CommandContext<Context>): Promise<string | null> {
-  const chatRow = getChat(ctx.chat.id);
+async function resolveRepo(ctx: CommandContext<Context> | Context): Promise<string | null> {
+  const chatRow = getChat(ctx.chat!.id);
   const project = chatRow?.project ?? "default";
   const cwd = workspaceFor(ctx.from!.id, project);
   const repos = findRepos(cwd);
@@ -585,7 +585,7 @@ function describeStatus(state: RepoStatus, repo: string): string {
   return parts.join(" · ");
 }
 
-bot.command("diff", async (ctx) => {
+async function showDiff(ctx: CommandContext<Context> | Context): Promise<void> {
   const repo = await resolveRepo(ctx);
   if (!repo) return;
 
@@ -615,7 +615,9 @@ bot.command("diff", async (ctx) => {
   } catch (error) {
     await ctx.reply(`⚠️ ${esc((error as Error).message.slice(0, 500))}`, { parse_mode: "HTML" });
   }
-});
+}
+
+bot.command("diff", (ctx) => showDiff(ctx));
 
 /**
  * Предложенные сообщения коммита ждут кнопки. Ключ короткий: callback_data
@@ -624,11 +626,9 @@ bot.command("diff", async (ctx) => {
 const pendingCommits = new Map<string, { repo: string; message: string }>();
 let commitSeq = 0;
 
-bot.command("commit", async (ctx) => {
+async function startCommit(ctx: CommandContext<Context> | Context, given: string): Promise<void> {
   const repo = await resolveRepo(ctx);
   if (!repo) return;
-
-  const given = ctx.match?.toString().trim() ?? "";
 
   try {
     const state = await status(repo);
@@ -656,7 +656,7 @@ bot.command("commit", async (ctx) => {
     const suggested = await suggestCommitMessage(repo, credential, user.model);
     if (!suggested) {
       await ctx.api.editMessageText(
-        ctx.chat.id,
+        ctx.chat!.id,
         note.message_id,
         "Не смог придумать сообщение. Напиши своё: <code>/commit текст</code>",
         { parse_mode: "HTML" },
@@ -667,7 +667,7 @@ bot.command("commit", async (ctx) => {
     const id = String(++commitSeq);
     pendingCommits.set(id, { repo, message: suggested });
     await ctx.api.editMessageText(
-      ctx.chat.id,
+      ctx.chat!.id,
       note.message_id,
       `${describeStatus(state, repo)}\n\nСообщение коммита:\n\n<b>${esc(suggested)}</b>\n\n` +
         `Файлов затронуто: ${state.entries.length}`,
@@ -676,6 +676,39 @@ bot.command("commit", async (ctx) => {
   } catch (error) {
     await ctx.reply(`⚠️ ${esc((error as Error).message.slice(0, 500))}`, { parse_mode: "HTML" });
   }
+}
+
+bot.command("commit", (ctx) => startCommit(ctx, ctx.match?.toString().trim() ?? ""));
+
+/**
+ * Кнопки быстрых действий под ответом. На телефоне набрать «покажи дифф»
+ * дороже, чем нажать, — поэтому девять действий из десяти вынесены сюда.
+ *
+ * Кнопки снимаются сразу после нажатия: они относятся к тому ответу, а не к
+ * следующему, и оставлять их — значит предлагать повторить вчерашнее.
+ */
+bot.callbackQuery(/^act:(go|diff|commit|test)$/, async (ctx) => {
+  const действие = ctx.match[1];
+  await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => undefined);
+
+  if (действие === "diff") {
+    await ctx.answerCallbackQuery("Смотрю изменения");
+    await showDiff(ctx);
+    return;
+  }
+  if (действие === "commit") {
+    await ctx.answerCallbackQuery("Готовлю коммит");
+    await startCommit(ctx, "");
+    return;
+  }
+
+  const задача =
+    действие === "go" ? "Продолжай." : "Прогони тесты проекта. Если упали — разберись и почини.";
+  await ctx.answerCallbackQuery(действие === "go" ? "Продолжаю" : "Запускаю тесты");
+  // Эхо задачи в чат: иначе в переписке остаётся ответ без вопроса, и через
+  // день непонятно, с чего бот вдруг побежал.
+  await ctx.reply(`▶️ <i>${esc(задача)}</i>`, { parse_mode: "HTML" });
+  await runTask(ctx, задача);
 });
 
 bot.callbackQuery(/^gc:(\d+):(y|n)$/, async (ctx) => {

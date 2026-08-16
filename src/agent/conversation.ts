@@ -36,6 +36,8 @@ export interface ConversationOutput {
   endStream(): Promise<void>;
   /** Прочитать ответ вслух, если о том просили. Необязательно и не мешает тексту. */
   speak?(text: string): Promise<void>;
+  /** Задача закончена: можно подвесить кнопки к последнему сообщению. */
+  finished?(): Promise<void>;
   /** Пустой черновик: у клиента появляется встроенная заглушка «Thinking…». */
   startDraft(): Promise<void>;
   /** Отдать файл с диска. */
@@ -691,6 +693,10 @@ export class Conversation {
         // Задача закончилась — самое время узнать, сколько осталось.
         // Не ждём: пользователю важен ответ, а не свежесть счётчика.
         void this.refreshRateLimits();
+
+        // Кнопки под последним сообщением: на телефоне набрать «покажи дифф»
+        // дороже, чем нажать. Ошибка тут ответа не отменяет.
+        if (output.finished) await output.finished().catch(() => undefined);
         this.#deps.onUsage({ tokens: deltaTokens, costUsd: deltaCost });
 
         for (const denial of message.permission_denials ?? []) {

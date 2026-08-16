@@ -1,7 +1,8 @@
 import type { Api } from "grammy";
-import { GrammyError, InputFile } from "grammy";
+import { GrammyError, InlineKeyboard, InputFile } from "grammy";
 import type { ConversationOutput } from "../agent/conversation.js";
 import { speechConfigured, synthesize } from "./speak.js";
+import { findRepos, status } from "./git.js";
 import type {
   PendingPermission,
   PendingQuestion,
@@ -40,6 +41,13 @@ export class TelegramOutput implements ConversationOutput {
    * мигание, а живой черновик фоновой задачи путается с ответом основной.
    */
   quiet = false;
+  /**
+   * Папка проекта. Нужна кнопкам под ответом: по ней видно, есть ли репозиторий
+   * и есть ли в нём что коммитить.
+   */
+  projectDir: string | null = null;
+  /** Последнее обычное сообщение — к нему и подвешиваются кнопки. */
+  #lastMessageId: number | null = null;
 
   constructor(api: Api, chatId: number) {
     this.#api = api;
@@ -50,6 +58,39 @@ export class TelegramOutput implements ConversationOutput {
    * Ответ голосом. Молча ничего не делаем, если озвучка не настроена или не
    * просили: голос — добавка к тексту, а не замена ему.
    */
+  /**
+   * Кнопки быстрых действий под последним сообщением.
+   *
+   * Подвешиваются к уже отправленному ответу, а не отдельным сообщением: лишняя
+   * реплика «вот кнопки» засоряла бы переписку. Состав зависит от того, есть ли
+   * что коммитить — предлагать дифф там, где ничего не менялось, бессмысленно.
+   */
+  async finished(): Promise<void> {
+    if (this.quiet || this.#lastMessageId === null) return;
+
+    const keyboard = new InlineKeyboard().text("▶️ Продолжай", "act:go");
+    try {
+      const repos = this.projectDir ? findRepos(this.projectDir) : [];
+      if (repos.length === 1) {
+        const state = await status(repos[0]!);
+        if (state.entries.length > 0) {
+          keyboard.text("📊 Дифф", "act:diff").row().text("💾 Коммит", "act:commit");
+        }
+      }
+    } catch {
+      // Репозиторий мог оказаться битым — тогда просто меньше кнопок.
+    }
+    keyboard.row().text("🧪 Тесты", "act:test");
+
+    try {
+      await this.#api.editMessageReplyMarkup(this.#chatId, this.#lastMessageId, {
+        reply_markup: keyboard,
+      });
+    } catch {
+      // Сообщение могло быть документом или уже уехать — не беда.
+    }
+  }
+
   async speak(text: string): Promise<void> {
     if (!this.voiceReply || !speechConfigured()) return;
     const audio = await synthesize(text);
@@ -69,12 +110,14 @@ export class TelegramOutput implements ConversationOutput {
         parse_mode: "HTML",
         link_preview_options: { is_disabled: true },
       });
+      this.#lastMessageId = message.message_id;
       return message.message_id;
     } catch (error) {
       // Единственная частая причина — кривая HTML-разметка внутри вывода модели.
       // Пробуем ещё раз обычным текстом, чтобы сообщение не потерялось.
       if (error instanceof GrammyError && error.description.includes("can't parse entities")) {
         const message = await this.#api.sendMessage(this.#chatId, stripTags(html));
+        this.#lastMessageId = message.message_id;
         return message.message_id;
       }
       console.error(`[output:${this.#chatId}] send failed:`, error);
