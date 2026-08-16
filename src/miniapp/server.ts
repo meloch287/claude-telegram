@@ -22,6 +22,16 @@ import { subscriptionUsage } from "../subscription-usage.js";
 
 const PUBLIC_DIR = resolve(fileURLToPath(new URL("./public", import.meta.url)));
 
+/**
+ * Имя бота для ссылки «поделиться». Узнаётся один раз на старте: в мини-аппе
+ * его взять неоткуда, а без него ссылка ведёт в пустоту.
+ */
+let botUsername = "";
+
+export function setBotUsername(name: string): void {
+  botUsername = name;
+}
+
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
@@ -176,6 +186,7 @@ function profilePayload(userId: number) {
       unlocked: user.total_tokens >= c.threshold,
     })),
     achievements: ACHIEVEMENTS.map((a) => ({ ...a, unlocked: unlocked.has(a.id) })),
+    botUsername,
     limits: buildLimits(userId),
     /**
      * Кооп: кто работает на одной подписке. Показываем только своих —

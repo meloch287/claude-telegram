@@ -78,7 +78,7 @@ import {
   suggestCommitMessage,
   type RepoStatus,
 } from "./bot/git.js";
-import { startMiniAppServer } from "./miniapp/server.js";
+import { setBotUsername, startMiniAppServer } from "./miniapp/server.js";
 import { scheduleDailyBackups } from "./backup.js";
 import {
   activeChannel,
@@ -1556,6 +1556,11 @@ if (config.miniappUrl) {
   // Иначе осталась бы кнопка от прошлого запуска, ведущая в никуда.
   await bot.api.setChatMenuButton({ menu_button: { type: "commands" } });
 }
+
+// Имя нужно мини-аппу для ссылки «поделиться». Спрашиваем один раз: меняется
+// оно разве что вручную в BotFather.
+const me = await bot.api.getMe().catch(() => null);
+if (me?.username) setBotUsername(me.username);
 
 startMiniAppServer();
 scheduleDailyBackups();

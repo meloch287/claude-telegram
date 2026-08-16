@@ -15,7 +15,7 @@ function text(value) {
 }
 
 function render(profile) {
-  const { cat, cats, achievements, totals, today, model, bot, history } = profile;
+  const { cat, cats, achievements, totals, today, model, bot } = profile;
 
   el("plan-line").textContent = `Модель ${model.label}`;
 
@@ -64,22 +64,10 @@ function render(profile) {
     [nf.format(totals.streakDays), "дней подряд"],
     [nf.format(today.tokens), "токенов сегодня"],
   ];
-  // Импорт старых транскриптов: токены есть, денег нет и взять их неоткуда —
-  // те сессии шли мимо бота. Прячем строку у тех, кто ничего не импортировал.
-  const historyNote = el("history-note");
-  if (history.tokens > 0) {
-    historyNote.hidden = false;
-    historyNote.textContent =
-      `Плюс импортировано из старых сессий: ${nf.format(history.tokens)} токенов ` +
-      `и ${nf.format(history.messages)} ответов. Стоимость по ним не считается — ` +
-      `те сессии шли мимо бота. Кот растёт от общей суммы.`;
-  } else {
-    historyNote.hidden = true;
-  }
-
-  el("cache-note").textContent =
-    "Чтение кэша в счёт не идёт: оно дешевле обычного токена в десять раз и " +
-    "больше его в сотни, так что общий счёт перестал бы что-либо значить.";
+  // Импортированная история и оговорка про кэш убраны из интерфейса: числа
+  // важнее объяснений, а объяснения живут в README.
+  el("history-note").hidden = true;
+  el("cache-note").hidden = true;
 
   const statsList = el("stats");
   statsList.replaceChildren();
@@ -217,23 +205,12 @@ function renderLimits(limits) {
   list.hidden = false;
   list.replaceChildren();
 
-  // Процент подписки есть не всегда: событие его не несёт, а запрос расхода
-  // плана отвечает отказом, если у токена нет области профиля. Молчать об этом
-  // нельзя — иначе пустая шкала читается как поломка.
-  const своиШкалы = limits.some((l) => l.utilization === null);
-  note.hidden = !своиШкалы;
-  if (своиШкалы) {
-    const безПотолка = limits.some((l) => l.utilization === null && !l.ceiling);
-    note.textContent =
-      "Процент считается от своего потолка, а не от лимита Anthropic: их число " +
-      "приходит с claude.ai, а он с этого сервера отдаёт проверку Cloudflare — " +
-      "датацентровые адреса не пускает. Расход считается по транскриптам: всё, " +
-      "что сделал Claude Code на сервере, вместе с кэшем и субагентами. Работа " +
-      "с других машин сюда не попадает." +
-      (безПотолка
-        ? " Потолок пока не задан: LIMIT_FIVE_HOUR_TOKENS и LIMIT_SEVEN_DAY_TOKENS в .env."
-        : "");
-  }
+  // Объяснений тут не место: человек открыл посмотреть числа. Подсказка
+  // остаётся одна и короткая — и только когда потолок не задан, то есть когда
+  // шкале и правда не от чего считаться.
+  const безПотолка = limits.some((l) => l.utilization === null && !l.ceiling);
+  note.hidden = !безПотолка;
+  if (безПотолка) note.textContent = "Потолок окна не задан — процент показать не от чего.";
 
   for (const limit of limits) {
     // Ключ берём из типа окна, а не из индекса: число строк меняется, и на
@@ -349,19 +326,48 @@ function formatOwn(value = 0) {
   if (value >= 1000) return `${(value / 1000).toFixed(1).replace(".", ",")} тыс.`;
   return String(value);
 }
+/**
+ * Короткое сообщение поверх страницы. Нужно там, где действие само по себе
+ * невидимо: скопировали в буфер — человек нажал и должен увидеть, что вышло.
+ */
+function сообщить(текст) {
+  if (tg?.showPopup) {
+    tg.showPopup({ message: текст });
+    return;
+  }
+  const toast = el("toast");
+  toast.textContent = текст;
+  toast.hidden = false;
+  clearTimeout(сообщить.таймер);
+  сообщить.таймер = setTimeout(() => {
+    toast.hidden = true;
+  }, 2500);
+}
+
 function setupShare(profile) {
   const line = `Мой Claude-кот: ${profile.cat.name} (уровень ${profile.cat.level}/10), ${nf.format(profile.totals.tokens)} токенов`;
 
   const share = () => {
-    if (tg?.switchInlineQuery) {
-      tg.switchInlineQuery(line, ["users", "groups"]);
-    } else if (tg?.sendData) {
-      tg.sendData(JSON.stringify({ share: line }));
-    } else if (navigator.share) {
-      void navigator.share({ text: line }).catch(() => undefined);
-    } else {
-      void navigator.clipboard?.writeText(line);
+    // Через обычную ссылку «поделиться», а не switchInlineQuery: тот требует
+    // включённого инлайн-режима в BotFather, а без него молча не делает ничего.
+    // Ссылка открывает штатный выбор чата в любом клиенте.
+    const кудаВедёт = profile.botUsername ? `https://t.me/${profile.botUsername}` : "https://t.me";
+    const адрес = `https://t.me/share/url?url=${encodeURIComponent(кудаВедёт)}&text=${encodeURIComponent(line)}`;
+
+    if (tg?.openTelegramLink) {
+      tg.openTelegramLink(адрес);
+      return;
     }
+    if (navigator.share) {
+      void navigator.share({ text: line, url: кудаВедёт }).catch(() => undefined);
+      return;
+    }
+    // Последний рубеж — буфер обмена. Молча копировать нельзя: человек нажал
+    // и должен видеть, что что-то произошло.
+    void navigator.clipboard
+      ?.writeText(`${line} ${кудаВедёт}`)
+      .then(() => сообщить("Скопировано в буфер обмена"))
+      .catch(() => сообщить("Не вышло поделиться"));
   };
 
   // Наличия tg.MainButton недостаточно: telegram-web-app.js создаёт объект и
