@@ -34,6 +34,8 @@ export interface ConversationOutput {
   stream(text: string, force?: boolean): Promise<void>;
   /** Ответ закончен: следующий пойдёт новым черновиком. */
   endStream(): Promise<void>;
+  /** Прочитать ответ вслух, если о том просили. Необязательно и не мешает тексту. */
+  speak?(text: string): Promise<void>;
   /** Пустой черновик: у клиента появляется встроенная заглушка «Thinking…». */
   startDraft(): Promise<void>;
   /** Отдать файл с диска. */
@@ -610,6 +612,9 @@ export class Conversation {
               for (const piece of chunk(esc(part.body))) await output.send(piece);
             }
             this.#liveText = "";
+            // Озвучка после текста, а не вместо: голос догоняет ответ, который
+            // уже можно читать. Ошибка тут ответа не отменяет.
+            if (output.speak) await output.speak(full).catch(() => undefined);
           } else if (block.type === "tool_use") {
             this.#toolNames.set(block.id, block.name);
             this.#activity.push(

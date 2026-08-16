@@ -200,3 +200,110 @@ export async function closeAll(): Promise<void> {
   await Promise.allSettled([...sessions.values()].map((s) => s.conversation.close()));
   sessions.clear();
 }
+
+/**
+ * Фоновые задачи.
+ *
+ * Основной диалог у чата один: вторая просьба встаёт в очередь и ждёт. Это
+ * правильно для разговора, но мешает, когда хочется запустить длинное «прогони
+ * тесты и почини» и продолжать разговаривать.
+ *
+ * Фоновая задача — отдельная сессия в той же папке проекта: свой контекст, свой
+ * счёт токенов, свои карточки разрешений. Отвечает она в тот же чат, но
+ * помечает себя, иначе два потока сообщений не различить.
+ */
+
+/** Больше двух на чат не пускаем: карточки разрешений от трёх задач сразу не разобрать. */
+const MAX_BACKGROUND = 2;
+
+interface BackgroundTask {
+  id: number;
+  prompt: string;
+  startedAt: number;
+  conversation: Conversation;
+}
+
+const background = new Map<number, Map<number, BackgroundTask>>();
+let backgroundSeq = 0;
+
+export function backgroundTasks(chatId: number): BackgroundTask[] {
+  return [...(background.get(chatId)?.values() ?? [])];
+}
+
+export class TooManyBackgroundTasks extends Error {
+  constructor() {
+    super(`больше ${MAX_BACKGROUND} фоновых задач на чат не запускается`);
+  }
+}
+
+export async function startBackgroundTask(
+  options: EnsureOptions & { prompt: string },
+): Promise<number> {
+  const { api, chatId, userId, notify, prompt } = options;
+
+  const running = background.get(chatId) ?? new Map<number, BackgroundTask>();
+  if (running.size >= MAX_BACKGROUND) throw new TooManyBackgroundTasks();
+
+  const user = getOrCreateUser(userId);
+  const chatRow = getChat(chatId);
+  const project = chatRow?.project ?? "default";
+  const cwd = workspaceFor(userId, project);
+
+  const credential = credentialFor(userId);
+  if (!credential) throw new Error("Не выполнен вход: /start");
+
+  const id = ++backgroundSeq;
+  const output = new TelegramOutput(api, chatId);
+  // Строку состояния фоновая задача не ведёт: две строки, перебивающие друг
+  // друга, читаются как мигание. О ходе дела скажет отчёт в конце.
+  output.quiet = true;
+
+  let finished = false;
+  const finish = async (итог: string) => {
+    if (finished) return;
+    finished = true;
+    running.delete(id);
+    if (running.size === 0) background.delete(chatId);
+    await notify(итог);
+    await task.conversation.close().catch(() => undefined);
+  };
+
+  const conversation = new Conversation({
+    chatId,
+    userId,
+    cwd,
+    credential,
+    model: user.model,
+    // Фоновая задача не начинает с чужого места: продолжать чей-то диалог она
+    // не должна, у неё своя мысль.
+    permissionMode: (chatRow?.permission_mode ?? "default") as PermissionMode,
+    permissionTimeoutMs: config.permissionTimeoutMs,
+    resumeSessionId: null,
+    output,
+    onUsage: ({ tokens, costUsd }) => {
+      if (tokens > 0 || costUsd > 0) recordUsage(userId, tokens, costUsd);
+      // Один результат — одна законченная задача: дальше ей нечего делать.
+      void finish(`✅ Фоновая задача №${id} готова: <i>${prompt.slice(0, 80)}</i>`);
+    },
+    onSessionId: () => {},
+    onResumeLost: () => {},
+    onToolDecision: (toolName, allowed) => recordToolDecision(userId, allowed),
+    onRateLimit: (limit) => recordRateLimit(userId, limit),
+  });
+
+  const task: BackgroundTask = { id, prompt, startedAt: Date.now(), conversation };
+  running.set(id, task);
+  background.set(chatId, running);
+
+  await conversation.send(prompt);
+  return id;
+}
+
+/** Останавливает фоновую задачу. false — такой не было. */
+export async function stopBackgroundTask(chatId: number, id: number): Promise<boolean> {
+  const task = background.get(chatId)?.get(id);
+  if (!task) return false;
+  await task.conversation.close().catch(() => undefined);
+  background.get(chatId)?.delete(id);
+  return true;
+}

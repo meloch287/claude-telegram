@@ -48,6 +48,9 @@ import {
   resetSession,
   switchProject,
   workspaceFor,
+  backgroundTasks,
+  startBackgroundTask,
+  stopBackgroundTask,
 } from "./bot/session.js";
 import {
   HELP,
@@ -68,6 +71,7 @@ import { limitTitle, percentOf, toMillis, WINDOWS } from "./limits.js";
 import { subscriptionUsage } from "./subscription-usage.js";
 import { saveTelegramFile } from "./bot/attachments.js";
 import { transcribe, transcriptionConfigured, TranscriptionNotConfigured } from "./bot/voice.js";
+import { speechConfigured } from "./bot/speak.js";
 import { formatSize } from "./bot/artifacts.js";
 import { cloneRepository } from "./bot/repos.js";
 import {
@@ -308,6 +312,66 @@ bot.command("context", async (ctx) => {
       `${usage.total.toLocaleString("ru-RU")} из ${usage.max.toLocaleString("ru-RU")} токенов${hint}`,
     { parse_mode: "HTML" },
   );
+});
+
+/**
+ * Фоновая задача. Основной диалог у чата один, и вторая просьба ждёт своей
+ * очереди — это верно для разговора, но мешает, когда хочется запустить долгое
+ * «прогони тесты и почини» и продолжать говорить о другом.
+ */
+bot.command("bg", async (ctx) => {
+  if (!(await requireLogin(ctx))) return;
+  const chatId = ctx.chat.id;
+  const prompt = ctx.match?.toString().trim() ?? "";
+
+  if (!prompt) {
+    const running = backgroundTasks(chatId);
+    if (running.length === 0) {
+      await ctx.reply(
+        "Фоновых задач нет.\n\n<code>/bg задача</code> — запустить в фоне, " +
+          "не занимая основной диалог.",
+        { parse_mode: "HTML" },
+      );
+      return;
+    }
+    const lines = running.map((task) => {
+      const минут = Math.max(1, Math.round((Date.now() - task.startedAt) / 60000));
+      return `№${task.id} · ${минут} мин · <i>${esc(task.prompt.slice(0, 60))}</i>`;
+    });
+    await ctx.reply(
+      `<b>Фоновые задачи</b>\n\n${lines.join("\n")}\n\n<code>/bg стоп НОМЕР</code> — прервать`,
+      { parse_mode: "HTML" },
+    );
+    return;
+  }
+
+  const [первое, второе] = prompt.split(/\s+/);
+  if (/^(стоп|stop)$/i.test(первое ?? "")) {
+    const id = Number(второе);
+    if (!Number.isInteger(id)) {
+      await ctx.reply("Нужен номер задачи: <code>/bg стоп 1</code>", { parse_mode: "HTML" });
+      return;
+    }
+    const остановлена = await stopBackgroundTask(chatId, id);
+    await ctx.reply(остановлена ? `⏹️ Прервал задачу №${id}.` : "Такой задачи нет.");
+    return;
+  }
+
+  try {
+    const id = await startBackgroundTask({
+      api: ctx.api,
+      chatId,
+      userId: ctx.from!.id,
+      notify: (html) => ctx.reply(html, { parse_mode: "HTML" }),
+      prompt,
+    });
+    await ctx.reply(
+      `🧵 Задача №${id} пошла в фоне. Отчитаюсь, когда закончит — основной диалог свободен.`,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await ctx.reply(`⚠️ Не запустил: ${esc(message)}`, { parse_mode: "HTML" });
+  }
 });
 
 bot.command("stop", async (ctx) => {
@@ -670,6 +734,30 @@ bot.command("project", async (ctx) => {
  * Только владельцу: в логе видно, кто и что писал боту, включая чужие чаты,
  * если их когда-нибудь пустят. Первый в ALLOWED_USER_IDS и есть владелец.
  */
+/** Чаты, где бот читает вслух всегда, а не только в ответ на голосовое. */
+const alwaysVoice = new Set<number>();
+
+/**
+ * Постоянная озвучка. На голосовое бот отвечает голосом и без неё; эта команда
+ * для тех, кто пишет текстом, а слушать хочет.
+ */
+bot.command("voice", async (ctx) => {
+  const chatId = ctx.chat.id;
+  if (!speechConfigured()) {
+    await ctx.reply("Озвучка не настроена: задай <code>TTS_URL</code> в <code>.env</code>.", {
+      parse_mode: "HTML",
+    });
+    return;
+  }
+  if (alwaysVoice.has(chatId)) {
+    alwaysVoice.delete(chatId);
+    await ctx.reply("🔇 Больше не читаю вслух. На голосовые всё равно отвечу голосом.");
+    return;
+  }
+  alwaysVoice.add(chatId);
+  await ctx.reply("🔊 Буду читать ответы вслух. Выключить — /voice ещё раз.");
+});
+
 bot.command("logs", async (ctx) => {
   const owner = config.allowedUserIds[0];
   if (owner === undefined || ctx.from!.id !== owner) {
@@ -1104,7 +1192,7 @@ bot.callbackQuery(/^q:([^:]+):(\d+)$/, async (ctx) => {
  * Отдать реплику агенту. Один путь на все виды сообщений: текст, голос, файл,
  * пересылку — иначе обработка ошибок разъезжается по копиям.
  */
-async function runTask(ctx: Context, prompt: string): Promise<boolean> {
+async function runTask(ctx: Context, prompt: string, вслух = false): Promise<boolean> {
   const userId = ctx.from?.id;
   const chatId = ctx.chat?.id;
   if (userId === undefined || chatId === undefined) return false;
@@ -1117,6 +1205,10 @@ async function runTask(ctx: Context, prompt: string): Promise<boolean> {
       userId,
       notify: (html) => ctx.reply(html, { parse_mode: "HTML" }),
     });
+    // Голосом отвечаем на голосовое или когда включён постоянный режим.
+    // Ставится на каждую задачу: иначе после одного голосового бот заговорил бы
+    // навсегда, а этого никто не просил.
+    session.output.voiceReply = вслух || alwaysVoice.has(chatId);
     await session.conversation.send(prompt);
     return true;
   } catch (error) {
@@ -1298,7 +1390,7 @@ bot.on(["message:voice", "message:audio"], async (ctx) => {
     parse_mode: "HTML",
   });
 
-  await runTask(ctx, text);
+  await runTask(ctx, text, true);
 });
 
 /**
@@ -1483,6 +1575,7 @@ await bot.api.setMyCommands([
   { command: "new", description: "начать заново" },
   { command: "file", description: "забрать файл из проекта" },
   { command: "context", description: "насколько заполнен контекст" },
+  { command: "bg", description: "запустить задачу в фоне" },
   { command: "stop", description: "остановить агента" },
   { command: "mode", description: "режим разрешений" },
   { command: "model", description: "сменить модель" },
@@ -1493,6 +1586,7 @@ await bot.api.setMyCommands([
   { command: "stats", description: "расход и мой кот" },
   { command: "cats", description: "коты и достижения" },
   { command: "status", description: "канал выхода и лимиты" },
+  { command: "voice", description: "читать ответы вслух" },
   { command: "logs", description: "хвост лога (владельцу)" },
   { command: "admin", description: "кому можно пользоваться ботом (владельцу)" },
   { command: "logout", description: "удалить доступ" },

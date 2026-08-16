@@ -78,6 +78,17 @@ export const config = {
   whisperViaProxy: optional("WHISPER_VIA_PROXY", "") === "1",
 
   /**
+   * Озвучка ответов. Адрес сервиса с интерфейсом OpenAI (POST /v1/audio/speech).
+   * По умолчанию берётся от адреса расшифровки: у одного и того же сервиса это
+   * соседние ручки, и заставлять писать почти тот же адрес дважды незачем.
+   */
+  ttsUrl: optional("TTS_URL", optional("WHISPER_URL", "").replace(/transcriptions$/, "speech")),
+  ttsModel: optional("TTS_MODEL", ""),
+  ttsVoice: optional("TTS_VOICE", ""),
+  ttsToken: optional("TTS_TOKEN", optional("WHISPER_TOKEN", "")),
+  ttsViaProxy: optional("TTS_VIA_PROXY", "") === "1",
+
+  /**
    * Потолки окон подписки в токенах. Нужны, чтобы показывать «сколько из 100%».
    *
    * Своё число, а не от Anthropic: настоящий процент приходит с claude.ai, а он

@@ -1,6 +1,7 @@
 import type { Api } from "grammy";
 import { GrammyError, InputFile } from "grammy";
 import type { ConversationOutput } from "../agent/conversation.js";
+import { speechConfigured, synthesize } from "./speak.js";
 import type {
   PendingPermission,
   PendingQuestion,
@@ -28,10 +29,37 @@ export class TelegramOutput implements ConversationOutput {
   #streamShown = "";
   #lastStreamEdit = 0;
   #typingTimer: NodeJS.Timeout | null = null;
+  /**
+   * Читать ли следующий ответ вслух. Ставится на одну задачу: пришло голосовое —
+   * ответим голосом. Постоянный режим включается /voice.
+   */
+  voiceReply = false;
+  /**
+   * Тихий режим для фоновых задач: без строки состояния и без черновиков.
+   * Две строки состояния в одном чате перебивают друг друга и читаются как
+   * мигание, а живой черновик фоновой задачи путается с ответом основной.
+   */
+  quiet = false;
 
   constructor(api: Api, chatId: number) {
     this.#api = api;
     this.#chatId = chatId;
+  }
+
+  /**
+   * Ответ голосом. Молча ничего не делаем, если озвучка не настроена или не
+   * просили: голос — добавка к тексту, а не замена ему.
+   */
+  async speak(text: string): Promise<void> {
+    if (!this.voiceReply || !speechConfigured()) return;
+    const audio = await synthesize(text);
+    if (!audio) return;
+    try {
+      await this.#api.sendVoice(this.#chatId, new InputFile(audio, "ответ.mp3"));
+    } catch (error) {
+      // Телеграм может не принять формат — текст уже ушёл, этого достаточно.
+      console.error("не отправил голосом:", (error as Error).message);
+    }
   }
 
   async send(html: string): Promise<number | undefined> {
@@ -65,6 +93,8 @@ export class TelegramOutput implements ConversationOutput {
    * исчезнет.
    */
   async stream(text: string, force = false): Promise<void> {
+    if (this.quiet) return;
+
     const trimmed = text.trimEnd();
     if (!trimmed) return;
 
@@ -80,6 +110,8 @@ export class TelegramOutput implements ConversationOutput {
 
   /** Пустой черновик — встроенная заглушка «Thinking…» у клиента. */
   async startDraft(): Promise<void> {
+    if (this.quiet) return;
+
     this.#streamShown = "";
     this.#lastStreamEdit = 0;
     await this.#draft("");
@@ -150,6 +182,8 @@ export class TelegramOutput implements ConversationOutput {
   }
 
   async status(html: string): Promise<void> {
+    if (this.quiet) return;
+
     const text = `<i>работаю…</i>\n\n${html}`;
     if (this.#statusMessageId === null) {
       const id = await this.send(text);
