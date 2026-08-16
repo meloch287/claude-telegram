@@ -20,6 +20,7 @@ import {
   getUsageToday,
   allowUser,
   disallowUser,
+  inviterOf,
   isUserAllowedInDb,
   listAllowedUsers,
   listRateLimits,
@@ -697,9 +698,21 @@ bot.command("logs", async (ctx) => {
  * его должен один человек, а не всякий, кого уже пустили.
  */
 bot.command("admin", async (ctx) => {
-  const owner = ownerId();
-  if (owner === undefined || ctx.from!.id !== owner) {
-    await ctx.reply("Списком доступа распоряжается только владелец бота.");
+  const userId = ctx.from!.id;
+
+  // Приглашать может каждый, у кого свой доступ. У кого его нет — тому нечего
+  // делить: он сам работает по чужой подписке.
+  if (!getCredential(userId)) {
+    const inviter = inviterOf(userId);
+    if (inviter !== null) {
+      await ctx.reply(
+        "Ты на приглашённой подписке — делиться пока нечем.\n\n" +
+          "Подключишь свой доступ — сможешь звать других, и расход пойдёт по твоему ключу.",
+        { reply_markup: new InlineKeyboard().text("🎫 Подключить свой доступ", "nav:auth") },
+      );
+      return;
+    }
+    await ctx.reply("Сначала подключи свой доступ: /start");
     return;
   }
 
@@ -717,12 +730,33 @@ bot.command("admin", async (ctx) => {
       return;
     }
     if (действие === "add") {
-      if (id === owner) {
-        await ctx.reply("Ты и так владелец — тебя добавлять некуда.");
+      if (id === userId) {
+        await ctx.reply("Себя приглашать некуда — у тебя свой доступ.");
         return;
       }
-      allowUser(id, owner, остальное.join(" ") || null);
-      await ctx.reply(`✅ Пустил <code>${id}</code>. Пусть напишет боту.`, { parse_mode: "HTML" });
+      allowUser(id, userId, остальное.join(" ") || null);
+      // Человек должен узнать, что его позвали, — иначе он просто напишет боту
+      // и не поймёт, почему тот вдруг отвечает.
+      const позвал = ctx.from!.first_name || "Владелец подписки";
+      const дошло = await bot.api
+        .sendMessage(
+          id,
+          `🎫 ${esc(позвал)} позвал тебя в общую подписку Claude.\n\n` +
+            "Вводить ничего не нужно — просто напиши задачу словами. Расход пойдёт по " +
+            "подписке пригласившего, а статистика и кот в мини-аппе у тебя свои.\n\n" +
+            "Захочешь работать по своему ключу — /start.",
+          { parse_mode: "HTML" },
+        )
+        .then(() => true)
+        .catch(() => false);
+
+      await ctx.reply(
+        `✅ Пустил <code>${id}</code>.` +
+          (дошло
+            ? " Сообщение ему отправил."
+            : " Написать ему не смог — пусть сам напишет боту первым."),
+        { parse_mode: "HTML" },
+      );
       return;
     }
     if (config.allowedUserIds.includes(id)) {
@@ -732,6 +766,10 @@ bot.command("admin", async (ctx) => {
       );
       return;
     }
+    if (inviterOf(id) !== userId && userId !== ownerId()) {
+      await ctx.reply("Его звал не ты — и отозвать можешь только тот, кто звал.");
+      return;
+    }
     await ctx.reply(
       disallowUser(id) ? `🚫 Отозвал доступ у <code>${id}</code>.` : "Такого в списке и не было.",
       { parse_mode: "HTML" },
@@ -739,64 +777,79 @@ bot.command("admin", async (ctx) => {
     return;
   }
 
-  await showAccessList(ctx);
+  await showAccessList(ctx, userId);
 });
 
-/** Кто сейчас в списке: неотзываемые из .env и выданные из чата — с кнопками. */
-async function showAccessList(ctx: CommandContext<Context> | Context): Promise<void> {
-  const fromEnv = config.allowedUserIds;
-  const fromDb = listAllowedUsers();
+/** Кого позвал этот человек: список с кнопками отзыва. */
+async function showAccessList(
+  ctx: CommandContext<Context> | Context,
+  userId: number,
+): Promise<void> {
+  // Владелец видит всех: он отвечает за машину целиком. Остальные — только тех,
+  // кого позвали сами, чтобы не лезть в чужие подписки.
+  const общий = userId === ownerId();
+  const приглашённые = общий ? listAllowedUsers() : listAllowedUsers(userId);
 
-  const lines = ["<b>Доступ к боту</b>", ""];
-  lines.push("<i>Из .env — отсюда не отзываются:</i>");
-  if (fromEnv.length === 0) {
-    lines.push("⚠️ список пуст — бот отвечает кому угодно");
-  } else {
-    fromEnv.forEach((id, index) => {
-      lines.push(`<code>${id}</code>${index === 0 ? " — владелец" : ""}`);
-    });
+  const lines = [общий ? "<b>Доступ к боту</b>" : "<b>Кого ты позвал</b>", ""];
+
+  if (общий) {
+    lines.push("<i>Из .env — отсюда не отзываются:</i>");
+    if (config.allowedUserIds.length === 0) {
+      lines.push("⚠️ список пуст — бот отвечает кому угодно");
+    } else {
+      config.allowedUserIds.forEach((id, index) => {
+        lines.push(`<code>${id}</code>${index === 0 ? " — владелец" : ""}`);
+      });
+    }
+    lines.push("", "<i>Позваны из чата:</i>");
   }
 
-  lines.push("", "<i>Выданы из чата:</i>");
-  if (fromDb.length === 0) {
-    lines.push("никого");
+  if (приглашённые.length === 0) {
+    lines.push("пока никого");
   } else {
-    for (const row of fromDb) {
+    for (const row of приглашённые) {
       const when = new Date(row.added_at).toLocaleDateString("ru-RU");
-      lines.push(`<code>${row.user_id}</code>${row.note ? ` — ${esc(row.note)}` : ""} · с ${when}`);
+      const чей = общий && row.added_by !== userId ? ` · позвал ${row.added_by}` : "";
+      const свой = getCredential(row.user_id) ? " · работает по своему ключу" : "";
+      lines.push(
+        `<code>${row.user_id}</code>${row.note ? ` — ${esc(row.note)}` : ""} · с ${when}${чей}${свой}`,
+      );
     }
   }
 
   lines.push(
     "",
-    "<code>/admin add НОМЕР [заметка]</code> — пустить",
+    "<code>/admin add НОМЕР [заметка]</code> — позвать",
     "<code>/admin del НОМЕР</code> — отозвать",
     "",
-    "Номер человека бот называет ему сам, когда тот пишет в закрытый бот.",
+    "Позванный работает по твоей подписке, но статистика и кот у него свои.",
+    "Свой номер бот называет человеку сам, когда тот пишет в закрытый бот.",
   );
 
   const keyboard = new InlineKeyboard();
-  for (const row of fromDb) {
+  for (const row of приглашённые) {
     keyboard.text(`🚫 ${row.note || row.user_id}`, `adm:del:${row.user_id}`).row();
   }
 
   await ctx.reply(lines.join("\n"), {
     parse_mode: "HTML",
-    reply_markup: fromDb.length > 0 ? keyboard : undefined,
+    reply_markup: приглашённые.length > 0 ? keyboard : undefined,
   });
 }
 
 bot.callbackQuery(/^adm:del:(\d+)$/, async (ctx) => {
-  const owner = ownerId();
-  if (owner === undefined || ctx.from.id !== owner) {
-    await ctx.answerCallbackQuery("Только владельцу");
+  const userId = ctx.from.id;
+  const id = Number(ctx.match[1]);
+  // Отозвать может тот, кто звал, и владелец машины. Иначе один приглашённый
+  // выкидывал бы другого из чужой подписки.
+  if (inviterOf(id) !== userId && userId !== ownerId()) {
+    await ctx.answerCallbackQuery("Его звал не ты");
     return;
   }
-  const id = Number(ctx.match[1]);
   const убран = disallowUser(id);
   await ctx.answerCallbackQuery(убран ? "Доступ отозван" : "Его уже не было");
   await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => undefined);
-  await showAccessList(ctx);
+  await showAccessList(ctx, userId);
 });
 
 bot.command("stats", async (ctx) => {

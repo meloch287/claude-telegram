@@ -269,6 +269,7 @@ const stmts = {
   ),
   disallowUser: db.prepare("DELETE FROM allowed_users WHERE user_id = ?"),
   isAllowed: db.prepare("SELECT user_id FROM allowed_users WHERE user_id = ?"),
+  getAllowed: db.prepare("SELECT * FROM allowed_users WHERE user_id = ?"),
   addEvent: db.prepare(
     "INSERT INTO usage_events (user_id, at, tokens, cost_usd) VALUES (?, ?, ?, ?)",
   ),
@@ -337,18 +338,20 @@ export function addHistoricalUsage(userId: number, tokens: number, messages: num
 /**
  * Доступ, по которому работает пользователь.
  *
- * Свой ключ, если он есть. Иначе — владельца: приглашённый через /admin
- * работает по его подписке и вводить ничего не должен. Это не лазейка, а суть
- * приглашения — пустить в бота и значит пустить к своей подписке.
+ * Сперва свой: у каждого свой Claude Code, это основной режим. Если своего нет,
+ * берётся ключ того, кто пригласил — в этом и смысл приглашения. Не «владельца
+ * бота», а именно пригласившего: приглашать может каждый, у кого есть свой
+ * доступ, и подписки при этом не смешиваются.
  *
- * Владельцу подставлять нечего: если у него ключа нет, работать не с чем.
+ * Расход при этом всё равно пишется на того, кто работает: кот в мини-аппе у
+ * каждого свой, и приглашённый видит только то, что потратил сам.
  */
 export function credentialFor(userId: number): Credential | null {
   const own = getCredential(userId);
   if (own) return own;
-  const owner = config.allowedUserIds[0];
-  if (owner === undefined || owner === userId) return null;
-  return getCredential(owner);
+  const inviter = inviterOf(userId);
+  if (inviter === null || inviter === userId) return null;
+  return getCredential(inviter);
 }
 
 export function setModel(userId: number, model: string | null): void {
@@ -542,8 +545,16 @@ export interface AllowedUserRow {
   added_at: number;
 }
 
-export function listAllowedUsers(): AllowedUserRow[] {
-  return stmts.listAllowed.all() as unknown as AllowedUserRow[];
+/** Кого пустил конкретный человек. Без аргумента — весь список, для владельца. */
+export function listAllowedUsers(invitedBy?: number): AllowedUserRow[] {
+  const rows = stmts.listAllowed.all() as unknown as AllowedUserRow[];
+  return invitedBy === undefined ? rows : rows.filter((r) => r.added_by === invitedBy);
+}
+
+/** Кто пригласил этого человека. null — он сам по себе. */
+export function inviterOf(userId: number): number | null {
+  const row = stmts.getAllowed.get(userId) as unknown as AllowedUserRow | undefined;
+  return row?.added_by ?? null;
 }
 
 export function allowUser(userId: number, addedBy: number, note: string | null): void {

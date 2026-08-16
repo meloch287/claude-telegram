@@ -1010,16 +1010,17 @@ test("доступ: выдача из чата, отзыв, неотзываем
   assert.equal(r.отзывНесуществующего, false, "отзыв того, кого не было, честно возвращает нет");
 });
 
-// Приглашённый работает по подписке владельца. Ошибка здесь либо запирает
-// человека на экране входа, либо, наоборот, пускает чужого к чужой подписке.
-test("общий доступ: приглашённый берёт ключ владельца, чужой — ничего", async () => {
+// У каждого свой Claude Code; приглашённый работает по ключу того, кто позвал.
+// Ошибка здесь либо запирает человека на экране входа, либо пускает его к чужой
+// подписке без приглашения.
+test("кооп: свой ключ, ключ пригласившего, цепочка приглашений", async () => {
   const { execFileSync } = await import("node:child_process");
   const { mkdtempSync, rmSync, writeFileSync } = await import("node:fs");
   const { join } = await import("node:path");
   const { tmpdir } = await import("node:os");
   const { fileURLToPath } = await import("node:url");
 
-  const dir = mkdtempSync(join(tmpdir(), "общий-"));
+  const dir = mkdtempSync(join(tmpdir(), "кооп-"));
   const dbPath = fileURLToPath(new URL("../src/db.ts", import.meta.url));
   const script = join(dir, "проба.mjs");
 
@@ -1030,23 +1031,31 @@ test("общий доступ: приглашённый берёт ключ вл
     process.env.ENCRYPTION_KEY = Buffer.alloc(32, 6).toString("base64");
     process.env.DATA_DIR = ${JSON.stringify(dir)};
     process.env.WORKSPACE_ROOT = ${JSON.stringify(join(dir, "ws"))};
-    // Владелец — первый в списке.
     process.env.ALLOWED_USER_IDS = "111,222";
 
     const db = await import(${JSON.stringify(dbPath)});
     db.getOrCreateUser(111);
-    db.setCredential(111, { kind: "subscription", secret: "sk-ant-oat01-владелец" });
+    db.setCredential(111, { kind: "subscription", secret: "ключ-111" });
 
     const шаги = {};
-    шаги.уВладельцаСвой = db.credentialFor(111)?.secret;
-    // 222 в списке из .env, своего ключа нет — работает по ключу владельца.
-    шаги.уПриглашённого = db.credentialFor(222)?.secret;
+    шаги.свой = db.credentialFor(111)?.secret ?? null;
+    // 222 в .env, но никем не позван и своего ключа не имеет: у каждого свой
+    // Claude Code — подставлять ему чужой не за что.
+    шаги.безПриглашения = db.credentialFor(222)?.secret ?? null;
 
-    // Свой ключ перебивает общий: расход пойдёт по нему.
-    db.getOrCreateUser(222);
-    db.setCredential(222, { kind: "api", secret: "sk-ant-api03-свой-собственный" });
-    шаги.послеСвоего = db.credentialFor(222)?.secret;
+    db.allowUser(333, 111, "позван первым");
+    шаги.позванный = db.credentialFor(333)?.secret ?? null;
 
+    // Свой ключ перебивает общий: дальше расход идёт по нему.
+    db.getOrCreateUser(333);
+    db.setCredential(333, { kind: "api", secret: "ключ-333" });
+    шаги.послеСвоего = db.credentialFor(333)?.secret ?? null;
+
+    // Позванный своим ключом может звать дальше — и делится уже своим.
+    db.allowUser(444, 333, "позван вторым");
+    шаги.цепочка = db.credentialFor(444)?.secret ?? null;
+    шаги.ктоПозвал444 = db.inviterOf(444);
+    шаги.ктоПозвал222 = db.inviterOf(222);
     console.log(JSON.stringify(шаги));
     `,
   );
@@ -1055,15 +1064,11 @@ test("общий доступ: приглашённый берёт ключ вл
   const r = JSON.parse(out.trim().split("\n").pop() ?? "{}");
   rmSync(dir, { recursive: true, force: true });
 
-  assert.equal(r.уВладельцаСвой, "sk-ant-oat01-владелец", "владелец работает по своему ключу");
-  assert.equal(
-    r.уПриглашённого,
-    "sk-ant-oat01-владелец",
-    "приглашённому подставляется ключ владельца — ради этого его и приглашали",
-  );
-  assert.equal(
-    r.послеСвоего,
-    "sk-ant-api03-свой-собственный",
-    "свой ключ перебивает общий: расход пойдёт по нему",
-  );
+  assert.equal(r.свой, "ключ-111", "свой ключ используется всегда");
+  assert.equal(r.безПриглашения, null, "без приглашения чужой ключ не подставляется");
+  assert.equal(r.позванный, "ключ-111", "позванному достаётся ключ того, кто позвал");
+  assert.equal(r.послеСвоего, "ключ-333", "свой ключ перебивает ключ пригласившего");
+  assert.equal(r.цепочка, "ключ-333", "позвавший делится своим ключом, а не чужим");
+  assert.equal(r.ктоПозвал444, 333, "видно, кто кого позвал");
+  assert.equal(r.ктоПозвал222, null, "кого не звали — у того и пригласившего нет");
 });

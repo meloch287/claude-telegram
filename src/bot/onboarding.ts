@@ -1,9 +1,10 @@
-import type { Context } from "grammy";
+import { InlineKeyboard, type Context } from "grammy";
 import { config } from "../config.js";
 import {
   credentialFor,
   getCredential,
   getOrCreateUser,
+  inviterOf,
   setCredential,
   markOnboarded,
 } from "../db.js";
@@ -38,12 +39,20 @@ export async function sendStart(ctx: Context): Promise<void> {
     // Если он до этого успел попасть на экран входа, снимаем ожидание токена:
     // иначе следующее «привет» бот снова разберёт как ключ.
     stopAwaiting(userId);
+    const позвал = inviterOf(userId);
     await ctx.reply(
-      "👋 Ты в списке — можно работать.\n\n" +
-        "Вход настраивать не нужно: бот ходит по подписке владельца. Просто напиши " +
-        "задачу словами, а я возьмусь.\n\n" +
-        "Свой ключ можно поставить и отдельно — /menu, вход. Тогда расход пойдёт по нему.",
-      { parse_mode: "HTML" },
+      "👋 Ты на общей подписке — можно работать.\n\n" +
+        (позвал === null
+          ? "Вход настраивать не нужно: просто напиши задачу словами."
+          : `Тебя позвал <code>${позвал}</code>, и расход идёт по его подписке. ` +
+            "Вводить ничего не нужно — просто напиши задачу словами.") +
+        "\n\nСтатистика и кот в мини-аппе у тебя свои: считается только то, что " +
+        "потратил ты.\n\nЗахочешь работать по своему ключу — кнопка ниже. Тогда " +
+        "расход пойдёт по нему, и сможешь звать других.",
+      {
+        parse_mode: "HTML",
+        reply_markup: new InlineKeyboard().text("🎫 Подключить свой доступ", "nav:auth"),
+      },
     );
     return;
   }
