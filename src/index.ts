@@ -786,11 +786,13 @@ bot.command("voice", async (ctx) => {
   }
   if (alwaysVoice.has(chatId)) {
     alwaysVoice.delete(chatId);
-    await ctx.reply("🔇 Больше не читаю вслух. На голосовые всё равно отвечу голосом.");
+    await ctx.reply("🔇 Больше не читаю вслух.");
     return;
   }
   alwaysVoice.add(chatId);
-  await ctx.reply("🔊 Буду читать ответы вслух. Выключить — /voice ещё раз.");
+  await ctx.reply(
+    "🔊 Буду читать ответы вслух — все, пока не выключишь. Выключить — /voice ещё раз.",
+  );
 });
 
 bot.command("logs", async (ctx) => {
@@ -1282,7 +1284,7 @@ bot.callbackQuery(/^q:([^:]+):(\d+)$/, async (ctx) => {
  * Отдать реплику агенту. Один путь на все виды сообщений: текст, голос, файл,
  * пересылку — иначе обработка ошибок разъезжается по копиям.
  */
-async function runTask(ctx: Context, prompt: string, вслух = false): Promise<boolean> {
+async function runTask(ctx: Context, prompt: string): Promise<boolean> {
   const userId = ctx.from?.id;
   const chatId = ctx.chat?.id;
   if (userId === undefined || chatId === undefined) return false;
@@ -1304,10 +1306,10 @@ async function runTask(ctx: Context, prompt: string, вслух = false): Promis
       userId,
       notify: (html) => ctx.reply(html, { parse_mode: "HTML" }),
     });
-    // Голосом отвечаем на голосовое или когда включён постоянный режим.
-    // Ставится на каждую задачу: иначе после одного голосового бот заговорил бы
-    // навсегда, а этого никто не просил.
-    session.output.voiceReply = вслух || alwaysVoice.has(chatId);
+    // Голосом — только если о том попросили командой /voice. Отвечать голосом
+    // на голосовое казалось удобным, но это догадка за пользователя: он прислал
+    // голосовое, потому что так быстрее набрать, а не потому что хочет слушать.
+    session.output.voiceReply = alwaysVoice.has(chatId);
     await session.conversation.send(prompt);
     return true;
   } catch (error) {
@@ -1489,7 +1491,7 @@ bot.on(["message:voice", "message:audio"], async (ctx) => {
     parse_mode: "HTML",
   });
 
-  await runTask(ctx, text, true);
+  await runTask(ctx, text);
 });
 
 /**
