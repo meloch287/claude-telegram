@@ -687,7 +687,7 @@ bot.command("commit", (ctx) => startCommit(ctx, ctx.match?.toString().trim() ?? 
  * Кнопки снимаются сразу после нажатия: они относятся к тому ответу, а не к
  * следующему, и оставлять их — значит предлагать повторить вчерашнее.
  */
-bot.callbackQuery(/^act:(go|diff|commit|test)$/, async (ctx) => {
+bot.callbackQuery(/^act:(diff|commit)$/, async (ctx) => {
   const действие = ctx.match[1];
   await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => undefined);
 
@@ -696,19 +696,8 @@ bot.callbackQuery(/^act:(go|diff|commit|test)$/, async (ctx) => {
     await showDiff(ctx);
     return;
   }
-  if (действие === "commit") {
-    await ctx.answerCallbackQuery("Готовлю коммит");
-    await startCommit(ctx, "");
-    return;
-  }
-
-  const задача =
-    действие === "go" ? "Продолжай." : "Прогони тесты проекта. Если упали — разберись и почини.";
-  await ctx.answerCallbackQuery(действие === "go" ? "Продолжаю" : "Запускаю тесты");
-  // Эхо задачи в чат: иначе в переписке остаётся ответ без вопроса, и через
-  // день непонятно, с чего бот вдруг побежал.
-  await ctx.reply(`▶️ <i>${esc(задача)}</i>`, { parse_mode: "HTML" });
-  await runTask(ctx, задача);
+  await ctx.answerCallbackQuery("Готовлю коммит");
+  await startCommit(ctx, "");
 });
 
 bot.callbackQuery(/^gc:(\d+):(y|n)$/, async (ctx) => {
@@ -1560,6 +1549,26 @@ function bufferForward(
   timer.unref?.();
   forwardBuffers.set(chatId, { lines, timer });
 }
+
+/**
+ * Неизвестная команда не должна уходить агенту.
+ *
+ * Иначе получается путаница: человек пишет /admin на старой версии бота, текст
+ * летит в Claude Code как обычная реплика, и тот отвечает «Unknown command» —
+ * будто команду не понял бот, хотя её просто нет в этой сборке. Ловим здесь,
+ * до общего обработчика текста.
+ */
+bot.on("message:text", async (ctx, next) => {
+  const text = ctx.message.text;
+  if (!text.startsWith("/")) {
+    await next();
+    return;
+  }
+  const имя = text.slice(1).split(/[\s@]/)[0] ?? "";
+  await ctx.reply(`Нет такой команды: <code>/${esc(имя)}</code>\n\nВсе команды — /help.`, {
+    parse_mode: "HTML",
+  });
+});
 
 bot.on("message:text", async (ctx) => {
   const userId = ctx.from.id;

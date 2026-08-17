@@ -68,19 +68,21 @@ export class TelegramOutput implements ConversationOutput {
   async finished(): Promise<void> {
     if (this.quiet || this.#lastMessageId === null) return;
 
-    const keyboard = new InlineKeyboard().text("▶️ Продолжай", "act:go");
+    const keyboard = new InlineKeyboard();
     try {
       const repos = this.projectDir ? findRepos(this.projectDir) : [];
       if (repos.length === 1) {
         const state = await status(repos[0]!);
         if (state.entries.length > 0) {
-          keyboard.text("📊 Дифф", "act:diff").row().text("💾 Коммит", "act:commit");
+          keyboard.text("📊 Дифф", "act:diff").text("💾 Коммит", "act:commit");
         }
       }
     } catch {
       // Репозиторий мог оказаться битым — тогда просто меньше кнопок.
     }
-    keyboard.row().text("🧪 Тесты", "act:test");
+    // Показывать нечего — и не показываем: пустая клавиатура под ответом
+    // выглядит как недоделка.
+    if (keyboard.inline_keyboard.flat().length === 0) return;
 
     try {
       await this.#api.editMessageReplyMarkup(this.#chatId, this.#lastMessageId, {
