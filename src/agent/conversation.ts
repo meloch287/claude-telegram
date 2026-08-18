@@ -6,7 +6,12 @@ import {
   type PermissionMode,
 } from "@anthropic-ai/claude-agent-sdk";
 import { MessageQueue } from "./queue.js";
-import { createPermissionBridge, flushChat, type PermissionBridgeHooks } from "./permissions.js";
+import {
+  createPermissionBridge,
+  flushChat,
+  hasPending,
+  type PermissionBridgeHooks,
+} from "./permissions.js";
 import { createDangerGuard } from "./guard.js";
 import {
   describeToolShort,
@@ -120,6 +125,17 @@ const SETTING_SOURCES = ["user", "project", "local"] as const;
 const RATE_LIMIT_REFRESH_MS = 60_000;
 
 /**
+ * Сколько молчания считать зависанием.
+ *
+ * В норме агент подаёт признаки жизни постоянно: куски текста, вызовы
+ * инструментов, их результаты. Восемь минут полной тишины при том, что задача
+ * числится идущей, — это уже не работа, а застрявшая сессия.
+ */
+const STALL_MS = 8 * 60_000;
+/** Как часто смотреть. Чаще незачем: спешить тут некуда. */
+const STALL_CHECK_MS = 60_000;
+
+/**
  * Окружение подпроцесса. Лишний способ входа нужно именно удалить: если
  * оставить унаследованный ANTHROPIC_API_KEY рядом с токеном подписки, работа
  * молча пойдёт по API — то есть по деньгам вместо лимитов подписки.
@@ -197,6 +213,9 @@ export class Conversation {
   // каждый result содержит итог с начала сессии. Пишем в статистику разницу.
   #lastTokens = 0;
   #lastRateLimitFetch = 0;
+  /** Когда в последний раз приходило хоть что-то от агента. */
+  #lastActivity = Date.now();
+  #stallTimer: NodeJS.Timeout | null = null;
   #lastCost = 0;
 
   /** Состояние рабочей папки до задачи — чтобы понять, что агент создал. */
@@ -253,6 +272,8 @@ export class Conversation {
     } as SDKUserMessage);
 
     this.#deps.output.startTyping();
+    this.#lastActivity = Date.now();
+    this.#watchStall();
     // Пустой черновик рисует у клиента встроенную заглушку «Thinking…»,
     // а дальше в него же плавно проявляется текст ответа.
     await this.#deps.output.startDraft();
@@ -358,6 +379,12 @@ export class Conversation {
     if (this.#closed) return;
     this.#closed = true;
     this.#deps.output.stopTyping();
+    // Сторож живёт вместе с диалогом: без этого таймер остался бы висеть на
+    // каждой закрытой сессии.
+    if (this.#stallTimer) {
+      clearInterval(this.#stallTimer);
+      this.#stallTimer = null;
+    }
     flushChat(this.chatId, { kind: "deny", message: "Сессия закрыта" });
     if (!this.#queue.closed) this.#queue.close();
     try {
@@ -423,10 +450,54 @@ export class Conversation {
     this.#pump = this.#pumpMessages();
   }
 
+  /**
+   * Сторож зависаний.
+   *
+   * Молчаливо застрявшая сессия — худший вид поломки: «печатает» крутится
+   * вечно, новые сообщения копятся в очереди, и человеку не за что зацепиться.
+   * Ни ошибки, ни ответа он не получает и решает, что бот сломан навсегда.
+   *
+   * Пока висит карточка разрешения, тишина — это норма: агент ждёт человека, а
+   * не завис. Поэтому такие паузы сторож пропускает.
+   */
+  #watchStall(): void {
+    if (this.#stallTimer) return;
+    const timer = setInterval(() => {
+      if (!this.#busy) return;
+      if (hasPending(this.chatId)) return;
+      if (Date.now() - this.#lastActivity < STALL_MS) return;
+      void this.#handleStall();
+    }, STALL_CHECK_MS);
+    timer.unref?.();
+    this.#stallTimer = timer;
+  }
+
+  async #handleStall(): Promise<void> {
+    const минут = Math.round((Date.now() - this.#lastActivity) / 60_000);
+    this.#busy = false;
+    this.#deps.output.stopTyping();
+    await this.#deps.output.clearStatus().catch(() => undefined);
+    flushChat(this.chatId, { kind: "deny", message: "Сессия застряла" });
+
+    // Саму сессию закрываем: продолжать с застрявшего места нечего, а очередь
+    // накопленных сообщений иначе так и останется висеть.
+    this.#query = null;
+    this.#queue = new MessageQueue<SDKUserMessage>();
+    this.#lastActivity = Date.now();
+
+    await this.#deps.output
+      .send(
+        `⚠️ Задача застряла: ${минут} мин без единого признака жизни.\n\n` +
+          "Сессию закрыл. Напиши задачу заново — подниму с чистого листа.",
+      )
+      .catch(() => undefined);
+  }
+
   async #pumpMessages(): Promise<void> {
     if (!this.#query) return;
     try {
       for await (const message of this.#query) {
+        this.#lastActivity = Date.now();
         await this.#handle(message);
       }
     } catch (error) {

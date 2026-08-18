@@ -89,6 +89,16 @@ export function cancelDenyComment(chatId: number): void {
   awaitingComment.delete(chatId);
 }
 
+/**
+ * Ждём ли мы сейчас ответа пользователя в этом чате. Нужно сторожу зависаний:
+ * пока висит карточка, тишина со стороны агента — это норма, а не поломка.
+ */
+export function hasPending(chatId: number): boolean {
+  for (const pending of permissions.values()) if (pending.chatId === chatId) return true;
+  for (const pending of questions.values()) if (pending.chatId === chatId) return true;
+  return false;
+}
+
 /** Все висящие запросы чата — нужно закрыть при /new, /stop и падении сессии. */
 export function flushChat(chatId: number, decision: Decision): number {
   let closed = 0;

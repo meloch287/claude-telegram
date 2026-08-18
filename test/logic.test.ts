@@ -1212,3 +1212,35 @@ test("квоты: только приглашённым, ноль снимает
   assert.equal(r.послеСнятия, null, "ноль снимает ограничение");
   assert.equal(r.уСвоего, null, "у кого свой ключ, того чужая квота не касается");
 });
+
+// Сторож зависаний не должен срабатывать, пока человек не ответил на карточку:
+// там тишина со стороны агента — это норма, а не поломка.
+test("висящие запросы чата видны сторожу", async () => {
+  const permissions = await import("../src/agent/permissions.js");
+
+  const hooks = {
+    onAsk: async () => 1,
+    onQuestion: async () => 1,
+    onTimeout: async () => {},
+  };
+
+  assert.equal(permissions.hasPending(4242), false, "пока ничего не спрашивали — и ждать нечего");
+
+  const pending = permissions.requestDecision({
+    chatId: 4242,
+    toolName: "Bash",
+    input: { command: "ls" },
+    timeoutMs: 5000,
+    hooks,
+    signal: new AbortController().signal,
+    toolUseID: "t",
+  });
+
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(permissions.hasPending(4242), true, "карточка висит — значит ждём человека");
+  assert.equal(permissions.hasPending(4243), false, "и только в своём чате");
+
+  permissions.flushChat(4242, { kind: "deny" });
+  await pending;
+  assert.equal(permissions.hasPending(4242), false, "ответили — ждать больше нечего");
+});
