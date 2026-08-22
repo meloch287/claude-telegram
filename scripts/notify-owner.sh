@@ -21,9 +21,16 @@ notify() {
     echo "некому писать: в .env нет BOT_TOKEN или ALLOWED_USER_IDS" >&2
     return
   fi
-  curl -sS --max-time 15 -o /dev/null \
-    -X POST "https://api.telegram.org/bot${token}/sendMessage" \
-    --data-urlencode "chat_id=${owner}" \
-    --data-urlencode "text=$1" \
+  # Сперва напрямую. Telegram из России отвечает через раз, и тревога, которая
+  # не дошла, - это то же самое, что её нет. Поэтому при неудаче повторяем через
+  # локальный прокси: он для того и поднят.
+  local args=(-sS --max-time 15 -o /dev/null
+    -X POST "https://api.telegram.org/${token:+bot}${token}/sendMessage"
+    --data-urlencode "chat_id=${owner}"
+    --data-urlencode "text=$1")
+
+  curl "${args[@]}" && return
+  echo "напрямую не ушло, пробую через прокси" >&2
+  curl -x "${NOTIFY_PROXY:-http://127.0.0.1:10809}" "${args[@]}" \
     || echo "не удалось отправить сообщение" >&2
 }
