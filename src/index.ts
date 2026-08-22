@@ -1830,8 +1830,19 @@ await bot.api.setMyCommands([
   { command: "help", description: "справка" },
 ]);
 
-// Канал выхода выбирается до старта: если Anthropic недоступен, лучше узнать
-// об этом в логе сразу, а не на первой задаче пользователя.
+// Мини-апп поднимаем ПЕРВЫМ, до перебора каналов.
+//
+// На нём висит /healthz, по которому docker судит, жив ли контейнер. Перебор
+// каналов идёт по сети и на мёртвой подписке занимает больше минуты: пять проб
+// по пятнадцать секунд. Всё это время проба здоровья не отвечала, контейнер
+// считался больным, и выкатка откатывалась — притом что бот был совершенно
+// исправен, просто ждал VPN. Здоровье должно означать «процесс жив и
+// обслуживает», а не «канал до Anthropic поднялся».
+startMiniAppServer();
+scheduleDailyBackups();
+
+// Канал выхода выбирается до приёма сообщений: если Anthropic недоступен,
+// лучше узнать об этом в логе сразу, а не на первой задаче пользователя.
 const choice = await chooseChannel(parsePool(config.proxyPool), {
   requireCountry: config.proxyRequireCountry || undefined,
 });
@@ -1892,9 +1903,6 @@ if (config.miniappUrl) {
 // оно разве что вручную в BotFather.
 const me = await bot.api.getMe().catch(() => null);
 if (me?.username) setBotUsername(me.username);
-
-startMiniAppServer();
-scheduleDailyBackups();
 
 console.log("🤖 Бот запущен");
 await bot.start({ drop_pending_updates: true });
