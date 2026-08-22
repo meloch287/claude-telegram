@@ -1,0 +1,13 @@
+[Unit]
+Description=Сторож места на диске claude-telegram
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/claude-telegram/scripts/disk-guard.sh
+# Ненулевой код — это «места всё ещё мало», а не поломка сторожа: о причине
+# уже написано в Telegram.
+SuccessExitStatus=0 1
+# Чистка кэша докера на большом объёме занимает минуты.
+TimeoutStartSec=20min
