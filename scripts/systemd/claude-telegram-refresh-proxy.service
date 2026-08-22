@@ -1,0 +1,13 @@
+[Unit]
+Description=Пересборка каналов VPN для claude-telegram
+# Конфиг применяется перезапуском контейнера — без docker делать нечего.
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/claude-telegram/scripts/refresh-proxy.sh
+# Единица — «подписка не ответила», обычная сетевая неудача: следующий запуск
+# по таймеру разберётся сам. Поломкой считаем только двойку, когда конфиг не
+# применился или пришлось откатиться — там нужен человек.
+SuccessExitStatus=0 1
