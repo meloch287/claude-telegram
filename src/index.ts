@@ -9,7 +9,12 @@ import {
 } from "grammy";
 import { statSync, readdirSync } from "node:fs";
 import { basename, join, resolve, sep } from "node:path";
-import { listSessions, type PermissionMode } from "@anthropic-ai/claude-agent-sdk";
+import {
+  getSessionMessages,
+  listSessions,
+  renameSession,
+  type PermissionMode,
+} from "@anthropic-ai/claude-agent-sdk";
 import { config } from "./config.js";
 import {
   clearCredential,
@@ -463,6 +468,58 @@ bot.command("resume", async (ctx) => {
   });
 });
 
+/**
+ * Чем закончился прошлый чат.
+ *
+ * Возвращаясь в чат недельной давности, человек не помнит, на чём встал, и
+ * первым делом спрашивает «а что мы тут делали». Показываем последний обмен
+ * репликами — этого хватает, чтобы вспомнить, и не приходится листать вверх.
+ */
+async function lastExchange(sessionId: string, cwd: string): Promise<string | null> {
+  try {
+    const messages = await getSessionMessages(sessionId, { dir: cwd });
+    if (!messages.length) return null;
+
+    const текст = (m: (typeof messages)[number]): string => {
+      const payload = m.message as { content?: unknown } | string | undefined;
+      if (typeof payload === "string") return payload;
+      const content = (payload as { content?: unknown })?.content;
+      if (typeof content === "string") return content;
+      if (!Array.isArray(content)) return "";
+      return content
+        .filter((b): b is { type: string; text: string } => {
+          const block = b as { type?: string; text?: string };
+          return block?.type === "text" && typeof block.text === "string";
+        })
+        .map((b) => b.text)
+        .join(" ")
+        .trim();
+    };
+
+    // Идём с конца: последние осмысленные реплики каждой стороны.
+    let вопрос = "";
+    let ответ = "";
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const m = messages[i]!;
+      const t = текст(m).replace(/\s+/g, " ").trim();
+      if (!t) continue;
+      if (!ответ && m.type === "assistant") ответ = t;
+      else if (!вопрос && m.type === "user") вопрос = t;
+      if (вопрос && ответ) break;
+    }
+    if (!вопрос && !ответ) return null;
+
+    const кусок = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}…` : s);
+    const parts: string[] = [];
+    if (вопрос) parts.push(`<b>Ты:</b> ${esc(кусок(вопрос, 220))}`);
+    if (ответ) parts.push(`<b>Я:</b> ${esc(кусок(ответ, 320))}`);
+    return parts.join("\n\n");
+  } catch {
+    // Транскрипт мог не найтись — это не повод ломать возврат в чат.
+    return null;
+  }
+}
+
 bot.callbackQuery(/^rs:(.+)$/, async (ctx) => {
   const sessionId = ctx.match[1] ?? "";
   const userId = ctx.from.id;
@@ -482,7 +539,17 @@ bot.callbackQuery(/^rs:(.+)$/, async (ctx) => {
 
   await ctx.answerCallbackQuery("Вернулся в чат");
   await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => undefined);
-  await ctx.reply("↩️ Вернулся в этот чат. Пиши — продолжу с того места.");
+
+  // Напоминаем, на чём встали: без этого возврат в чат недельной давности
+  // начинается с «а что мы тут делали».
+  const cwd = workspaceFor(userId, chatRow?.project ?? "default");
+  const хвост = await lastExchange(sessionId, cwd);
+  await ctx.reply(
+    хвост
+      ? `↩️ Вернулся в этот чат. На чём остановились:\n\n${хвост}\n\nПиши — продолжу.`
+      : "↩️ Вернулся в этот чат. Пиши — продолжу с того места.",
+    { parse_mode: "HTML" },
+  );
 });
 
 // ── Настройки ────────────────────────────────────────────────────────────────
@@ -728,6 +795,65 @@ bot.callbackQuery(/^gc:(\d+):(y|n)$/, async (ctx) => {
   } catch (error) {
     await ctx.reply(`⚠️ ${esc((error as Error).message.slice(0, 500))}`, { parse_mode: "HTML" });
   }
+});
+
+/**
+ * Переименование чата.
+ *
+ * Автоназвание берётся из первой реплики и часто выходит бессмысленным:
+ * «Привет» или «сделай так же, но…». В списке /resume по такому чат не найти.
+ * Имя пишется в сам транскрипт сессии, поэтому переживает перезапуск и видно
+ * его будет и в терминале.
+ */
+bot.command("rename", async (ctx) => {
+  const userId = ctx.from!.id;
+  const chatId = ctx.chat.id;
+  const title = ctx.match?.toString().trim() ?? "";
+
+  const chatRow = getChat(chatId);
+  const sessionId = chatRow?.session_id;
+  if (!sessionId) {
+    await ctx.reply(
+      "Этот чат ещё не начат — переименовывать нечего.\n\nНапиши задачу, а потом " +
+        "<code>/rename название</code>.",
+      { parse_mode: "HTML" },
+    );
+    return;
+  }
+
+  if (!title) {
+    const текущее = chatRow?.title;
+    await ctx.reply(
+      `Как назвать этот чат?\n\n<code>/rename название</code>` +
+        (текущее ? `\n\nСейчас: <b>${esc(текущее)}</b>` : ""),
+      { parse_mode: "HTML" },
+    );
+    return;
+  }
+
+  const cwd = workspaceFor(userId, chatRow?.project ?? "default");
+  try {
+    await renameSession(sessionId, title.slice(0, 80), { dir: cwd });
+  } catch (error) {
+    await ctx.reply(`⚠️ Не переименовалось: ${esc(String(error).slice(0, 200))}`, {
+      parse_mode: "HTML",
+    });
+    return;
+  }
+
+  // Дублируем имя в свою базу: /status и заголовки читают её, а не транскрипт.
+  saveChat({
+    chatId,
+    userId,
+    project: chatRow?.project ?? "default",
+    sessionId,
+    title: title.slice(0, 80),
+    permissionMode: chatRow?.permission_mode ?? "default",
+  });
+
+  await ctx.reply(`✏️ Теперь этот чат называется <b>${esc(title.slice(0, 80))}</b>.`, {
+    parse_mode: "HTML",
+  });
 });
 
 bot.command("project", async (ctx) => {
@@ -1682,6 +1808,7 @@ process.once("SIGTERM", () => void shutdown("SIGTERM"));
 await bot.api.setMyCommands([
   { command: "menu", description: "главное меню" },
   { command: "resume", description: "прошлые чаты" },
+  { command: "rename", description: "переименовать чат" },
   { command: "new", description: "начать заново" },
   { command: "file", description: "забрать файл из проекта" },
   { command: "context", description: "насколько заполнен контекст" },
