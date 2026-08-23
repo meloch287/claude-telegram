@@ -3,6 +3,7 @@ import { GrammyError, InlineKeyboard, InputFile } from "grammy";
 import type { ConversationOutput } from "../agent/conversation.js";
 import { speechConfigured, synthesize } from "./speak.js";
 import { findRepos, status } from "./git.js";
+import { markRunning, clearRunning } from "../db.js";
 import type {
   PendingPermission,
   PendingQuestion,
@@ -233,6 +234,9 @@ export class TelegramOutput implements ConversationOutput {
     if (this.#statusMessageId === null) {
       const id = await this.send(text);
       this.#statusMessageId = id ?? null;
+      // В базу — чтобы после падения процесса было кому сказать, что задача
+      // оборвалась: само сообщение переживёт бот, а память нет.
+      if (id) markRunning(this.#chatId, id);
       return;
     }
     try {
@@ -252,6 +256,7 @@ export class TelegramOutput implements ConversationOutput {
   async clearStatus(finalHtml?: string): Promise<void> {
     const id = this.#statusMessageId;
     this.#statusMessageId = null;
+    clearRunning(this.#chatId);
     if (id === null) {
       if (finalHtml) await this.send(finalHtml);
       return;

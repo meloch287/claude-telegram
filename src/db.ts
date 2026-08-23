@@ -97,6 +97,19 @@ CREATE TABLE IF NOT EXISTS projects_seen (
   project TEXT    NOT NULL,
   PRIMARY KEY (user_id, project)
 );
+
+-- Задача, которая шла в момент, когда процесс умер.
+--
+-- Индикатор «работаю…» жил только в памяти: бот пересобирал сам себя, процесс
+-- уходил вместе с ним, и сообщение оставалось висеть в чате навсегда. Человек
+-- ждал ответа, которого уже некому было прислать. Строка появляется, когда
+-- индикатор поставлен, и исчезает, когда он убран, — значит всё, что уцелело
+-- после перезапуска, и есть оборванные задачи.
+CREATE TABLE IF NOT EXISTS running_tasks (
+  chat_id    INTEGER PRIMARY KEY,
+  message_id INTEGER NOT NULL,
+  started_at INTEGER NOT NULL
+);
 `);
 
 /**
@@ -199,6 +212,12 @@ export interface ChatRow {
 }
 
 const stmts = {
+  markRunning: db.prepare(
+    "INSERT INTO running_tasks (chat_id, message_id, started_at) VALUES (?, ?, ?)" +
+      " ON CONFLICT(chat_id) DO UPDATE SET message_id = excluded.message_id, started_at = excluded.started_at",
+  ),
+  clearRunning: db.prepare("DELETE FROM running_tasks WHERE chat_id = ?"),
+  allRunning: db.prepare("SELECT chat_id, message_id, started_at FROM running_tasks"),
   getUser: db.prepare("SELECT * FROM users WHERE user_id = ?"),
   insertUser: db.prepare("INSERT OR IGNORE INTO users (user_id, created_at) VALUES (?, ?)"),
   markOnboarded: db.prepare("UPDATE users SET onboarded = 1 WHERE user_id = ?"),
@@ -637,4 +656,24 @@ export function quotaLeft(userId: number): { limit: number; used: number; left: 
 
 export function isUserAllowedInDb(userId: number): boolean {
   return stmts.isAllowed.get(userId) !== undefined;
+}
+
+/**
+ * Задача пошла: запоминаем сообщение-индикатор.
+ *
+ * Пишем в базу, а не в память процесса, потому что интересен как раз тот
+ * случай, когда процесса больше нет.
+ */
+export function markRunning(chatId: number, messageId: number): void {
+  stmts.markRunning.run(chatId, messageId, Date.now());
+}
+
+/** Задача кончилась — индикатора больше нет, забываем. */
+export function clearRunning(chatId: number): void {
+  stmts.clearRunning.run(chatId);
+}
+
+/** Что осталось висеть с прошлого запуска. */
+export function runningTasks(): { chat_id: number; message_id: number; started_at: number }[] {
+  return stmts.allRunning.all() as { chat_id: number; message_id: number; started_at: number }[];
 }

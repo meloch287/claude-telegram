@@ -25,6 +25,25 @@ export GIT_CONFIG_VALUE_0="$APP_DIR"
 PREVIOUS=$(git rev-parse HEAD)
 echo "▶ Сейчас на $PREVIOUS"
 
+# Спасение того, что не уехало в origin.
+#
+# Ниже стоит git reset --hard, и однажды он молча снёс правку, сделанную прямо
+# на сервере: она была закоммичена локально, но не отправлена, а выкатка по
+# таймеру приехала раньше пуша. Работа исчезла без следа и без слова. Теперь
+# всё, чего нет в origin, сначала уходит в ветку-слепок — reset её не трогает,
+# и вернуться к ней можно одной командой.
+DIRTY=$(git status --porcelain)
+AHEAD=$(git log --oneline "origin/$BRANCH..HEAD" 2>/dev/null || true)
+if [ -n "$DIRTY" ] || [ -n "$AHEAD" ]; then
+  SNAPSHOT="rescue/$(date +%Y%m%d-%H%M%S)"
+  if [ -n "$DIRTY" ]; then
+    git add -A
+    git -c user.name=deploy -c user.email=deploy@localhost commit -q -m "Слепок перед выкаткой"
+  fi
+  git branch "$SNAPSHOT" HEAD
+  echo "⚠ НЕОТПРАВЛЕННОЕ сохранено в ветке $SNAPSHOT — вернуть: git reset --hard $SNAPSHOT"
+fi
+
 echo "▶ Забираю $BRANCH"
 git fetch --prune origin "$BRANCH"
 git reset --hard "origin/$BRANCH"

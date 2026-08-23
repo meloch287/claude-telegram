@@ -102,12 +102,12 @@ import {
   startChannelWatch,
 } from "./proxy.js";
 import { startFileLog, tailLog } from "./log.js";
+import { runningTasks, clearRunning } from "./db.js";
 
 // Раньше всего остального: иначе первые же строки о выборе канала и о том,
 // что пошло не так на старте, в файл не попадут — а именно они нужны, когда
 // бот не поднялся.
 startFileLog();
-
 
 /**
  * Канал до Telegram.
@@ -115,23 +115,24 @@ startFileLog();
  * Раньше grammY ходил в api.telegram.org напрямую, и на этом хосте запросы
  * стабильно отваливались по таймауту (`connect ETIMEDOUT 149.154.167.220`):
  * бот молча переставал отвечать, а пользователи видели «не работает».
- * Anthropic мы и так вытаскиваем через прокси-пул — Telegram пускаем тем же
- * каналом. TELEGRAM_PROXY перебивает пул, пустые значения = прямой выход.
+ * Одно время Telegram гнали через тот же прокси-пул, что и Anthropic. Так бот
+ * стал зависеть от прокси целиком: падал канал — и бот терял не только доступ к
+ * модели, но и связь с людьми. А с этого хоста api.telegram.org отвечает
+ * напрямую. Поэтому по умолчанию идём прямо, а TELEGRAM_PROXY остаётся
+ * запасным выходом на случай, когда прямой снова начнёт отваливаться.
  */
 function telegramFetchOptions(): { agent: HttpsProxyAgent<string> } | undefined {
-  const explicit = (process.env.TELEGRAM_PROXY ?? "").trim();
-  const fromPool = (config.proxyPool ?? "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean)[0];
-  const url = explicit || fromPool || "";
+  const url = (process.env.TELEGRAM_PROXY ?? "").trim();
   if (!url) return undefined;
   console.log(`📮 Telegram через прокси: ${url}`);
   return { agent: new HttpsProxyAgent(url) };
 }
 
 const tgFetch = telegramFetchOptions();
-const bot = new Bot(config.botToken, tgFetch ? { client: { baseFetchConfig: tgFetch } } : undefined);
+const bot = new Bot(
+  config.botToken,
+  tgFetch ? { client: { baseFetchConfig: tgFetch } } : undefined,
+);
 
 /** Владелец — первый в списке из .env. Он один распоряжается доступом. */
 function ownerId(): number | undefined {
@@ -1928,6 +1929,31 @@ if (config.miniappUrl) {
 // оно разве что вручную в BotFather.
 const me = await bot.api.getMe().catch(() => null);
 if (me?.username) setBotUsername(me.username);
+
+/**
+ * Разбор оборванных задач.
+ *
+ * Процесс может уйти в любой момент — пересборка образа, сторож, нехватка
+ * памяти. Задача при этом умирает молча: в чате остаётся «работаю…», человек
+ * ждёт ответа, а ответить уже некому. Раньше это выглядело как «бот встал и
+ * больше не работает». Теперь при старте проходим по тому, что осталось
+ * висеть, и говорим прямо.
+ */
+for (const task of runningTasks()) {
+  clearRunning(task.chat_id);
+  const прошло = Math.round((Date.now() - task.started_at) / 60_000);
+  const текст =
+    "⚠️ Бот перезапустился, задача оборвалась" +
+    (прошло > 0 ? ` (шла ${прошло} мин)` : "") +
+    ".\n\nКонтекст цел — повтори последнюю просьбу или загляни в /resume.";
+  try {
+    await bot.api.editMessageText(task.chat_id, task.message_id, текст);
+  } catch {
+    // Сообщение могли удалить или оно слишком старое для правки — тогда просто
+    // пишем новым, молчать здесь нельзя.
+    await bot.api.sendMessage(task.chat_id, текст).catch(() => {});
+  }
+}
 
 console.log("🤖 Бот запущен");
 await bot.start({ drop_pending_updates: true });
