@@ -7,6 +7,7 @@ import {
   type CommandContext,
   type Context,
 } from "grammy";
+import { HttpsProxyAgent } from "https-proxy-agent";
 import { statSync, readdirSync } from "node:fs";
 import { basename, join, resolve, sep } from "node:path";
 import {
@@ -15,6 +16,7 @@ import {
   renameSession,
   type PermissionMode,
 } from "@anthropic-ai/claude-agent-sdk";
+import { fetchTelegramFile } from "./bot/tgFile.js";
 import { config } from "./config.js";
 import {
   clearCredential,
@@ -106,7 +108,30 @@ import { startFileLog, tailLog } from "./log.js";
 // бот не поднялся.
 startFileLog();
 
-const bot = new Bot(config.botToken);
+
+/**
+ * Канал до Telegram.
+ *
+ * Раньше grammY ходил в api.telegram.org напрямую, и на этом хосте запросы
+ * стабильно отваливались по таймауту (`connect ETIMEDOUT 149.154.167.220`):
+ * бот молча переставал отвечать, а пользователи видели «не работает».
+ * Anthropic мы и так вытаскиваем через прокси-пул — Telegram пускаем тем же
+ * каналом. TELEGRAM_PROXY перебивает пул, пустые значения = прямой выход.
+ */
+function telegramFetchOptions(): { agent: HttpsProxyAgent<string> } | undefined {
+  const explicit = (process.env.TELEGRAM_PROXY ?? "").trim();
+  const fromPool = (config.proxyPool ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)[0];
+  const url = explicit || fromPool || "";
+  if (!url) return undefined;
+  console.log(`📮 Telegram через прокси: ${url}`);
+  return { agent: new HttpsProxyAgent(url) };
+}
+
+const tgFetch = telegramFetchOptions();
+const bot = new Bot(config.botToken, tgFetch ? { client: { baseFetchConfig: tgFetch } } : undefined);
 
 /** Владелец — первый в списке из .env. Он один распоряжается доступом. */
 function ownerId(): number | undefined {
@@ -1585,7 +1610,7 @@ bot.on(["message:voice", "message:audio"], async (ctx) => {
     const file = await ctx.api.getFile(voice.file_id);
     if (!file.file_path) throw new Error("Telegram не отдал путь к файлу");
     const url = `https://api.telegram.org/file/bot${config.botToken}/${file.file_path}`;
-    const response = await fetch(url);
+    const response = await fetchTelegramFile(url);
     if (!response.ok) throw new Error(`не скачать голосовое: HTTP ${response.status}`);
     const audio = Buffer.from(await response.arrayBuffer());
     text = await transcribe(audio, file.file_path.split("/").pop() ?? "voice.ogg");

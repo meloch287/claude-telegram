@@ -1,3 +1,4 @@
+import { fetchTelegramFile } from "./tgFile.js";
 import { mkdirSync, createWriteStream } from "node:fs";
 import { join } from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -53,7 +54,7 @@ export async function saveTelegramFile(
   const target = join(dir, name);
 
   const token = api.token;
-  const response = await fetch(`https://api.telegram.org/file/bot${token}/${file.file_path}`);
+  const response = await fetchTelegramFile(`https://api.telegram.org/file/bot${token}/${file.file_path}`);
   if (!response.ok || !response.body) {
     throw new Error(`Не удалось скачать файл: HTTP ${response.status}`);
   }
