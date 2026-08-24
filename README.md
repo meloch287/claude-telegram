@@ -1,5 +1,9 @@
 <div align="center">
 
+<p align="center">
+  <img src="docs/logo.jpg" alt="Логотип" width="180">
+</p>
+
 # Claude в Telegram
 
 **Claude Code, которым управляешь с телефона.**
