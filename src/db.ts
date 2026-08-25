@@ -647,8 +647,54 @@ export function setQuota(userId: number, tokens: number | null): boolean {
  * Расход берётся свой, за сутки: окна подписки всё равно сбрасываются, и
  * «сколько сегодня» понятнее любой скользящей меры.
  */
+/**
+ * Справедливая доля, когда подписку делят несколько человек.
+ *
+ * Ограничения на число приглашённых в коде нет и не было: зови хоть двадцать.
+ * Настоящий предел — сама подписка. И без общей доли она делится по принципу
+ * «кто успел»: один увлёкшийся выбирает пятичасовое окно целиком, а остальные
+ * девять упираются в стену и не понимают почему.
+ *
+ * Поэтому доля считается от числа участников, а не задаётся числом: коопы
+ * растут и сжимаются, а вручную переставлять квоту на каждого при каждом
+ * изменении никто не станет.
+ *
+ * Личная квота, выставленная владельцем через /admin quota, всегда главнее —
+ * общая доля только страхует от того, чтобы всё не съел один.
+ */
+const COOP_FAIR_SHARE = (() => {
+  const raw = (process.env.COOP_FAIR_SHARE ?? "").trim().toLowerCase();
+  return raw !== "off" && raw !== "0" && raw !== "false";
+})();
+
+/** Дневной предел подписки: семидневное окно, делённое на семь. */
+function dailySubscriptionBudget(): number {
+  const week = Number(process.env.LIMIT_SEVEN_DAY_TOKENS ?? 0);
+  return week > 0 ? Math.floor(week / 7) : 0;
+}
+
+/**
+ * Сколько токенов в день причитается участнику коопа.
+ *
+ * Владельцу оставляем двойную долю: подписка его, и работает он обычно больше
+ * остальных вместе взятых.
+ */
+export function fairShareFor(userId: number): number | null {
+  if (!COOP_FAIR_SHARE) return null;
+  const budget = dailySubscriptionBudget();
+  if (budget <= 0) return null;
+  const payer = payerFor(userId);
+  const members = coopMembers(payer).length;
+  if (members <= 1) return null;
+  const parts = members + 1; // владелец считается за двоих
+  const share = Math.floor(budget / parts);
+  return userId === payer ? share * 2 : share;
+}
+
 export function quotaLeft(userId: number): { limit: number; used: number; left: number } | null {
-  const limit = quotaFor(userId);
+  // Личная квота главнее общей доли: владелец мог задать её осознанно.
+  const personal = quotaFor(userId);
+  const limit = personal !== null && personal > 0 ? personal : fairShareFor(userId);
   if (limit === null || limit <= 0) return null;
   const used = getUsageToday(userId).tokens;
   return { limit, used, left: Math.max(0, limit - used) };

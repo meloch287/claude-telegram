@@ -35,6 +35,8 @@ services:
       # ~/.claude.json рядом с ним, и при монтировании одной лишь папки файл
       # терялся при каждой пересборке — Claude Code ругался, что конфига нет.
       - ./claude-home:/home/claude
+      # Файлы своего Bot API: бот берёт их с диска по тому же пути.
+      - ./botapi-data:/var/lib/telegram-bot-api:ro
     ports:
       # Только на петлю: наружу мини-апп отдаёт Caddy, он же держит TLS.
       - "127.0.0.1:8788:8788"
@@ -50,6 +52,30 @@ services:
       # Первая сборка сессии и проба каналов занимают время; до конца этого
       # окна неудачи не считаются падением.
       start_period: 60s
+    networks:
+      - claude
+
+  # Свой сервер Bot API — снимает потолок в 20 МБ на приём и 50 МБ на отправку.
+  #
+  # Облачный Bot API этих пределов не двигает: архив на сорок мегабайт до бота
+  # просто не доходит. Свой поднимает их до 2 ГБ и кладёт файлы на диск, откуда
+  # бот берёт их копированием, а не по сети.
+  #
+  # Профиль botapi: служба не поднимается, пока не заданы TELEGRAM_API_ID и
+  # TELEGRAM_API_HASH с my.telegram.org. Без них она бессмысленна.
+  botapi:
+    image: aiogram/telegram-bot-api:latest
+    container_name: telegram-bot-api
+    profiles: ["botapi"]
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      TELEGRAM_API_ID: ${TELEGRAM_API_ID:-}
+      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:-}
+      TELEGRAM_LOCAL: 1
+    volumes:
+      # Файлы кладутся сюда и видны боту тем же путём — так работает локальный режим.
+      - ./botapi-data:/var/lib/telegram-bot-api
     networks:
       - claude
 

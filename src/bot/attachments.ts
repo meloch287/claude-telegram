@@ -13,7 +13,19 @@ import type { Api } from "grammy";
  * молча обрезаем.
  */
 
-const MAX_BYTES = 20 * 1024 * 1024;
+/**
+ * Потолок в 20 МБ — ограничение ОБЛАЧНОГО Bot API, а не бота.
+ *
+ * Снимается единственным способом: своим сервером Bot API (telegram-bot-api),
+ * где предел поднимается до 2 ГБ, а файл вдобавок кладётся на диск — качать по
+ * сети вообще не нужно. Отсюда два режима.
+ */
+function localApiRoot(): string {
+  return (process.env.TELEGRAM_API_ROOT ?? "").trim();
+}
+
+const MAX_BYTES_CLOUD = 20 * 1024 * 1024;
+const MAX_BYTES_LOCAL = 2000 * 1024 * 1024;
 
 export interface SavedAttachment {
   path: string;
@@ -36,8 +48,17 @@ export async function saveTelegramFile(
   suggestedName: string,
 ): Promise<SavedAttachment> {
   const file = await api.getFile(fileId);
-  if ((file.file_size ?? 0) > MAX_BYTES) {
-    throw new Error("Файл больше 20 МБ — Telegram не отдаёт такие ботам");
+  const local = localApiRoot();
+  const limit = local ? MAX_BYTES_LOCAL : MAX_BYTES_CLOUD;
+  if ((file.file_size ?? 0) > limit) {
+    const mb = Math.round((file.file_size ?? 0) / 1024 / 1024);
+    throw new Error(
+      local
+        ? `Файл ${mb} МБ — больше 2 ГБ не отдаёт даже свой сервер Bot API`
+        : `Файл ${mb} МБ. Облачный Bot API отдаёт ботам не больше 20 МБ — это ограничение ` +
+          `Telegram, а не бота. Снимается своим сервером Bot API: нужны api_id и api_hash ` +
+          `с my.telegram.org.`,
+    );
   }
   if (!file.file_path) {
     throw new Error("Telegram не вернул путь к файлу");

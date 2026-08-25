@@ -128,6 +128,14 @@ function telegramFetchOptions(): { agent: HttpsProxyAgent<string> } | undefined 
   return { agent: new HttpsProxyAgent(url) };
 }
 
+/**
+ * Свой сервер Bot API, если он поднят.
+ *
+ * Облачный отдаёт ботам файлы не больше 20 МБ и принимает не больше 50 —
+ * поэтому архив на сорок мегабайт до бота просто не доходил.
+ */
+const apiRoot = (process.env.TELEGRAM_API_ROOT ?? "").trim();
+
 const tgFetch = telegramFetchOptions();
 const bot = new Bot(
   config.botToken,
