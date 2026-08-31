@@ -111,7 +111,12 @@ export function flushChat(chatId: number, decision: Decision): number {
   for (const [id, pending] of questions) {
     if (pending.chatId !== chatId) continue;
     questions.delete(id);
-    pending.resolve({ behavior: "deny", message: "Диалог сброшен пользователем" });
+    pending.resolve({
+      behavior: "deny",
+      message: decision.kind === "deny" && decision.message
+        ? decision.message
+        : "Диалог сброшен пользователем",
+    });
     closed += 1;
   }
   awaitingComment.delete(chatId);

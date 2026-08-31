@@ -48,6 +48,8 @@ import {
   getPermission,
   getQuestion,
   pendingCommentFor,
+  hasPending,
+  flushChat,
   resolvePermission,
 } from "./agent/permissions.js";
 import {
@@ -1761,6 +1763,27 @@ bot.on("message:text", async (ctx) => {
     if (pending) {
       resolvePermission(commentFor, { kind: "deny", message: text });
       await ctx.reply("🚫 Отклонил и передал твоё объяснение.");
+      return;
+    }
+  }
+
+  // 2.5. Висит запрос разрешения, а человек ответил текстом, не кнопкой.
+  //
+  // Так делают почти все: на карточку «Claude хочет использовать WebFetch»
+  // пишут «нет, лучше сделай иначе». Раньше такой текст уходил в никуда, а
+  // агент продолжал ждать нажатия до самого таймаута — полчаса тишины, и со
+  // стороны это выглядит как зависший бот.
+  //
+  // Считаем это отказом с объяснением: сам текст уходит агенту как причина,
+  // и работа продолжается с учётом сказанного.
+  if (hasPending(chatId)) {
+    const closed = flushChat(chatId, { kind: "deny", message: text });
+    if (closed > 0) {
+      await ctx.reply(
+        closed === 1
+          ? "🚫 Понял, не буду. Передал агенту твоё объяснение."
+          : `🚫 Понял, не буду (${closed} запроса). Передал агенту твоё объяснение.`,
+      );
       return;
     }
   }
