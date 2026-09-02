@@ -249,7 +249,7 @@ const CATEGORIES = [
     sub: "race",
     tools: [
       { id: "cat", icon: "cat", name: "Кот", kind: "cat", hint: "Веди пальцем по суше — коты выбранного народа появятся по следу." },
-      { id: "house", icon: "house", name: "Дом", kind: "house", hint: "Дом для выбранного народа. Гномы строят только в горах и на холмах." },
+      { id: "house", icon: "house", name: "Дом", kind: "house", hint: "Дом даром, от бога. Сами коты строят за брёвна: 10 на хижину, лес рубят по минуте на дерево." },
       { id: "war", icon: "war", name: "Война", kind: "war", hint: "Ткни в чужую территорию — выбранный народ объявит ей войну. Лучники, мечи, поджоги." },
     ],
   },
@@ -410,7 +410,12 @@ function setupCity(profile) {
       pop.append(text(nf.format(v.pop)));
       tag.append(name, pop);
       if (atWar[v.race]) tag.insertAdjacentHTML("beforeend", icon("war", 12, "wb-label-war"));
-      tag.title = `Основал ${v.founder}. Домов: ${v.houses}`;
+      // Склад: брёвна и камень, плюс верфь, если есть.
+      const stock = document.createElement("span");
+      stock.className = "wb-label-stock";
+      stock.innerHTML = `${icon("log", 11)}${v.wood}${icon("rock", 11)}${v.stone}${v.shipyard ? icon("ship", 11) : ""}`;
+      tag.append(stock);
+      tag.title = `Основал ${v.founder}. Домов: ${v.houses}. Брёвен ${v.wood}, камня ${v.stone}${v.shipyard ? ", есть верфь" : ""}`;
       labels.append(tag);
     }
   };
@@ -614,6 +619,7 @@ function setupCity(profile) {
     const ratioX = (viewport.scrollLeft + viewport.clientWidth / 2) / Math.max(1, viewport.scrollWidth);
     const ratioY = (viewport.scrollTop + viewport.clientHeight / 2) / Math.max(1, viewport.scrollHeight);
     stage.style.width = `${ZOOMS[ui.zoom] * 100}%`;
+    viewport.classList.toggle("wb-viewport--zoom", ui.zoom > 0);
     el("zoom-label").textContent = `${ZOOMS[ui.zoom]}×`;
     viewport.scrollLeft = ratioX * viewport.scrollWidth - viewport.clientWidth / 2;
     viewport.scrollTop = ratioY * viewport.scrollHeight - viewport.clientHeight / 2;
@@ -705,7 +711,7 @@ function setupCity(profile) {
   // Мир крутится всегда, даже на вкладке «Кот»: там он просто не рисуется.
   world.start();
   if (el("panel-city").hidden) world.stop();
-  if (world.population === 0) hint.textContent = "Остров пуст. Выбери народ и проведи пальцем по суше — там поселятся первые коты. Дома они построят сами.";
+  if (world.population === 0) hint.textContent = "Остров пуст. Выбери народ и проведи пальцем по суше — там поселятся первые коты. Дальше они сами: нарубят леса, поставят дома, верфь и выйдут в море.";
 }
 
 

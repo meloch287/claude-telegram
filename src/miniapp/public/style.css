@@ -1847,3 +1847,51 @@ h2 {
   display: block;
   height: 4px;
 }
+
+/* ── Тело карты: на 1× карта видна целиком, оверлеи привязаны к ней ──── */
+
+.wb-body {
+  position: relative;
+}
+
+/* На 1× ограничения по высоте нет: вся карта на экране. Ограничение и
+   прокрутка появляются только при приближении. */
+.wb-viewport {
+  max-height: none;
+}
+
+.wb-viewport--zoom {
+  max-height: 62vh;
+}
+
+.wb-era,
+.wb-zoom {
+  top: 10px;
+}
+
+.wb-settings {
+  top: 10px;
+  max-height: calc(100% - 20px);
+}
+
+.wb-label {
+  flex-wrap: wrap;
+  justify-content: center;
+  row-gap: 1px;
+}
+
+.wb-label-stock {
+  flex-basis: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  font-size: 9px;
+  font-weight: 600;
+  color: #e6dcc5;
+  opacity: 0.9;
+}
+
+.wb-label-stock svg {
+  margin-left: 4px;
+}

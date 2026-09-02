@@ -272,7 +272,22 @@ export function renderPreview(canvas, seed, mapId) {
 /* ── Мир ────────────────────────────────────────────────────────────────── */
 
 const DAY_TICKS = 30 * 180; // сутки — три минуты
-const SAVE_VERSION = 6;
+const SAVE_VERSION = 7;
+
+/* ── Экономика ──────────────────────────────────────────────────────────
+   Ничего не строится из воздуха. Кот рубит дерево минуту и приносит пять
+   брёвен; хижина стоит десять. Улучшение дома — десять брёвен и десять
+   камней, камень добывают в горах. Верфь — двадцать брёвен, и только с ней
+   деревня выходит в море. Лес отрастает, но медленно. */
+const COST = {
+  house: { wood: 10, stone: 0 },
+  upgrade: { wood: 10, stone: 10 },
+  shipyard: { wood: 20, stone: 0 },
+};
+const CHOP_TICKS = 1800; // минута на дерево
+const MINE_TICKS = 1800;
+const LOGS_PER_TREE = 5;
+const STONE_PER_DIG = 5;
 
 /* ── Имена ───────────────────────────────────────────────────────────────
    У каждого кота своё имя, у каждой деревни — название от основателя, как
@@ -406,7 +421,7 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
 
   function foundVillage(r, x, y, founder = null) {
     const who = founder || catName(RACES[r].id);
-    state.villages.push({ race: r, x, y, name: villageName(RACES[r].id, who), founder: who });
+    state.villages.push({ race: r, x, y, name: villageName(RACES[r].id, who), founder: who, wood: 0, stone: 0, shipyard: null });
     if (!state.homes[r]) state.homes[r] = state.villages[state.villages.length - 1];
     return state.villages.length - 1;
   }
@@ -513,6 +528,12 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       state.houses = saved.houses || [];
       state.homes = Array.isArray(saved.homes) ? saved.homes.map((h) => h || null) : [null, null, null, null];
       state.villages = Array.isArray(saved.villages) ? saved.villages : [];
+      for (const v of state.villages) {
+        v.wood = v.wood || 0;
+        v.stone = v.stone || 0;
+        v.shipyard = v.shipyard || null;
+      }
+      for (const h of state.houses) if (h.lvl === undefined) h.lvl = 0;
       state.relations = Array.isArray(saved.relations) && saved.relations.length === 4 ? saved.relations : RACES.map(() => RACES.map(() => "peace"));
       state.wars = Array.isArray(saved.wars) ? saved.wars : [];
       state.allies = Array.isArray(saved.allies) ? saved.allies : [];
@@ -595,11 +616,20 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
         if (!vs.length || state.pop[r] === 0) continue;
         const houses = state.houses.filter((h) => h.race === r).length;
         const pop = state.cats.filter((c) => c.race === r).length;
-        if (houses < Math.ceil(pop / 3) && houses < 40) {
-          const vi = vs[Math.floor(rand() * vs.length)];
-          const site = pickSite(r, state.villages[vi]);
+        // За день деревня добывает примерно столько, сколько котов, и строит
+        // на накопленное.
+        for (const vi of vs) {
+          const v = state.villages[vi];
+          v.wood += Math.max(1, Math.floor(state.cats.filter((c) => c.v === vi).length / 2));
+          if (state.era[r] >= 1) v.stone += 2;
+        }
+        const vi = vs[Math.floor(rand() * vs.length)];
+        const v = state.villages[vi];
+        if (houses < Math.ceil(pop / 3) && houses < 40 && v.wood >= COST.house.wood) {
+          const site = pickSite(r, v);
           if (site) {
-            state.houses.push({ x: site.x, y: site.y, race: r, v: vi, hp: 2 });
+            v.wood -= COST.house.wood;
+            state.houses.push({ x: site.x, y: site.y, race: r, v: vi, hp: 2, lvl: 0 });
             state.trees.delete(idx(site.x, site.y));
           }
         } else if (pop < houses * 4 + 1 && state.cats.length < 260) {
@@ -630,6 +660,8 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     arson: (a, b) => `${RACES[a].name} подожгли дом ${RACES[b].plural}.`,
     fallen: (r, name, village) => `Пал воин ${name || ""} ${RACES[r].plural}${village ? ` из ${village}` : ""}.`.replace("  ", " "),
     built: (r) => `${RACES[r].name} построили себе дом.`,
+    upgraded: (r, lvl) => `${RACES[r].name} ${lvl === 1 ? "надстроили второй этаж" : "возвели башню"}.`,
+    shipyard: (r, village) => `В ${village} ${RACES[r].plural === "людей-котов" ? "люди-коты" : RACES[r].name.toLowerCase()} поставили верфь — можно в море.`,
     grow: (n) => `Пока тебя не было, родилось ${n} кот${plural(n)} — остров растёт от твоей работы.`,
     spawn: (n, r) => `Бог призвал ${n} ${RACES[r].plural}.`,
     house: (r) => `${RACES[r].name} обживают новый дом.`,
@@ -751,6 +783,9 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
         y: v.y,
         pop: state.cats.filter((c) => c.v === i).length,
         houses: state.houses.filter((h) => h.v === i).length,
+        wood: v.wood || 0,
+        stone: v.stone || 0,
+        shipyard: Boolean(v.shipyard),
       })),
     });
     hud();
@@ -863,9 +898,52 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
   function finishTask(c) {
     const t = c.task;
     c.task = null;
+    const village = state.villages[t.v ?? c.v];
+    if (t.kind === "chop") {
+      const i = idx(t.x, t.y);
+      if (state.trees.has(i)) {
+        state.trees.delete(i);
+        puff(t.x, t.y, "#3d6a2c", 6, "dust");
+        puff(t.x, t.y, "#8a5a2b", 3, "dust");
+        if (village) village.wood += LOGS_PER_TREE;
+        bakeArea(t.x - 1, t.y - 2, t.x + 1, t.y + 1);
+      }
+      return;
+    }
+    if (t.kind === "mine") {
+      puff(t.x, t.y, "#c9d3df", 5, "spark");
+      if (village) village.stone += STONE_PER_DIG;
+      return;
+    }
+    if (t.kind === "upgrade") {
+      const h = state.houses.find((o) => o.x === t.x && o.y === t.y);
+      if (h && h.lvl < 2) {
+        h.lvl += 1;
+        puff(t.x, t.y, "#e0a93b", 6, "spark");
+        chronicle("upgraded", c.race, h.lvl);
+        bakeArea(t.x - 1, t.y - 3, t.x + 1, t.y + 1);
+        countPop();
+        persist();
+      }
+      return;
+    }
+    if (t.kind === "shipyard") {
+      if (village && !village.shipyard) {
+        village.shipyard = { x: t.x, y: t.y };
+        puff(t.x, t.y, "#8a5a2b", 8, "dust");
+        chronicle("shipyard", c.race, village.name);
+        bakeArea(t.x - 1, t.y - 2, t.x + 1, t.y + 1);
+        countPop();
+        persist();
+      }
+      return;
+    }
     if (t.kind !== "build") return;
-    if (!RACES[c.race].canBuild(tileAt(t.x, t.y)) || state.houses.some((h) => h.x === t.x && h.y === t.y)) return;
-    state.houses.push({ x: t.x, y: t.y, race: c.race, v: t.v ?? c.v, hp: 2 });
+    if (!RACES[c.race].canBuild(tileAt(t.x, t.y)) || state.houses.some((h) => h.x === t.x && h.y === t.y)) {
+      if (village) village.wood += COST.house.wood; // брёвна не пропали
+      return;
+    }
+    state.houses.push({ x: t.x, y: t.y, race: c.race, v: t.v ?? c.v, hp: 2, lvl: 0 });
     state.trees.delete(idx(t.x, t.y));
     state.flowers.delete(idx(t.x, t.y));
     puff(t.x, t.y, "#c9b48a", 8, "dust");
@@ -878,37 +956,183 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     persist();
   }
 
-  function build() {
-    // Раз в ~8 секунд один народ достраивает дом, если тесно: на дом — три
-    // кота. Так деревня растёт сама, как в WorldBox, а не по кисти бога.
-    if (state.tick % 240 !== 120) return;
-    if (!state.villages.length) return;
-    const vi = Math.floor(Math.random() * state.villages.length);
-    const village = state.villages[vi];
-    const r = village.race;
-    const popV = state.cats.filter((c) => c.race === r && c.v === vi).length;
-    if (popV === 0) return;
-    const housesV = state.houses.filter((h) => h.race === r && h.v === vi).length;
-    if (housesV >= Math.ceil(popV / 3) || state.houses.filter((h) => h.race === r).length >= 48) return;
-    if (state.cats.some((c) => c.race === r && c.v === vi && c.task)) return; // уже строят
-    const site = pickSite(r, village);
-    if (!site) return;
-    // Ближайший свободный кот деревни идёт строить и стоит там секунд пять.
+  /** Свободный кот деревни, ближайший к точке. */
+  function idleCatNear(vi, x, y) {
     let worker = null;
     let best = Infinity;
     for (const c of state.cats) {
-      if (c.race !== r || c.v !== vi || c.task || c.warrior) continue;
-      const d = Math.abs(c.x - site.x) + Math.abs(c.y - site.y);
+      if (c.v !== vi || c.task || c.warrior) continue;
+      const d = Math.abs(c.x - x) + Math.abs(c.y - y);
       if (d < best) {
         best = d;
         worker = c;
       }
     }
-    if (!worker) return;
-    worker.task = { kind: "build", x: site.x, y: site.y, ttl: 150, v: vi };
-    worker.tx = site.x;
-    worker.ty = site.y;
-    worker.wait = 0;
+    return worker;
+  }
+
+  function assign(c, task) {
+    c.task = task;
+    c.tx = task.x;
+    c.ty = task.y;
+    c.wait = 0;
+  }
+
+  /** Ближайшее дерево к деревне, ещё не занятое дровосеком. */
+  function nearestTree(village, radius = 10) {
+    let best = null;
+    let bestD = Infinity;
+    const busy = new Set(state.cats.filter((c) => c.task?.kind === "chop").map((c) => idx(c.task.x, c.task.y)));
+    for (let dy = -radius; dy <= radius; dy += 1) {
+      for (let dx = -radius; dx <= radius; dx += 1) {
+        const x = village.x + dx;
+        const y = village.y + dy;
+        if (!inside(x, y)) continue;
+        const i = idx(x, y);
+        if (!state.trees.has(i) || busy.has(i)) continue;
+        if (state.terr && state.terr[i] !== 255 && state.terr[i] !== village.race) continue;
+        const d = dx * dx + dy * dy;
+        if (d < bestD) {
+          bestD = d;
+          best = { x, y };
+        }
+      }
+    }
+    return best;
+  }
+
+  /** Ближайшая скала, где можно стоять рядом и долбить камень. */
+  function nearestRock(village, radius = 10) {
+    let best = null;
+    let bestD = Infinity;
+    for (let dy = -radius; dy <= radius; dy += 1) {
+      for (let dx = -radius; dx <= radius; dx += 1) {
+        const x = village.x + dx;
+        const y = village.y + dy;
+        if (!inside(x, y)) continue;
+        const t = tileAt(x, y);
+        if (t !== T.MOUNTAIN && t !== T.HILL) continue;
+        const race = RACES[village.race];
+        // Стоять надо на самой клетке (гномы) или на соседней проходимой.
+        const spot = race.canStand(t) ? { x, y } : nearestStand(x, y, race, 1);
+        if (!spot) continue;
+        const d = dx * dx + dy * dy;
+        if (d < bestD) {
+          bestD = d;
+          best = spot;
+        }
+      }
+    }
+    return best;
+  }
+
+  /** Берег рядом с деревней: суша, у которой есть вода. */
+  function nearestShore(village, radius = 8) {
+    let best = null;
+    let bestD = Infinity;
+    for (let dy = -radius; dy <= radius; dy += 1) {
+      for (let dx = -radius; dx <= radius; dx += 1) {
+        const x = village.x + dx;
+        const y = village.y + dy;
+        if (!inside(x, y)) continue;
+        const t = tileAt(x, y);
+        if (t !== T.SAND && t !== T.GRASS) continue;
+        if (state.houses.some((h) => h.x === x && h.y === y)) continue;
+        const water = tileAt(x + 1, y) <= T.WATER || tileAt(x - 1, y) <= T.WATER || tileAt(x, y + 1) <= T.WATER || tileAt(x, y - 1) <= T.WATER;
+        if (!water) continue;
+        const d = dx * dx + dy * dy;
+        if (d < bestD) {
+          bestD = d;
+          best = { x, y };
+        }
+      }
+    }
+    return best;
+  }
+
+  /**
+   * Хозяйство деревни. Раз в несколько секунд одна деревня решает, кого
+   * куда послать: сперва добыча, если склад пуст, потом стройка за брёвна,
+   * верфь за двадцать, улучшения за брёвна и камень. Рабочие руки — мирные
+   * коты без дела; воины не рубят.
+   */
+  function build() {
+    if (state.tick % 90 !== 45 || !state.villages.length) return;
+    const vi = Math.floor(Math.random() * state.villages.length);
+    const village = state.villages[vi];
+    const r = village.race;
+    const race = RACES[r];
+    const mine = state.cats.filter((c) => c.v === vi);
+    if (!mine.length) return;
+    const houses = state.houses.filter((h) => h.v === vi);
+    const needHouses = houses.length < Math.ceil(mine.length / 3) && state.houses.filter((h) => h.race === r).length < 48;
+    const era = state.era[r] || 0;
+    const needUpgrade = houses.find((h) => (h.lvl || 0) < era);
+    const wantShipyard = !village.shipyard && houses.length >= 2;
+
+    // 1. Стройка за брёвна.
+    if (needHouses && village.wood >= COST.house.wood && !mine.some((c) => c.task?.kind === "build")) {
+      const site = pickSite(r, village);
+      const worker = site && idleCatNear(vi, site.x, site.y);
+      if (worker) {
+        village.wood -= COST.house.wood;
+        assign(worker, { kind: "build", x: site.x, y: site.y, ttl: 150, v: vi });
+        return;
+      }
+    }
+    // 2. Верфь.
+    if (wantShipyard && village.wood >= COST.shipyard.wood && !mine.some((c) => c.task?.kind === "shipyard")) {
+      const shore = nearestShore(village);
+      const worker = shore && idleCatNear(vi, shore.x, shore.y);
+      if (worker) {
+        village.wood -= COST.shipyard.wood;
+        assign(worker, { kind: "shipyard", x: shore.x, y: shore.y, ttl: 200, v: vi });
+        return;
+      }
+    }
+    // 3. Улучшение дома под эру.
+    if (needUpgrade && village.wood >= COST.upgrade.wood && village.stone >= COST.upgrade.stone && !mine.some((c) => c.task?.kind === "upgrade")) {
+      const worker = idleCatNear(vi, needUpgrade.x, needUpgrade.y);
+      if (worker) {
+        village.wood -= COST.upgrade.wood;
+        village.stone -= COST.upgrade.stone;
+        assign(worker, { kind: "upgrade", x: needUpgrade.x, y: needUpgrade.y, ttl: 150, v: vi });
+        return;
+      }
+    }
+    // 4. Добыча: дровосеков — до трети деревни, камнетёсов — когда нужен камень.
+    const idle = mine.filter((c) => !c.task && !c.warrior);
+    if (!idle.length) return;
+    const choppers = mine.filter((c) => c.task?.kind === "chop").length;
+    const miners = mine.filter((c) => c.task?.kind === "mine").length;
+    const wantWood = village.wood < 40 || needHouses || wantShipyard;
+    const wantStone = (needUpgrade || era >= 1) && village.stone < 30;
+    if (wantStone && miners < Math.max(1, Math.floor(mine.length / 5))) {
+      const rock = nearestRock(village);
+      const worker = rock && idleCatNear(vi, rock.x, rock.y);
+      if (worker) {
+        assign(worker, { kind: "mine", x: rock.x, y: rock.y, ttl: MINE_TICKS, v: vi });
+        return;
+      }
+    }
+    if (wantWood && choppers < Math.max(1, Math.floor(mine.length / 3))) {
+      const tree = nearestTree(village);
+      const worker = tree && idleCatNear(vi, tree.x, tree.y);
+      if (worker) assign(worker, { kind: "chop", x: tree.x, y: tree.y, ttl: CHOP_TICKS, v: vi });
+    }
+  }
+
+  /** Лес отрастает: раз в двадцать секунд на лесной клетке без дерева всходит новое. */
+  function regrow() {
+    if (state.tick % 600 !== 100) return;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const i = Math.floor(Math.random() * W * H);
+      if (state.tiles[i] !== T.FOREST || state.trees.has(i)) continue;
+      if (state.houses.some((h) => idx(h.x, h.y) === i)) continue;
+      state.trees.add(i);
+      bakeArea(i % W, ((i / W) | 0) - 1, i % W, (i / W) | 0);
+      return;
+    }
   }
 
   /** Место под дом рядом со столицей, по вкусу народа. Без постановки. */
@@ -1360,10 +1584,11 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     // деревня совсем сухопутная — ближайшая вода к столице.
     if (state.tick % 600 === 300 && state.ships.length < 12) {
       const r = Math.floor(Math.random() * RACES.length);
-      if (state.era[r] >= 1 && state.ships.filter((sh) => sh.race === r).length < 3) {
+      const yards = state.villages.filter((v) => v.race === r && v.shipyard);
+      if (yards.length && state.ships.filter((sh) => sh.race === r).length < yards.length * 2) {
         const docks = [];
-        for (const h of state.houses) {
-          if (h.race !== r) continue;
+        for (const v of yards) {
+          const h = v.shipyard;
           for (let dy = -5; dy <= 5; dy += 1) {
             for (let dx = -5; dx <= 5; dx += 1) {
               const x = h.x + dx;
@@ -1432,7 +1657,9 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       persist();
     }
     if (state.tick % 1200 !== 600) return;
-    const kinds = ["trade", "festival", "fishing", "forge", "song", "raid"];
+    // Рыбалка — только у кого есть верфь; иначе в море выходить не на чем.
+    const kinds = ["trade", "festival", "forge", "song", "raid"];
+    if (state.villages.some((v) => v.shipyard)) kinds.push("fishing");
     const kind = kinds[Math.floor(Math.random() * kinds.length)];
     const a = Math.floor(Math.random() * 4);
     let b = Math.floor(Math.random() * 4);
@@ -1881,7 +2108,7 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
    */
   function drawHouse(g, h) {
     const race = RACES[h.race];
-    const era = state.era[h.race] || 0;
+    const era = Math.min(h.lvl || 0, state.era[h.race] || 0);
     const bx = h.x * PX;
     const by = h.y * PX;
     if (era === 0) {
@@ -1982,6 +2209,20 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     rect(g, race.banner, bx + 7, top + 6, 1, 2);
   }
 
+  /** Верфь: настил на сваях, каркас лодки, флажок народа. */
+  function drawShipyard(g, v) {
+    const race = RACES[v.race];
+    const bx = v.shipyard.x * PX;
+    const by = v.shipyard.y * PX;
+    rect(g, "#8a5a2b", bx, by + 3, 8, 3);
+    rect(g, "#5b3d22", bx + 1, by + 6, 1, 2);
+    rect(g, "#5b3d22", bx + 6, by + 6, 1, 2);
+    rect(g, "#5b3d22", bx, by + 2, 8, 1);
+    rect(g, "#5b3d22", bx + 2, by, 4, 2);
+    rect(g, "#c9d3df", bx + 3, by + 1, 2, 1);
+    rect(g, race.banner, bx + 7, by - 1, 1, 3);
+  }
+
   function drawFlag(g, home) {
     const race = RACES[home.race];
     const bx = home.x * PX;
@@ -2036,6 +2277,10 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       }
     }
     refreshWater();
+    for (const v of state.villages) {
+      const y = v.shipyard;
+      if (y && y.x >= ax && y.x <= bx && y.y >= ay && y.y <= by + 1) drawShipyard(tctx, v);
+    }
     const inArea = state.houses.filter((h) => h.x >= ax && h.x <= bx && h.y >= ay && h.y <= by + 2);
     inArea.sort((a, b) => a.y - b.y);
     for (const h of inArea) drawHouse(tctx, h);
@@ -2095,7 +2340,26 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     // Хвост машет: две фазы, у каждого кота своя.
     const wag = ((state.tick >> 3) + c.x) % 2;
     rect(ctx, race.dark, f > 0 ? bx - 1 : bx + 6, by + 1 + wag, 1, 2);
-    if (c.task && c.x === c.task.x && c.y === c.task.y) {
+    if (c.task && c.x === c.task.x && c.y === c.task.y && (c.task.kind === "chop" || c.task.kind === "mine")) {
+      // Рубит или долбит: топор/кирка машут, щепки летят, дерево вздрагивает.
+      const swing = (state.tick >> 2) % 2;
+      const tool = c.task.kind === "chop" ? "#c9d3df" : "#8c9ba8";
+      rect(ctx, "#5b3d22", f > 0 ? bx + 6 : bx - 1, by - 2 + swing, 1, 4);
+      rect(ctx, tool, f > 0 ? bx + 6 : bx - 2, by - 3 + swing, 2, 1);
+      if (state.tick % 12 === 0) puff(c.task.x, c.task.y, c.task.kind === "chop" ? "#8a5a2b" : "#c9d3df", 1, c.task.kind === "chop" ? "dust" : "spark");
+      if (c.task.kind === "chop" && swing) {
+        // Дерево вздрагивает от удара: перерисовываем крону со сдвигом.
+        ctx.globalAlpha = 0.5;
+        rect(ctx, "#3d6a2c", c.task.x * PX + 3, c.task.y * PX, 4, 5);
+        ctx.globalAlpha = 1;
+      }
+      // Полоска прогресса над работой.
+      const total = c.task.kind === "chop" ? CHOP_TICKS : MINE_TICKS;
+      const done = Math.round((1 - c.task.ttl / total) * 6);
+      rect(ctx, "#141413", bx, by - 5, 6, 1);
+      rect(ctx, "#e0a93b", bx, by - 5, done, 1);
+    }
+    if (c.task && c.x === c.task.x && c.y === c.task.y && (c.task.kind === "build" || c.task.kind === "upgrade" || c.task.kind === "shipyard")) {
       // Строит: молоток машет, под котом каркас будущего дома.
       const swing = (state.tick >> 2) % 2;
       rect(ctx, "#5b3d22", bx + 6, by - 2 + swing, 1, 3);
@@ -2300,7 +2564,7 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.fillStyle = `rgba(255, 220, 130, ${Math.min(1, night * 1.6)})`;
       for (const h of state.houses) {
-        const era = state.era[h.race] || 0;
+        const era = Math.min(h.lvl || 0, state.era[h.race] || 0);
         ctx.fillRect(h.x * PX + 3, h.y * PX + (era === 0 ? 5 : era === 1 ? 0 : -3), 2, 2);
         if (era >= 1) ctx.fillRect(h.x * PX + 5, h.y * PX + (era === 1 ? -4 : -6), 1, 1);
       }
@@ -2342,6 +2606,7 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
         burn();
         fallMeteors();
         build();
+        regrow();
         breed();
         warTick();
         allyTick();

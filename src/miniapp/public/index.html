@@ -45,6 +45,10 @@
             <button class="wb-gear" id="wb-gear" type="button" aria-label="Настройки" aria-expanded="false"></button>
           </div>
 
+          <!-- Тело карты: вьюпорт и всё, что висит поверх него, — плашка эры,
+               зум, настройки. Позиции считаются от карты, а не от шапки:
+               шапка на узком экране переносится и меняет высоту. -->
+          <div class="wb-body">
           <div class="wb-viewport" id="city-viewport">
             <div class="wb-stage" id="city-stage">
               <canvas class="wb-map" id="city-map" aria-label="Карта континента четырёх кошачьих народов. Проведи пальцем, чтобы применить выбранный инструмент."></canvas>
@@ -78,6 +82,8 @@
             <div class="wb-settings-sub">Карта</div>
             <div class="wb-maps" id="wb-maps" role="group" aria-label="Выбор карты"></div>
             <button class="button button--ghost wb-settings-reset" id="city-reset" type="button">Начать остров заново</button>
+          </div>
+
           </div>
 
           <div class="wb-panel">
