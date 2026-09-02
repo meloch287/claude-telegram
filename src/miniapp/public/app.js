@@ -450,11 +450,8 @@ function setupCity(profile) {
         b.type = "button";
         b.className = "wb-chip";
         b.setAttribute("aria-pressed", String(r === ui.race));
-        const dot = document.createElement("span");
-        dot.className = "wb-dot";
-        dot.style.setProperty("--dot", race.id === "elf" ? race.hat : race.fur);
-        dot.setAttribute("aria-hidden", "true");
-        b.append(dot, text(race.name.replace("-коты", "")));
+        b.insertAdjacentHTML("afterbegin", icon(`race-${race.id}`, 22, "wb-chip-icon"));
+        b.append(text(race.name.replace("-коты", "")));
         const count = document.createElement("span");
         count.className = "wb-chip-count";
         count.append(text(nf.format(ui.pops[r] ?? 0)));
@@ -575,6 +572,9 @@ function setupCity(profile) {
 
   setCategory(CATEGORIES[0]);
   renderChronicle(world.chronicle);
+  // Вкладки поднимаются раньше мира: если мини-апп открылся сразу на городе,
+  // start() тогда некому было позвать — и коты стояли как вкопанные.
+  if (!el("panel-city").hidden) world.start();
   if (world.population === 0) hint.textContent = "Остров пуст. Выбери народ и проведи пальцем по суше — там поселятся первые коты. Дома они построят сами.";
 }
 

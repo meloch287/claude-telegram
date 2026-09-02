@@ -1539,3 +1539,8 @@ h2 {
     animation: none;
   }
 }
+
+.wb-chip-icon {
+  flex: 0 0 auto;
+  filter: drop-shadow(0 1px 0 rgb(0 0 0 / 60%));
+}

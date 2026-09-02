@@ -250,8 +250,9 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
 
   function newCat(x, y, r) {
     // px/py — где кот нарисован; x/y — клетка, куда идёт. Между ними кот
-    // плавно доезжает, и движение видно, а не мигает по клеткам.
-    return { x, y, px: x, py: y, race: r, tx: x, ty: y, wait: Math.floor(Math.random() * 40), step: Math.random(), face: 1, gait: 0 };
+    // плавно доезжает, и движение видно, а не мигает по клеткам. task —
+    // дело, ради которого он остановится (стройка); без дела кот бродит.
+    return { x, y, px: x, py: y, race: r, tx: x, ty: y, wait: Math.floor(Math.random() * 8), step: Math.random(), face: 1, gait: 0, task: null };
   }
 
   function newShip(x, y, r) {
@@ -441,7 +442,17 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
       }
       c.px = c.x;
       c.py = c.y;
-      if (c.wait > 0) {
+      // Дело: дошёл до места — стоит и работает, пока не закончит.
+      if (c.task) {
+        if (c.x === c.task.x && c.y === c.task.y) {
+          c.task.ttl -= 1;
+          if (c.task.ttl <= 0) finishTask(c);
+          continue;
+        }
+        c.tx = c.task.x;
+        c.ty = c.task.y;
+        c.wait = 0;
+      } else if (c.wait > 0) {
         c.wait -= 1;
         continue;
       }
@@ -458,7 +469,8 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
             break;
           }
         }
-        c.wait = 6 + Math.floor(Math.random() * 50);
+        // Почти без передышки: кот, который стоит, выглядит сломанным.
+        c.wait = Math.floor(Math.random() * 6);
         continue;
       }
       c.step += 0.5;
@@ -472,11 +484,34 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
         if (nx !== c.x) c.face = nx > c.x ? 1 : -1;
         c.x = nx;
         c.y = ny;
+      } else if (c.task) {
+        // Не пройти к стройке — бросаем и пусть возьмётся другой.
+        c.task = null;
+        c.tx = c.x;
+        c.ty = c.y;
       } else {
         c.tx = c.x;
         c.ty = c.y;
       }
     }
+  }
+
+  /** Стройка закончена: дом встаёт, кот идёт дальше по делам. */
+  function finishTask(c) {
+    const t = c.task;
+    c.task = null;
+    if (t.kind !== "build") return;
+    if (!RACES[c.race].canBuild(tileAt(t.x, t.y)) || state.houses.some((h) => h.x === t.x && h.y === t.y)) return;
+    state.houses.push({ x: t.x, y: t.y, race: c.race });
+    state.trees.delete(idx(t.x, t.y));
+    state.flowers.delete(idx(t.x, t.y));
+    chronicle("built", c.race);
+    bakeArea(t.x - 1, t.y - 2, t.x + 1, t.y + 1);
+    // Строитель отходит от свежего дома, а не стоит в дверях.
+    c.tx = t.x + (Math.random() < 0.5 ? -1 : 1);
+    c.ty = t.y + 1;
+    countPop();
+    persist();
   }
 
   function build() {
@@ -488,12 +523,40 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
     if (!home || state.pop[r] === 0) return;
     const houses = state.houses.filter((h) => h.race === r).length;
     if (houses >= Math.ceil(state.pop[r] / 3) || houses >= 40) return;
-    if (placeHouse(r, home)) {
-      chronicle("built", r);
-      bakeArea(home.x - 6, home.y - 6, home.x + 6, home.y + 6);
-      countPop();
-      persist();
+    if (state.cats.some((c) => c.race === r && c.task)) return; // уже строят
+    const site = pickSite(r, home);
+    if (!site) return;
+    // Ближайший свободный кот народа идёт строить и стоит там секунд пять.
+    let worker = null;
+    let best = Infinity;
+    for (const c of state.cats) {
+      if (c.race !== r || c.task) continue;
+      const d = Math.abs(c.x - site.x) + Math.abs(c.y - site.y);
+      if (d < best) {
+        best = d;
+        worker = c;
+      }
     }
+    if (!worker) return;
+    worker.task = { kind: "build", x: site.x, y: site.y, ttl: 150 };
+    worker.tx = site.x;
+    worker.ty = site.y;
+    worker.wait = 0;
+  }
+
+  /** Место под дом рядом со столицей, по вкусу народа. Без постановки. */
+  function pickSite(r, near) {
+    const race = RACES[r];
+    for (let attempt = 0; attempt < 80; attempt += 1) {
+      const radius = 1 + Math.floor(attempt / 10);
+      const x = near.x + Math.round((rand() * 2 - 1) * radius * 2);
+      const y = near.y + Math.round((rand() * 2 - 1) * radius * 1.4);
+      if (!inside(x, y) || !race.canBuild(tileAt(x, y))) continue;
+      if (state.houses.some((h) => h.x === x && h.y === y)) continue;
+      if (state.homes.some((h) => h && h.x === x && h.y === y)) continue;
+      return { x, y };
+    }
+    return null;
   }
 
   function breed() {
@@ -1189,6 +1252,15 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
     rect(ctx, "#141413", eyeL + 2, by + 2, 1, 1);
     rect(ctx, "#e37f6a", f > 0 ? bx + 3 : bx + 2, by + 3, 1, 1); // нос
     rect(ctx, race.dark, f > 0 ? bx - 1 : bx + 6, by + 2, 1, 2); // хвост
+    if (c.task && c.x === c.task.x && c.y === c.task.y) {
+      // Строит: молоток машет, под котом каркас будущего дома.
+      const swing = (state.tick >> 2) % 2;
+      rect(ctx, "#5b3d22", bx + 6, by - 2 + swing, 1, 3);
+      rect(ctx, "#8c9ba8", bx + 5, by - 3 + swing, 3, 1);
+      rect(ctx, "#5b3d22", c.task.x * PX, c.task.y * PX + 7, 8, 1);
+      rect(ctx, "#5b3d22", c.task.x * PX, c.task.y * PX + 4, 1, 3);
+      rect(ctx, "#5b3d22", c.task.x * PX + 7, c.task.y * PX + 4, 1, 3);
+    }
     switch (race.id) {
       case "human":
         rect(ctx, race.hat, bx, by - 1, 6, 1);

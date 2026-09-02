@@ -27,6 +27,10 @@ const PALETTE = {
   p: "#c9a2ff", // фиолетовый (молния, будущее)
   m: "#5b3d22", // дерево-ствол
   x: "#9a9590", // серый
+  e: "#efe9d6", // шерсть эльфов
+  q: "#6f8f4a", // шерсть орков
+  u: "#b7b3ad", // шерсть гномов
+  f: "#e37f6a", // нос
 };
 
 const ICONS = {
@@ -339,6 +343,62 @@ const ICONS = {
     "...mmmmmm...",
     "bbbbbbbbbbbb",
     "bbbbbbbbbbbb",
+  ],
+  "race-human": [
+    "............",
+    "...rrrrrr...",
+    "..rrrrrrrr..",
+    "..kc....ck..",
+    "..kcccccck..",
+    "..kckcckck..",
+    "..kcccccck..",
+    "..kccfccck..",
+    "..kcccccck..",
+    "...kccccck..",
+    "....kkkkk...",
+    "............",
+  ],
+  "race-elf": [
+    "............",
+    ".....GG.....",
+    ".k.......k..",
+    "kek.....kek.",
+    "..kkeeeeekk.",
+    "..keeeeeek..",
+    "..kekeekek..",
+    "..keeeeeek..",
+    "..keefeeek..",
+    "...keeeeek..",
+    "....kkkkk...",
+    "............",
+  ],
+  "race-orc": [
+    "............",
+    "..k......k..",
+    "..kk....kk..",
+    "..kqkkkkqk..",
+    "..kqqqqqqk..",
+    "..kqkqqkqk..",
+    "..kqqqqqqk..",
+    "..kqqfqqqk..",
+    "..kwqqqqwk..",
+    "...kqqqqqk..",
+    "....kkkkk...",
+    "............",
+  ],
+  "race-gnome": [
+    ".....rr.....",
+    "....rrrr....",
+    "...rrrrrr...",
+    "..rrrrrrrr..",
+    "..kuuuuuuk..",
+    "..kukuukuk..",
+    "..kuuuuuuk..",
+    "..kuufuuuk..",
+    "..kwwwwwwk..",
+    "...kwwwwwk..",
+    "....kkkkk...",
+    "............",
   ],
   reset: [
     "............",
