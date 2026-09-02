@@ -165,11 +165,28 @@ function valueNoise(seed, size) {
   };
 }
 
-function buildTerrain(seed) {
+/**
+ * Пять карт. Все из одного сида, но с разной формой суши: у каждой карты
+ * свой мир и своё сохранение — можно держать пять островов разом.
+ */
+export const MAPS = [
+  { id: "island", name: "Остров", desc: "Один большой остров, горы в сердце" },
+  { id: "archipelago", name: "Архипелаг", desc: "Россыпь островков, много моря и кораблей" },
+  { id: "continent", name: "Континент", desc: "Почти сплошная суша, есть где развернуться" },
+  { id: "highlands", name: "Нагорье", desc: "Горы и снег, царство гномов" },
+  { id: "lakes", name: "Озёрный край", desc: "Земля в озёрах, лес и луга" },
+];
+
+export function buildTerrain(seed, mapId = "island") {
   const n1 = valueNoise(seed + 1, 5);
   const n2 = valueNoise(seed + 2, 11);
   const n3 = valueNoise(seed + 3, 23);
   const nForest = valueNoise(seed + 4, 8);
+  const nLake = valueNoise(seed + 5, 6);
+  const rnd = rng(seed + 77);
+  // Архипелаг: несколько центров, от ближайшего — спад высоты.
+  const centers = [];
+  for (let i = 0; i < 4; i += 1) centers.push({ x: 0.2 + rnd() * 0.6, y: 0.2 + rnd() * 0.6, r: 0.16 + rnd() * 0.12 });
   const tiles = new Uint8Array(W * H);
   for (let y = 0; y < H; y += 1) {
     for (let x = 0; x < W; x += 1) {
@@ -179,19 +196,77 @@ function buildTerrain(seed) {
       const dx = (u - 0.5) * 2;
       const dy = (v - 0.5) * 2;
       const dist = Math.sqrt(dx * dx + dy * dy);
-      h -= Math.max(0, dist - 0.6) * 1.4;
+      let sea = 0.24;
+      let shallow = 0.33;
+      let sand = 0.37;
+      let hill = 0.58;
+      let mount = 0.68;
+      let snow = 0.78;
+      switch (mapId) {
+        case "archipelago": {
+          let best = Infinity;
+          for (const c of centers) best = Math.min(best, Math.hypot(u - c.x, (v - c.y) * 1.1) / c.r);
+          h -= Math.max(0, best - 0.45) * 1.1;
+          sea = 0.28;
+          shallow = 0.36;
+          sand = 0.4;
+          hill = 0.62;
+          mount = 0.74;
+          snow = 0.86;
+          break;
+        }
+        case "continent":
+          h -= Math.max(0, dist - 0.9) * 1.6;
+          sea = 0.16;
+          shallow = 0.22;
+          sand = 0.25;
+          hill = 0.56;
+          mount = 0.7;
+          snow = 0.82;
+          break;
+        case "highlands":
+          h = h * 1.25 + 0.05 - Math.max(0, dist - 0.65) * 1.4;
+          hill = 0.52;
+          mount = 0.62;
+          snow = 0.74;
+          break;
+        case "lakes":
+          h -= Math.max(0, dist - 0.85) * 1.6;
+          sea = 0.16;
+          shallow = 0.22;
+          sand = 0.25;
+          if (nLake(u, v) > 0.66) h = Math.min(h, 0.3);
+          hill = 0.62;
+          mount = 0.74;
+          snow = 0.88;
+          break;
+        default:
+          h -= Math.max(0, dist - 0.6) * 1.4;
+      }
       let t;
-      if (h < 0.24) t = T.DEEP;
-      else if (h < 0.33) t = T.WATER;
-      else if (h < 0.37) t = T.SAND;
-      else if (h < 0.58) t = nForest(u, v) > 0.56 ? T.FOREST : T.GRASS;
-      else if (h < 0.68) t = T.HILL;
-      else if (h < 0.78) t = T.MOUNTAIN;
+      if (h < sea) t = T.DEEP;
+      else if (h < shallow) t = T.WATER;
+      else if (h < sand) t = T.SAND;
+      else if (h < hill) t = nForest(u, v) > (mapId === "lakes" ? 0.5 : 0.56) ? T.FOREST : T.GRASS;
+      else if (h < mount) t = T.HILL;
+      else if (h < snow) t = T.MOUNTAIN;
       else t = T.SNOW;
       tiles[y * W + x] = t;
     }
   }
   return tiles;
+}
+
+/** Миниатюра карты для выбора в настройках: клетка — два пикселя. */
+export function renderPreview(canvas, seed, mapId) {
+  const tiles = buildTerrain(seed, mapId);
+  canvas.width = W * 2;
+  canvas.height = H * 2;
+  const g = canvas.getContext("2d");
+  for (let i = 0; i < W * H; i += 1) {
+    g.fillStyle = TILE_COLOR[tiles[i]][0];
+    g.fillRect((i % W) * 2, ((i / W) | 0) * 2, 2, 2);
+  }
 }
 
 /* ── Мир ────────────────────────────────────────────────────────────────── */
@@ -242,9 +317,10 @@ export const ERAS = [
   { id: "future", name: "Будущее", days: 6, houses: 12 },
 ];
 
-export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVillages }) {
+export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVillages, map = "island" }) {
   const rand = rng(seed * 7 + 13);
-  const storeKey = `world:v${SAVE_VERSION}:${seed}`;
+  // У каждой карты своё сохранение: пять миров живут параллельно.
+  const storeKey = `world:v${SAVE_VERSION}:${seed}:${map}`;
 
   const state = {
     tiles: null,
@@ -268,6 +344,7 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     villages: [], // { race, x, y } — у народа их несколько, столица — первая
     relations: RACES.map(() => RACES.map(() => "peace")),
     wars: [], // { a, b, ttl, kills: [0, 0] }
+    allies: [], // { a, b, ttl } — союзы: вступают в войну друг за друга
     projectiles: [], // стрелы и лучи: { x, y, tx, ty, color, kind, race }
     savedAt: Date.now(),
     terr: null, // Uint8Array: чья территория у клетки, 255 — ничья
@@ -371,7 +448,7 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
   }
 
   function generate() {
-    state.tiles = buildTerrain(seed);
+    state.tiles = buildTerrain(seed, map);
     for (let i = 0; i < W * H; i += 1) {
       const t = state.tiles[i];
       if (t === T.FOREST && rand() < 0.6) state.trees.add(i);
@@ -410,6 +487,7 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
             villages: state.villages,
             relations: state.relations,
             wars: state.wars,
+            allies: state.allies,
             cats: state.cats.map((c) => [c.x, c.y, c.race, c.v, c.warrior ? 1 : 0, c.hp, c.name]),
             savedAt: Date.now(),
             day: state.day,
@@ -437,6 +515,7 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       state.villages = Array.isArray(saved.villages) ? saved.villages : [];
       state.relations = Array.isArray(saved.relations) && saved.relations.length === 4 ? saved.relations : RACES.map(() => RACES.map(() => "peace"));
       state.wars = Array.isArray(saved.wars) ? saved.wars : [];
+      state.allies = Array.isArray(saved.allies) ? saved.allies : [];
       state.cats = (saved.cats || []).map(([x, y, r, v = 0, w = 0, hp = 3, name = null]) => {
         const c = newCat(x, y, r, v);
         c.warrior = Boolean(w);
@@ -501,6 +580,7 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       build();
       breed();
       warTick();
+      allyTick();
       colonize();
       advanceEras();
       stepParticles();
@@ -543,6 +623,9 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     colony: (r, founder, village) => (founder ? `${founder} увёл ${RACES[r].plural} на новое место: деревня ${village}.` : `${RACES[r].name} основали новую деревню.`),
     away: (b, h) => `Пока тебя не было: родилось ${b} кот${plural(b)}, построено ${h} дом${plural(h)}.`,
     war: (a, b) => `⚔ ${RACES[a].name} объявили войну ${RACES[b].dat}!`,
+    join: (c, a, b) => `⚔ ${RACES[c].name} вступают в войну против ${RACES[b].plural} на стороне ${RACES[a].plural}.`,
+    ally: (a, b) => `🤝 ${RACES[a].name} и ${RACES[b].name.toLowerCase()} заключили союз.`,
+    allyEnd: (a, b) => `Союз ${RACES[a].plural} и ${RACES[b].plural} распался.`,
     peace: (a, b, ka, kb) => `Мир между ${RACES[a].instr} и ${RACES[b].instr}. Потери: ${ka} и ${kb}.`,
     arson: (a, b) => `${RACES[a].name} подожгли дом ${RACES[b].plural}.`,
     fallen: (r, name, village) => `Пал воин ${name || ""} ${RACES[r].plural}${village ? ` из ${village}` : ""}.`.replace("  ", " "),
@@ -654,8 +737,12 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
         center: state.centers[r],
       })),
     );
-    onVillages?.(
-      state.villages.map((v, i) => ({
+    onVillages?.({
+      wars: state.wars.map((w) => ({ a: w.a, b: w.b })),
+      allies: state.allies.map((al) => ({ a: al.a, b: al.b })),
+      atWar: RACES.map((_, r) => RACES.some((__, o) => atWar(r, o))),
+      capitals: state.homes.map((h) => (h ? { x: h.x, y: h.y } : null)),
+      villages: state.villages.map((v, i) => ({
         name: v.name,
         founder: v.founder,
         race: v.race,
@@ -665,7 +752,7 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
         pop: state.cats.filter((c) => c.v === i).length,
         houses: state.houses.filter((h) => h.v === i).length,
       })),
-    );
+    });
     hud();
   }
 
@@ -902,14 +989,32 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     return a !== b && state.relations[a][b] === "war";
   }
 
-  function declareWar(a, b) {
+  function allied(a, b) {
+    return a !== b && state.relations[a][b] === "ally";
+  }
+
+  function alliesOf(r) {
+    return RACES.map((_, o) => o).filter((o) => allied(r, o));
+  }
+
+  /**
+   * Война. Союзники обеих сторон встают рядом — так на одного нападают двое,
+   * а коалиции складываются сами. Между союзниками войны быть не может:
+   * сначала распадается союз.
+   */
+  function declareWar(a, b, joinedFor = null) {
     if (a === b || atWar(a, b)) return false;
+    if (allied(a, b)) breakAlliance(a, b);
     state.relations[a][b] = "war";
     state.relations[b][a] = "war";
     state.wars.push({ a, b, ttl: 3600, kills: [0, 0] });
-    chronicle("war", a, b);
-    // Воины готовятся: у каждого народа не меньше четверти бойцов.
+    if (joinedFor === null) chronicle("war", a, b);
+    else chronicle("join", a, joinedFor, b);
     for (const c of state.cats) if (c.race === a || c.race === b) assignWarrior(c);
+    if (joinedFor === null) {
+      for (const c of alliesOf(a)) if (!atWar(c, b) && state.pop[c] >= 3) declareWar(c, b, a);
+      for (const c of alliesOf(b)) if (!atWar(c, a) && state.pop[c] >= 3) declareWar(c, a, b);
+    }
     persist();
     return true;
   }
@@ -920,6 +1025,40 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     state.wars = state.wars.filter((o) => o !== w);
     chronicle("peace", w.a, w.b, w.kills[1], w.kills[0]);
     persist();
+  }
+
+  function makeAlliance(a, b) {
+    if (a === b || allied(a, b) || atWar(a, b)) return false;
+    state.relations[a][b] = "ally";
+    state.relations[b][a] = "ally";
+    state.allies.push({ a, b, ttl: 7200 });
+    chronicle("ally", a, b);
+    persist();
+    return true;
+  }
+
+  function breakAlliance(a, b) {
+    state.relations[a][b] = "peace";
+    state.relations[b][a] = "peace";
+    state.allies = state.allies.filter((o) => !((o.a === a && o.b === b) || (o.a === b && o.b === a)));
+    chronicle("allyEnd", a, b);
+  }
+
+  /** Союзы рождаются у мирных соседей с общим врагом или просто по-соседски. */
+  function allyTick() {
+    for (const al of state.allies.slice()) {
+      al.ttl -= 1;
+      if (al.ttl <= 0) breakAlliance(al.a, al.b);
+    }
+    if (state.tick % 600 !== 400 || !state.terr) return;
+    const alive = RACES.map((_, r) => r).filter((r) => state.pop[r] >= 4);
+    if (alive.length < 2) return;
+    const a = alive[Math.floor(Math.random() * alive.length)];
+    const b = alive[Math.floor(Math.random() * alive.length)];
+    if (a === b || atWar(a, b) || allied(a, b)) return;
+    // Общий враг сближает: шанс выше, если оба воюют с одним и тем же.
+    const commonFoe = RACES.some((_, r) => atWar(a, r) && atWar(b, r));
+    if (Math.random() < (commonFoe ? 0.5 : 0.08)) makeAlliance(a, b);
   }
 
   /** Ближайший враг для кота: воин (или любой кот) враждебного народа. */
@@ -960,6 +1099,8 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
   function killCat(victim, byRace) {
     state.cats = state.cats.filter((o) => o !== victim);
     puff(victim.x, victim.y, "#d9d3c4", 6, "dust");
+    // Призрак кота поднимается к небу.
+    state.particles.push({ x: victim.x * PX + 1, y: victim.y * PX + 1, vx: 0, vy: -0.25, ttl: 60, life: 60, color: "#ffffff", kind: "ghost" });
     const w = state.wars.find((o) => (o.a === victim.race && o.b === byRace) || (o.b === victim.race && o.a === byRace));
     if (w) w.kills[victim.race === w.a ? 0 : 1] += 1;
     if (victim.warrior) chronicle("fallen", victim.race, victim.name, state.villages[victim.v]?.name);
@@ -1002,7 +1143,7 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
         const a = Math.floor(code / 10);
         const b = code % 10;
         const orc = RACES[a].id === "orc" || RACES[b].id === "orc";
-        if (!atWar(a, b) && state.pop[a] >= 6 && state.pop[b] >= 6 && Math.random() < (orc ? 0.3 : 0.12)) declareWar(a, b);
+        if (!atWar(a, b) && !allied(a, b) && state.pop[a] >= 6 && state.pop[b] >= 6 && Math.random() < (orc ? 0.3 : 0.12)) declareWar(a, b);
       }
     }
 
@@ -1057,18 +1198,26 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       c.cd = wp.cd;
       c.face = target.x >= c.x ? 1 : -1;
       c.wait = 6;
+      const isCat = "px" in target;
       if (wp.kind === "sword") {
-        puff(target.x, target.y, "#ffffff", 3, "spark");
-        if (target.hp !== undefined && target.race !== undefined && !("v" in target && !("px" in target))) {
-          /* кот */
-        }
-        if ("px" in target) {
+        // Пять боевых сцен: выпад с ударом, свалка двух мечников, отбрасывание,
+        // залп стрел по дуге и луч бластера со вспышкой. Какая — по оружию и
+        // тому, дерётся ли цель в ответ.
+        const duel = isCat && target.warrior && weaponOf(target).kind === "sword";
+        c.anim = { kind: duel ? "brawl" : "lunge", t: duel ? 14 : 8, dx: c.face, dy: Math.sign(target.y - c.y) };
+        if (duel) target.anim = { kind: "brawl", t: 14, dx: -c.face, dy: 0 };
+        puff(target.x, target.y, "#fff3a3", 3, "spark");
+        if (isCat) {
           target.hp -= 1;
+          target.hit = 5;
+          if (!duel) target.anim = { kind: "knock", t: 8, dx: c.face, dy: 0 };
+          puff(target.x, target.y, "#e0242f", 3, "hit");
           if (target.hp <= 0) killCat(target, c.race);
         } else {
           hitHouse(target, c.race);
         }
       } else {
+        c.anim = { kind: wp.kind === "bow" ? "shoot" : "blast", t: 8, dx: c.face, dy: 0 };
         state.projectiles.push({
           x: c.x * PX + 4,
           y: c.y * PX + 3,
@@ -1093,7 +1242,9 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       if ("px" in tg) {
         if (!state.cats.includes(tg)) continue;
         tg.hp -= 1;
-        puff(tg.x, tg.y, p.kind === "blaster" ? "#7fd4ff" : "#c9402b", 2, "spark");
+        tg.hit = 5;
+        tg.anim = { kind: "knock", t: 6, dx: Math.sign(p.tx - p.x) || 1, dy: 0 };
+        puff(tg.x, tg.y, p.kind === "blaster" ? "#7fd4ff" : "#e0242f", 3, "hit");
         if (tg.hp <= 0) killCat(tg, p.race);
       } else if (state.houses.includes(tg)) {
         hitHouse(tg, p.race);
@@ -1630,6 +1781,10 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
   }
 
   function stepParticles() {
+    for (const c of state.cats) {
+      if (c.anim && --c.anim.t <= 0) c.anim = null;
+      if (c.hit > 0) c.hit -= 1;
+    }
     for (const p of state.particles) {
       p.x += p.vx;
       p.y += p.vy;
@@ -1657,6 +1812,15 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
         rect(ctx, p.color, Math.round(p.x), Math.round(p.y), 1, 1);
         rect(ctx, p.color, Math.round(p.x) + 2, Math.round(p.y), 1, 1);
         rect(ctx, p.color, Math.round(p.x) + 1, Math.round(p.y) + 3, 1, 1);
+      } else if (p.kind === "ghost") {
+        const gx = Math.round(p.x + Math.sin(p.ttl / 5) * 1.5);
+        const gy = Math.round(p.y);
+        ctx.globalAlpha = Math.max(0, p.ttl / p.life) * 0.85;
+        rect(ctx, "#ffffff", gx, gy + 1, 6, 4);
+        rect(ctx, "#ffffff", gx, gy, 1, 1);
+        rect(ctx, "#ffffff", gx + 5, gy, 1, 1);
+        rect(ctx, "#141413", gx + 1, gy + 2, 1, 1);
+        rect(ctx, "#141413", gx + 4, gy + 2, 1, 1);
       } else {
         rect(ctx, p.color, Math.round(p.x), Math.round(p.y), p.kind === "dust" ? 2 : 1, p.kind === "dust" ? 2 : 1);
       }
@@ -1895,9 +2059,20 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     let hop = 0;
     if (left > 0.01) hop = Math.round(3 * Math.sin(Math.PI * (1 - left)));
     else if (c.wait > 0 && c.wait % 45 < 3) hop = 1;
-    const bx = Math.round(c.px * PX) + 1;
-    const by = Math.round(c.py * PX) + 1 - hop;
+    let bx = Math.round(c.px * PX) + 1;
+    let by = Math.round(c.py * PX) + 1 - hop;
     const f = c.face;
+    const an = c.anim;
+    if (an) {
+      // Смещение тела по сцене: выпад вперёд, отброс назад, дрожь в свалке.
+      if (an.kind === "lunge") bx += an.dx * Math.round(3 * Math.sin((Math.PI * an.t) / 8));
+      if (an.kind === "knock") bx += an.dx * Math.round(2 * (an.t / 8));
+      if (an.kind === "brawl") {
+        bx += ((state.tick + c.x) % 2) * 2 - 1;
+        by += (state.tick >> 1) % 2;
+      }
+      if (an.kind === "shoot") bx -= an.dx * (an.t > 4 ? 1 : 0);
+    }
     // Тень, тело 6×4, уши, глаза, хвост. Лицо смотрит туда, куда шёл.
     ctx.globalAlpha = 0.25;
     rect(ctx, "#141413", bx, by + 5 + hop, 6, 1);
@@ -1929,12 +2104,44 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       rect(ctx, "#5b3d22", c.task.x * PX, c.task.y * PX + 4, 1, 3);
       rect(ctx, "#5b3d22", c.task.x * PX + 7, c.task.y * PX + 4, 1, 3);
     }
+    if (an) {
+      const ax = f > 0 ? bx + 7 : bx - 4;
+      if (an.kind === "lunge" && an.t > 2) {
+        // Дуга удара: три пикселя от жёлтого к белому.
+        rect(ctx, "#fff3a3", ax, by, 1, 1);
+        rect(ctx, "#ffffff", ax + (f > 0 ? 1 : -1), by + 1, 1, 2);
+        rect(ctx, "#fff3a3", ax, by + 3, 1, 1);
+      }
+      if (an.kind === "brawl") {
+        // Свалка: облако пыли и звёздочки вокруг.
+        ctx.globalAlpha = 0.6;
+        const ph = state.tick % 4;
+        for (let i = 0; i < 4; i += 1) {
+          const a = ((i + ph / 4) * Math.PI) / 2;
+          rect(ctx, "#c9b48a", Math.round(bx + 3 + Math.cos(a) * 5), Math.round(by + 2 + Math.sin(a) * 3), 2, 2);
+        }
+        ctx.globalAlpha = 1;
+        rect(ctx, "#fff3a3", bx + ((state.tick >> 1) % 6), by - 3, 1, 1);
+        rect(ctx, "#ffffff", bx + 5 - ((state.tick >> 1) % 6), by - 2, 1, 1);
+      }
+      if (an.kind === "blast" && an.t > 5) {
+        rect(ctx, "#7fd4ff", ax, by + 1, 2, 2);
+        rect(ctx, "#ffffff", ax + (f > 0 ? 1 : 0), by + 1, 1, 1);
+      }
+    }
+    if (c.hit > 0) {
+      // Вспышка попадания: тело на кадр краснеет.
+      ctx.globalAlpha = 0.55;
+      rect(ctx, "#ff3b3b", bx, by, 6, 5);
+      ctx.globalAlpha = 1;
+    }
     if (c.warrior) {
       const wp = weaponOf(c);
       const wx = f > 0 ? bx + 6 : bx - 1;
       if (wp.kind === "bow") {
         rect(ctx, "#8a5a2b", wx, by - 1, 1, 6);
-        rect(ctx, "#f4efe2", f > 0 ? wx + 1 : wx - 1, by, 1, 4);
+        const pull = an && an.kind === "shoot" && an.t > 4 ? 2 : 1;
+        rect(ctx, "#f4efe2", f > 0 ? wx + pull : wx - pull, by, 1, 4);
       } else if (wp.kind === "sword") {
         rect(ctx, "#c9d3df", wx, by - 3, 1, 5);
         rect(ctx, "#e0a93b", wx - 1, by + 2, 3, 1);
@@ -2137,6 +2344,7 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
         build();
         breed();
         warTick();
+        allyTick();
         stepProjectiles();
         colonize();
         advanceEras();

@@ -1,6 +1,6 @@
 import { catSvg } from "./cat-art.js";
 import { achievementSvg } from "./achievement-art.js";
-import { createWorld, RACES, TERRAIN_TOOLS, ERAS } from "./world.js";
+import { createWorld, RACES, TERRAIN_TOOLS, ERAS, MAPS, renderPreview } from "./world.js";
 import { icon } from "./icons.js";
 
 const tg = window.Telegram?.WebApp;
@@ -312,6 +312,13 @@ function setupCity(profile) {
   const stage = el("city-stage");
   const wb = document.querySelector(".wb");
   const seed = profile.world?.seed ?? 1;
+  let mapId = "island";
+  try {
+    mapId = localStorage.getItem(`world:map:${seed}`) || "island";
+  } catch {
+    /* ничего */
+  }
+  if (!MAPS.some((m) => m.id === mapId)) mapId = "island";
 
   // Элементы панели — до создания мира: он сразу зовёт колбэки, которые
   // рисуют панель, и константы ниже по коду были бы ещё не объявлены.
@@ -359,11 +366,40 @@ function setupCity(profile) {
   };
   // Подпись у каждой деревни: название и сколько в ней котов, как у
   // поселений в WorldBox. Цвет рамки — народа.
-  const renderVillages = (villages) => {
+  const renderVillages = ({ villages, wars, allies, atWar, capitals }) => {
     labels.replaceChildren();
+    // Мечи между столицами воюющих, рукопожатие — между союзниками.
+    const mid = (r1, r2) => {
+      const c1 = capitals[r1];
+      const c2 = capitals[r2];
+      if (!c1 || !c2) return null;
+      return { x: (c1.x + c2.x) / 2 + 0.5, y: (c1.y + c2.y) / 2 + 0.5 };
+    };
+    for (const w of wars) {
+      const m = mid(w.a, w.b);
+      if (!m) continue;
+      const tag = document.createElement("div");
+      tag.className = "wb-mark wb-mark--war";
+      tag.style.left = `${(m.x / 56) * 100}%`;
+      tag.style.top = `${(m.y / 44) * 100}%`;
+      tag.innerHTML = icon("war", 18);
+      tag.title = `Война: ${RACES[w.a].name} и ${RACES[w.b].name}`;
+      labels.append(tag);
+    }
+    for (const al of allies) {
+      const m = mid(al.a, al.b);
+      if (!m) continue;
+      const tag = document.createElement("div");
+      tag.className = "wb-mark wb-mark--ally";
+      tag.style.left = `${(m.x / 56) * 100}%`;
+      tag.style.top = `${(m.y / 44) * 100}%`;
+      tag.innerHTML = icon("ally", 18);
+      tag.title = `Союз: ${RACES[al.a].name} и ${RACES[al.b].name}`;
+      labels.append(tag);
+    }
     for (const v of villages) {
       const tag = document.createElement("div");
-      tag.className = "wb-label";
+      tag.className = `wb-label${atWar[v.race] ? " wb-label--war" : ""}`;
       tag.style.left = `${((v.x + 0.5) / 56) * 100}%`;
       tag.style.top = `${((v.y - 1.2) / 44) * 100}%`;
       tag.style.setProperty("--race-color", v.zone);
@@ -373,6 +409,7 @@ function setupCity(profile) {
       const pop = document.createElement("b");
       pop.append(text(nf.format(v.pop)));
       tag.append(name, pop);
+      if (atWar[v.race]) tag.insertAdjacentHTML("beforeend", icon("war", 12, "wb-label-war"));
       tag.title = `Основал ${v.founder}. Домов: ${v.houses}`;
       labels.append(tag);
     }
@@ -402,6 +439,7 @@ function setupCity(profile) {
     onRaces: renderRaces,
     onVillages: renderVillages,
     onHud: renderHud,
+    map: mapId,
   });
 
   /* ── Панель ───────────────────────────────────────────────────────────── */
@@ -615,14 +653,47 @@ function setupCity(profile) {
     });
   });
 
+  // Карты: пять миров, у каждого своё сохранение. Миниатюра — настоящая
+  // генерация по тому же сиду, так что что видишь, то и получишь.
+  const mapsRow = el("wb-maps");
+  for (const m of MAPS) {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = `wb-map-card${m.id === mapId ? " wb-map-card--on" : ""}`;
+    card.setAttribute("aria-pressed", String(m.id === mapId));
+    const thumb = document.createElement("canvas");
+    thumb.className = "wb-map-thumb";
+    renderPreview(thumb, seed, m.id);
+    const name = document.createElement("span");
+    name.className = "wb-map-name";
+    name.append(text(m.name));
+    const desc = document.createElement("span");
+    desc.className = "wb-map-desc";
+    desc.append(text(m.desc));
+    card.append(thumb, name, desc);
+    card.addEventListener("click", () => {
+      if (m.id === mapId) return;
+      const go = () => {
+        try {
+          localStorage.setItem(`world:map:${seed}`, m.id);
+        } catch {
+          /* ничего */
+        }
+        location.reload();
+      };
+      ask(`Перейти на карту «${m.name}»? Текущий остров сохранится, вернуться можно в любой момент.`, go);
+    });
+    mapsRow.append(card);
+  }
+  el("hud-name").textContent = `${MAPS.find((m) => m.id === mapId)?.name ?? "Остров"} №${seed % 10000}`;
+
   el("city-reset").insertAdjacentHTML("afterbegin", icon("reset", 18, "wb-inline-icon"));
   el("city-reset").addEventListener("click", () => {
     const go = () => {
       world.reset();
       location.reload();
     };
-    if (tg?.showConfirm) tg.showConfirm("Стереть всё и вырастить остров заново?", (ok) => ok && go());
-    else if (confirm("Стереть всё и вырастить остров заново?")) go();
+    ask("Стереть всё и вырастить остров заново?", go);
   });
 
   setCategory(CATEGORIES[0]);
@@ -639,6 +710,19 @@ function setupCity(profile) {
 
 
 /** «2 д 5 ч», «37 мин» — сколько остров живёт по настоящим часам. */
+/** Спросить «да/нет»: через Telegram, если умеет, иначе обычным confirm. */
+function ask(question, onYes) {
+  try {
+    if (tg?.showConfirm && (!tg.isVersionAtLeast || tg.isVersionAtLeast("6.2"))) {
+      tg.showConfirm(question, (ok) => ok && onYes());
+      return;
+    }
+  } catch {
+    /* падаем на confirm ниже */
+  }
+  if (confirm(question)) onYes();
+}
+
 function aliveText(ms) {
   const m = Math.floor(ms / 60000);
   if (m < 1) return "меньше минуты";
@@ -817,9 +901,13 @@ function formatOwn(value = 0) {
  * невидимо: скопировали в буфер — человек нажал и должен увидеть, что вышло.
  */
 function сообщить(текст) {
-  if (tg?.showPopup) {
-    tg.showPopup({ message: текст });
-    return;
+  try {
+    if (tg?.showPopup && (!tg.isVersionAtLeast || tg.isVersionAtLeast("6.2"))) {
+      tg.showPopup({ message: текст });
+      return;
+    }
+  } catch {
+    /* покажем тост ниже */
   }
   const toast = el("toast");
   toast.textContent = текст;

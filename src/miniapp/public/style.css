@@ -1720,3 +1720,114 @@ h2 {
 .wb-hud-alive {
   font-size: 0.6875rem;
 }
+
+/* ── Карты в настройках и маркеры войны/союза ─────────────────────────── */
+
+.wb-settings-sub {
+  margin-top: 4px;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--wb-muted);
+}
+
+.wb-maps {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+/* Карточка карты: миниатюра-«окно» с внутренней тенью, имя капителью,
+   описание тише. Выбранная горит оранжевым, как активный инструмент. */
+.wb-map-card {
+  display: grid;
+  gap: 4px;
+  padding: 6px;
+  background: #1f1b17;
+  color: var(--wb-ink);
+  border: 1px solid var(--wb-line);
+  border-bottom-width: 3px;
+  border-radius: 10px;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.12s ease;
+}
+
+.wb-map-card:active {
+  transform: translateY(1px);
+}
+
+.wb-map-card--on {
+  background: #4a2f16;
+  border-color: var(--wb-hot);
+  box-shadow: inset 0 0 0 1px var(--wb-hot), 0 0 12px rgb(232 121 47 / 40%);
+}
+
+.wb-map-thumb {
+  width: 100%;
+  aspect-ratio: 56 / 44;
+  border-radius: 6px;
+  image-rendering: pixelated;
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 50%), inset 0 6px 12px rgb(0 0 0 / 35%);
+}
+
+.wb-map-name {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.wb-map-desc {
+  font-size: 0.6875rem;
+  line-height: 1.25;
+  color: var(--wb-muted);
+}
+
+.wb-mark {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgb(23 21 18 / 80%);
+  border: 1px solid #ff4d4d;
+  box-shadow: 0 0 10px rgb(255 77 77 / 55%);
+  animation: mark-pulse 1.2s ease-in-out infinite;
+}
+
+.wb-mark--ally {
+  border-color: #4dff88;
+  box-shadow: 0 0 10px rgb(77 255 136 / 45%);
+  animation: none;
+}
+
+@keyframes mark-pulse {
+  0%,
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+  }
+  50% {
+    transform: translate(-50%, -50%) scale(1.15);
+  }
+}
+
+.wb-label--war {
+  border-color: #ff4d4d;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 50%), 0 0 10px rgb(255 77 77 / 60%);
+}
+
+.wb-label-war {
+  margin-left: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-mark {
+    animation: none;
+  }
+}
