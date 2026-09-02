@@ -221,7 +221,12 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
     era: [0, 0, 0, 0], // эра каждого народа
     ships: [], // { x, y, vx, vy, race, wait } — по воде
     born: Date.now(), // когда остров появился: эры идут по настоящему времени
+    particles: [], // { x, y, vx, vy, ttl, life, color } — сердечки, пыль, искры
+    terr: null, // Uint8Array: чья территория у клетки, 255 — ничья
+    centers: [null, null, null, null], // центр территории народа, для подписи
   };
+  // Настройки игрока: подсветка территорий, подписи, скорость, пауза.
+  const options = { territories: true, labels: true, speed: 1, paused: false };
 
   const idx = (x, y) => y * W + x;
   const inside = (x, y) => x >= 0 && y >= 0 && x < W && y < H;
@@ -392,12 +397,57 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
     onEvent?.(state.chronicle);
   }
 
+  /**
+   * Территории как в WorldBox: земля в четырёх клетках от домов и столицы
+   * народа — его. Спорные клетки достаются тому, чей дом ближе. Считается
+   * заново при каждой смене домов, рисуется полупрозрачной заливкой с
+   * границей в отдельный слой.
+   */
+  function computeTerritory() {
+    const terr = new Uint8Array(W * H).fill(255);
+    const dist = new Float32Array(W * H).fill(Infinity);
+    const seeds = [];
+    for (const h of state.houses) seeds.push({ x: h.x, y: h.y, r: h.race });
+    for (const home of state.homes) if (home) seeds.push({ x: home.x, y: home.y, r: home.race });
+    const R = 4;
+    for (const sd of seeds) {
+      for (let dy = -R; dy <= R; dy += 1) {
+        for (let dx = -R; dx <= R; dx += 1) {
+          const x = sd.x + dx;
+          const y = sd.y + dy;
+          if (!inside(x, y)) continue;
+          const t = state.tiles[idx(x, y)];
+          if (t <= T.WATER) continue;
+          const d = dx * dx + dy * dy;
+          if (d > R * R + 2) continue;
+          const i = idx(x, y);
+          if (d < dist[i]) {
+            dist[i] = d;
+            terr[i] = sd.r;
+          }
+        }
+      }
+    }
+    state.terr = terr;
+    const sums = RACES.map(() => ({ x: 0, y: 0, n: 0 }));
+    for (let i = 0; i < W * H; i += 1) {
+      const r = terr[i];
+      if (r === 255) continue;
+      sums[r].x += i % W;
+      sums[r].y += (i / W) | 0;
+      sums[r].n += 1;
+    }
+    state.centers = sums.map((a) => (a.n ? { x: a.x / a.n + 0.5, y: a.y / a.n + 0.5, area: a.n } : null));
+    bakeOverlay();
+  }
+
   function countPop() {
     const pop = [0, 0, 0, 0];
     const houses = [0, 0, 0, 0];
     for (const c of state.cats) pop[c.race] += 1;
     for (const h of state.houses) houses[h.race] += 1;
     state.pop = pop;
+    computeTerritory();
     onRaces?.(
       RACES.map((race, r) => ({
         ...race,
@@ -407,6 +457,7 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
         eraName: ERAS[state.era[r]].name,
         ships: state.ships.filter((sh) => sh.race === r).length,
         mood: mood(r, pop[r], houses[r]),
+        center: state.centers[r],
       })),
     );
     hud();
@@ -423,7 +474,17 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
 
   function hud() {
     const era = Math.max(...state.era);
-    onHud?.({ pop: state.cats.length, day: state.day, night: nightAlpha() > 0.2, trees: state.trees.size, houses: state.houses.length, era, eraName: ERAS[era].name });
+    onHud?.({
+      pop: state.cats.length,
+      day: state.day,
+      night: nightAlpha() > 0.2,
+      trees: state.trees.size,
+      houses: state.houses.length,
+      era,
+      eraName: ERAS[era].name,
+      alive: Date.now() - state.born,
+      paused: options.paused,
+    });
   }
 
   /* ── Симуляция ────────────────────────────────────────────────────────── */
@@ -505,6 +566,7 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
     state.houses.push({ x: t.x, y: t.y, race: c.race });
     state.trees.delete(idx(t.x, t.y));
     state.flowers.delete(idx(t.x, t.y));
+    puff(t.x, t.y, "#c9b48a", 8, "dust");
     chronicle("built", c.race);
     bakeArea(t.x - 1, t.y - 2, t.x + 1, t.y + 1);
     // Строитель отходит от свежего дома, а не стоит в дверях.
@@ -566,6 +628,8 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
     const houses = state.houses.filter((h) => h.race === r).length;
     if (state.pop[r] >= houses * 4 + 1) return;
     if (spawnCat(r, state.homes[r])) {
+      const kitten = state.cats[state.cats.length - 1];
+      puff(kitten.x, kitten.y, "#ff6f91", 5, "heart");
       chronicle("born", r);
       countPop();
       persist();
@@ -635,6 +699,7 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
           }
         }
         const near = state.homes.find((h) => h && Math.abs(h.x - m.x) < 8 && Math.abs(h.y - m.y) < 6);
+        puff(m.x, m.y, "#ffb347", 16, "spark");
         chronicle("meteor", near ? near.race : null);
         bakeArea(m.x - 2, m.y - 2, m.x + 2, m.y + 2);
         countPop();
@@ -846,12 +911,17 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
     if (!inside(x, y)) return;
     switch (tool.kind) {
       case "terrain": {
+        let touched = false;
         brush(x, y, size, (cx, cy, i) => {
           if (state.tiles[i] === tool.t) return;
           state.tiles[i] = tool.t;
           settle(cx, cy);
           mark(cx, cy);
+          touched = true;
         });
+        // Печём сразу: человек ведёт пальцем и должен видеть след кисти, а не
+        // ждать, пока отпустит.
+        if (touched) bakeArea(x - size - 1, y - size - 2, x + size + 1, y + size + 1);
         stroke.kind = tool.t <= T.WATER ? "water" : tool.t >= T.MOUNTAIN ? "stone" : "land";
         break;
       }
@@ -866,6 +936,7 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
           state.flowers.delete(i);
           mark(cx, cy);
         });
+        bakeArea(x - size - 1, y - size - 2, x + size + 1, y + size + 1);
         stroke.kind = "tree";
         break;
       }
@@ -875,6 +946,7 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
           state.flowers.add(i);
           mark(cx, cy);
         });
+        bakeArea(x - size - 1, y - size - 1, x + size + 1, y + size + 1);
         stroke.kind = "flowers";
         break;
       }
@@ -886,6 +958,7 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
           state.houses = state.houses.filter((h) => !(h.x === cx && h.y === cy));
           if (before !== state.houses.length) mark(cx, cy);
         });
+        bakeArea(x - size - 1, y - size - 2, x + size + 1, y + size + 1);
         break;
       }
       case "cat": {
@@ -914,6 +987,7 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
         state.trees.delete(idx(x, y));
         state.flowers.delete(idx(x, y));
         mark(x, y);
+        bakeArea(x - 1, y - 2, x + 1, y + 1);
         stroke.kind = "house";
         stroke.race = tool.race;
         break;
@@ -1027,6 +1101,107 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
   terrain.width = canvas.width;
   terrain.height = canvas.height;
   const tctx = terrain.getContext("2d");
+
+  // Слой территорий: полупрозрачная заливка цветом народа и граница там, где
+  // сосед — другой народ или ничья земля. Печётся при смене домов.
+  const overlay = document.createElement("canvas");
+  overlay.width = canvas.width;
+  overlay.height = canvas.height;
+  const octx = overlay.getContext("2d");
+
+  function bakeOverlay() {
+    octx.clearRect(0, 0, overlay.width, overlay.height);
+    const terr = state.terr;
+    if (!terr) return;
+    for (let y = 0; y < H; y += 1) {
+      for (let x = 0; x < W; x += 1) {
+        const r = terr[idx(x, y)];
+        if (r === 255) continue;
+        const race = RACES[r];
+        const color = race.id === "elf" ? race.hat : race.banner;
+        octx.globalAlpha = 0.16;
+        octx.fillStyle = color;
+        octx.fillRect(x * PX, y * PX, PX, PX);
+        octx.globalAlpha = 0.85;
+        const other = (nx, ny) => !inside(nx, ny) || terr[idx(nx, ny)] !== r;
+        if (other(x, y - 1)) octx.fillRect(x * PX, y * PX, PX, 1);
+        if (other(x, y + 1)) octx.fillRect(x * PX, y * PX + PX - 1, PX, 1);
+        if (other(x - 1, y)) octx.fillRect(x * PX, y * PX, 1, PX);
+        if (other(x + 1, y)) octx.fillRect(x * PX + PX - 1, y * PX, 1, PX);
+      }
+    }
+    octx.globalAlpha = 1;
+  }
+
+  /** Частицы: короткие, дешёвые, ради ощущения жизни. */
+  function puff(x, y, color, n, kind) {
+    for (let i = 0; i < n; i += 1) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = kind === "spark" ? 0.6 + Math.random() * 1.2 : 0.15 + Math.random() * 0.35;
+      state.particles.push({
+        x: x * PX + 4,
+        y: y * PX + 4,
+        vx: Math.cos(a) * sp,
+        vy: kind === "heart" ? -0.3 - Math.random() * 0.3 : Math.sin(a) * sp - (kind === "dust" ? 0.2 : 0),
+        ttl: kind === "heart" ? 40 : kind === "spark" ? 24 : 30,
+        life: kind === "heart" ? 40 : kind === "spark" ? 24 : 30,
+        color,
+        kind,
+      });
+    }
+  }
+
+  function stepParticles() {
+    for (const p of state.particles) {
+      p.x += p.vx;
+      p.y += p.vy;
+      if (p.kind === "spark") p.vy += 0.08;
+      if (p.kind === "dust") p.vx *= 0.92;
+      p.ttl -= 1;
+    }
+    state.particles = state.particles.filter((p) => p.ttl > 0);
+    // Дым из труб: у домов изредка вылетает клуб. Только в эрах до будущего —
+    // башни не коптят.
+    if (state.tick % 20 === 0 && state.houses.length) {
+      const h = state.houses[Math.floor(Math.random() * state.houses.length)];
+      const era = state.era[h.race] || 0;
+      if (era < 2 && Math.random() < 0.5) {
+        state.smokes.push({ x: h.x, y: h.y - (era === 1 ? 1 : 0), ttl: 60 });
+      }
+    }
+  }
+
+  function drawParticles() {
+    for (const p of state.particles) {
+      ctx.globalAlpha = Math.max(0, p.ttl / p.life);
+      if (p.kind === "heart") {
+        rect(ctx, p.color, Math.round(p.x), Math.round(p.y) + 1, 3, 2);
+        rect(ctx, p.color, Math.round(p.x), Math.round(p.y), 1, 1);
+        rect(ctx, p.color, Math.round(p.x) + 2, Math.round(p.y), 1, 1);
+        rect(ctx, p.color, Math.round(p.x) + 1, Math.round(p.y) + 3, 1, 1);
+      } else {
+        rect(ctx, p.color, Math.round(p.x), Math.round(p.y), p.kind === "dust" ? 2 : 1, p.kind === "dust" ? 2 : 1);
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /** Вода живая: блики бегут по волнам. Клетки воды известны после запекания. */
+  let waterCells = [];
+  function drawWater() {
+    const t = state.tick;
+    ctx.fillStyle = "#8fc9e6";
+    for (let i = 0; i < waterCells.length; i += 1) {
+      const cell = waterCells[i];
+      // Каждая клетка мерцает в своей фазе; в кадре светится примерно каждая шестая.
+      const phase = (t + cell * 7) % 90;
+      if (phase > 12) continue;
+      const x = cell % W;
+      const y = (cell / W) | 0;
+      const off = phase >> 2;
+      ctx.fillRect(x * PX + 1 + off, y * PX + 3 + (cell % 3), 2, 1);
+    }
+  }
 
   const shadeRand = rng(seed + 99);
   const shadeMap = new Uint8Array(W * H);
@@ -1172,6 +1347,7 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
     rect(g, "#3b2f2a", bx + 3, by - 6, 1, 8);
     rect(g, race.banner, bx + 4, by - 6, 4, 3);
     rect(g, "#141413", bx + 5, by - 5, 1, 1);
+    rect(g, "#e0a93b", bx + 2, by - 7, 3, 1);
   }
 
   function bakeCell(x, y) {
@@ -1217,6 +1393,7 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
         if (state.trees.has(i)) drawTree(tctx, x, y);
       }
     }
+    refreshWater();
     const inArea = state.houses.filter((h) => h.x >= ax && h.x <= bx && h.y >= ay && h.y <= by + 2);
     inArea.sort((a, b) => a.y - b.y);
     for (const h of inArea) drawHouse(tctx, h);
@@ -1225,6 +1402,11 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
 
   function bakeAll() {
     bakeArea(0, 0, W - 1, H - 1);
+  }
+
+  function refreshWater() {
+    waterCells = [];
+    for (let i = 0; i < W * H; i += 1) if (state.tiles[i] <= T.WATER) waterCells.push(i);
   }
 
   function drawCat(c) {
@@ -1248,10 +1430,18 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
     rect(ctx, race.dark, bx + 1, by + 4, 1, 1);
     rect(ctx, race.dark, bx + 4, by + 4, 1, 1);
     const eyeL = f > 0 ? bx + 2 : bx + 1;
-    rect(ctx, "#141413", eyeL, by + 2, 1, 1);
-    rect(ctx, "#141413", eyeL + 2, by + 2, 1, 1);
+    // Моргание: раз в несколько секунд на пару кадров глаза — полоски.
+    const blink = (state.tick + c.x * 13 + c.y * 7) % 140 < 4;
+    if (!blink) {
+      rect(ctx, "#141413", eyeL, by + 2, 1, 1);
+      rect(ctx, "#141413", eyeL + 2, by + 2, 1, 1);
+    } else {
+      rect(ctx, race.dark, eyeL, by + 2, 3, 1);
+    }
     rect(ctx, "#e37f6a", f > 0 ? bx + 3 : bx + 2, by + 3, 1, 1); // нос
-    rect(ctx, race.dark, f > 0 ? bx - 1 : bx + 6, by + 2, 1, 2); // хвост
+    // Хвост машет: две фазы, у каждого кота своя.
+    const wag = ((state.tick >> 3) + c.x) % 2;
+    rect(ctx, race.dark, f > 0 ? bx - 1 : bx + 6, by + 1 + wag, 1, 2);
     if (c.task && c.x === c.task.x && c.y === c.task.y) {
       // Строит: молоток машет, под котом каркас будущего дома.
       const swing = (state.tick >> 2) % 2;
@@ -1377,6 +1567,15 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
   let cursor = null; // { x, y, size } — подсветка кисти под пальцем
   function frame() {
     ctx.drawImage(terrain, 0, 0);
+    drawWater();
+    if (options.territories) ctx.drawImage(overlay, 0, 0);
+    // Флаги столиц машут поверх запечённых: два кадра полотнища.
+    for (const home of state.homes) {
+      if (!home) continue;
+      const race = RACES[home.race];
+      const fl = (state.tick >> 3) % 2;
+      rect(ctx, race.banner, home.x * PX + 4, home.y * PX - 6 + fl, 4, 3);
+    }
     for (const s of state.smokes) drawSmoke(s);
     // Коты по y: нижние поверх верхних, как в любой изометрии.
     for (const sh of state.ships) drawShip(sh);
@@ -1385,6 +1584,7 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
     for (const f of state.fires) drawFire(f);
     for (const b of state.bolts) drawBolt(b);
     for (const m of state.meteors) drawMeteor(m);
+    drawParticles();
     const night = nightAlpha();
     if (night > 0.01) {
       ctx.fillStyle = `rgba(16, 20, 48, ${night})`;
@@ -1417,22 +1617,27 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
     if (!running) return;
     if (now - last >= STEP) {
       last = now;
-      state.tick += 1;
-      moveCats();
-      sailShips();
-      burn();
-      fallMeteors();
-      build();
-      breed();
-      advanceEras();
-      ambient();
+      const steps = options.paused ? 0 : options.speed;
+      for (let i = 0; i < steps; i += 1) {
+        state.tick += 1;
+        moveCats();
+        sailShips();
+        burn();
+        fallMeteors();
+        build();
+        breed();
+        advanceEras();
+        ambient();
+        stepParticles();
+      }
       frame();
-      if (state.tick % 90 === 0) hud();
+      if (state.tick % 90 === 0 || options.paused) hud();
     }
     raf = requestAnimationFrame(loop);
   }
 
   bakeAll();
+  refreshWater();
   countPop();
   onEvent?.(state.chronicle);
   frame();
@@ -1457,6 +1662,14 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
     },
     apply,
     endStroke,
+    setOption(name, value) {
+      options[name] = value;
+      if (!running) frame();
+      hud();
+    },
+    get options() {
+      return { ...options };
+    },
     setCursor(c) {
       cursor = c;
       if (!running) frame();

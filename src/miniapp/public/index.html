@@ -41,11 +41,15 @@
             <span class="wb-hud-item" id="hud-name"></span>
             <span class="wb-hud-item" id="hud-pop"></span>
             <span class="wb-hud-item" id="hud-day"></span>
+            <span class="wb-hud-item wb-hud-alive" id="hud-alive"></span>
+            <button class="wb-gear" id="wb-gear" type="button" aria-label="Настройки" aria-expanded="false"></button>
           </div>
 
           <div class="wb-viewport" id="city-viewport">
             <div class="wb-stage" id="city-stage">
               <canvas class="wb-map" id="city-map" aria-label="Карта континента четырёх кошачьих народов. Проведи пальцем, чтобы применить выбранный инструмент."></canvas>
+              <!-- Подписи территорий: имя народа и численность, поверх карты. -->
+              <div class="wb-labels" id="city-labels" aria-hidden="true"></div>
             </div>
           </div>
           <div class="wb-era" id="hud-era" aria-live="polite" aria-label="Эра"></div>
@@ -53,6 +57,25 @@
             <button class="wb-zoom-btn" id="zoom-out" type="button" aria-label="Отдалить">−</button>
             <span class="wb-zoom-label" id="zoom-label">1×</span>
             <button class="wb-zoom-btn" id="zoom-in" type="button" aria-label="Приблизить">+</button>
+          </div>
+
+          <!-- Настройки: поверх карты, как меню в WorldBox. -->
+          <div class="wb-settings" id="wb-settings" role="dialog" aria-label="Настройки острова" hidden>
+            <div class="wb-settings-head">
+              <span>Настройки</span>
+              <button class="wb-settings-close" id="set-close" type="button" aria-label="Закрыть">×</button>
+            </div>
+            <p class="wb-settings-alive" id="set-alive"></p>
+            <label class="wb-switch"><input type="checkbox" id="set-territories" /> <span>Подсвечивать территории</span></label>
+            <label class="wb-switch"><input type="checkbox" id="set-labels" /> <span>Подписи народов на карте</span></label>
+            <label class="wb-switch"><input type="checkbox" id="set-paused" /> <span>Пауза</span></label>
+            <div class="wb-speed" role="group" aria-label="Скорость">
+              <span>Скорость</span>
+              <button type="button" data-speed="1" aria-pressed="true">1×</button>
+              <button type="button" data-speed="2" aria-pressed="false">2×</button>
+              <button type="button" data-speed="4" aria-pressed="false">4×</button>
+            </div>
+            <button class="button button--ghost wb-settings-reset" id="city-reset" type="button">Начать остров заново</button>
           </div>
 
           <div class="wb-panel">
@@ -65,9 +88,6 @@
 
         <h2 class="city-h2">Летопись</h2>
         <ol class="chronicle" id="chronicle" role="list"></ol>
-        <p class="city-reset-row">
-          <button class="button button--ghost" id="city-reset" type="button">Начать остров заново</button>
-        </p>
       </section>
 
       <!--

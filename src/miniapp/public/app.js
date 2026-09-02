@@ -351,14 +351,35 @@ function setupCity(profile) {
 
   // Численность народов держим при себе и показываем прямо в кнопках выбора
   // народа: отдельные карточки внизу дублировали панель.
+  const labels = el("city-labels");
   const renderRaces = (races) => {
     ui.pops = races.map((r) => r.pop);
     if (ui.category.sub === "race") renderSub();
+    // Подпись на территории: имя народа и сколько котов, как у королевств в
+    // WorldBox. Пустые территории без подписи.
+    labels.replaceChildren();
+    for (const race of races) {
+      if (!race.center || race.pop === 0) continue;
+      const tag = document.createElement("div");
+      tag.className = "wb-label";
+      tag.style.left = `${(race.center.x / 56) * 100}%`;
+      tag.style.top = `${(race.center.y / 44) * 100}%`;
+      tag.style.setProperty("--race-color", race.id === "elf" ? race.hat : race.banner);
+      tag.insertAdjacentHTML("afterbegin", icon(`race-${race.id}`, 14, "wb-label-icon"));
+      const name = document.createElement("span");
+      name.append(text(race.name.replace("-коты", "")));
+      const pop = document.createElement("b");
+      pop.append(text(nf.format(race.pop)));
+      tag.append(name, pop);
+      labels.append(tag);
+    }
   };
 
-  const renderHud = ({ pop, day, night, era, eraName }) => {
+  const renderHud = ({ pop, day, night, era, eraName, alive, paused }) => {
     el("hud-pop").innerHTML = `${icon("cat", 16, "wb-hud-icon")} ${nf.format(pop)}`;
-    el("hud-day").textContent = `${night ? "Ночь" : "День"} ${day}`;
+    el("hud-day").textContent = `${paused ? "Пауза · " : ""}${night ? "Ночь" : "День"} ${day}`;
+    el("hud-alive").textContent = `Живёт ${aliveText(alive)}`;
+    el("set-alive").textContent = `Остров живёт ${aliveText(alive)} — с ${new Date(Date.now() - alive).toLocaleDateString("ru-RU")}.`;
     // Плашка эры слева на карте: римская цифра и название.
     const plaque = el("hud-era");
     plaque.innerHTML = `${icon("era", 14, "wb-era-icon")}<span class="wb-era-num">${["I", "II", "III"][era] ?? era + 1}</span><span class="wb-era-name">${eraName}</span>`;
@@ -560,6 +581,36 @@ function setupCity(profile) {
   el("zoom-in").addEventListener("click", () => setZoom(ui.zoom + 1));
   el("zoom-out").addEventListener("click", () => setZoom(ui.zoom - 1));
 
+  const settings = el("wb-settings");
+  const gear = el("wb-gear");
+  const openSettings = (on) => {
+    settings.hidden = !on;
+    gear.setAttribute("aria-expanded", String(on));
+    tg?.HapticFeedback?.selectionChanged?.();
+  };
+  gear.insertAdjacentHTML("afterbegin", icon("gear", 20, "wb-gear-icon"));
+  gear.addEventListener("click", () => openSettings(settings.hidden));
+  el("set-close").addEventListener("click", () => openSettings(false));
+
+  const bindToggle = (id, name) => {
+    const box = el(id);
+    box.checked = Boolean(world.options[name]);
+    box.addEventListener("change", () => world.setOption(name, box.checked));
+  };
+  bindToggle("set-territories", "territories");
+  bindToggle("set-labels", "labels");
+  bindToggle("set-paused", "paused");
+  el("set-labels").addEventListener("change", () => {
+    labels.hidden = !el("set-labels").checked;
+  });
+  document.querySelectorAll("[data-speed]").forEach((b) => {
+    b.addEventListener("click", () => {
+      const speed = Number(b.dataset.speed);
+      world.setOption("speed", speed);
+      document.querySelectorAll("[data-speed]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    });
+  });
+
   el("city-reset").insertAdjacentHTML("afterbegin", icon("reset", 18, "wb-inline-icon"));
   el("city-reset").addEventListener("click", () => {
     const go = () => {
@@ -578,6 +629,17 @@ function setupCity(profile) {
   if (world.population === 0) hint.textContent = "Остров пуст. Выбери народ и проведи пальцем по суше — там поселятся первые коты. Дома они построят сами.";
 }
 
+
+/** «2 д 5 ч», «37 мин» — сколько остров живёт по настоящим часам. */
+function aliveText(ms) {
+  const m = Math.floor(ms / 60000);
+  if (m < 1) return "меньше минуты";
+  if (m < 60) return `${m} мин`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} ч ${m % 60} мин`;
+  const d = Math.floor(h / 24);
+  return `${d} д ${h % 24} ч`;
+}
 
 function plural(n) {
   const m10 = n % 10;

@@ -1544,3 +1544,168 @@ h2 {
   flex: 0 0 auto;
   filter: drop-shadow(0 1px 0 rgb(0 0 0 / 60%));
 }
+
+/* ── Настройки, подписи территорий, таймер ─────────────────────────────── */
+
+.wb-hud {
+  align-items: center;
+}
+
+.wb-hud-alive {
+  color: var(--wb-muted);
+  font-weight: 600;
+}
+
+.wb-gear {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  margin: -4px -6px -4px 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wb-gear[aria-expanded="true"] {
+  background: #4a2f16;
+  border-color: var(--wb-hot);
+}
+
+.wb-settings {
+  position: absolute;
+  right: 12px;
+  top: 46px;
+  z-index: 3;
+  width: min(300px, calc(100% - 24px));
+  padding: 12px 14px 14px;
+  background: rgb(23 21 18 / 96%);
+  color: var(--wb-ink);
+  border: 1px solid var(--wb-brass);
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 1px #3a2818, 0 12px 30px rgb(0 0 0 / 55%);
+  display: grid;
+  gap: 10px;
+  font-size: 0.875rem;
+}
+
+.wb-settings-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.75rem;
+  color: var(--wb-muted);
+}
+
+.wb-settings-close {
+  width: 30px;
+  height: 30px;
+  background: transparent;
+  color: var(--wb-ink);
+  border: 1px solid var(--wb-line);
+  border-radius: 999px;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.wb-settings-alive {
+  margin: 0;
+  color: var(--wb-muted);
+  font-size: 0.8125rem;
+}
+
+.wb-switch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+  cursor: pointer;
+}
+
+.wb-switch input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--wb-hot);
+}
+
+.wb-speed {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.wb-speed span {
+  flex: 1;
+}
+
+.wb-speed button {
+  min-width: 42px;
+  min-height: 32px;
+  background: #1f1b17;
+  color: var(--wb-ink);
+  border: 1px solid var(--wb-line);
+  border-radius: 8px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.wb-speed button[aria-pressed="true"] {
+  background: var(--wb-hot);
+  color: #1a120a;
+  border-color: var(--wb-hot);
+}
+
+.wb-settings-reset {
+  margin-top: 4px;
+  color: #ff9b7a;
+  border-color: #7a3a2a;
+}
+
+.wb-labels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* Подпись королевства: имя и число, с чёрной обводкой — читается и на снегу,
+   и на лесу. Позиция в процентах — не разъезжается при зуме. */
+.wb-label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px 2px 5px;
+  background: rgb(23 21 18 / 72%);
+  color: #fff;
+  border: 1px solid var(--race-color, #fff);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  text-shadow: 0 1px 0 #000;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 50%), 0 0 10px rgb(0 0 0 / 40%);
+}
+
+.wb-label b {
+  color: var(--race-color, #fff);
+  font-variant-numeric: tabular-nums;
+}
+
+.wb-label-icon {
+  flex: 0 0 auto;
+}
+
+/* hidden должен побеждать display: grid, иначе панель невидимо перекрывает кнопки. */
+.wb-settings[hidden] {
+  display: none;
+}
