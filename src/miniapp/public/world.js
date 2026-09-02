@@ -197,7 +197,37 @@ function buildTerrain(seed) {
 /* ── Мир ────────────────────────────────────────────────────────────────── */
 
 const DAY_TICKS = 30 * 180; // сутки — три минуты
-const SAVE_VERSION = 5;
+const SAVE_VERSION = 6;
+
+/* ── Имена ───────────────────────────────────────────────────────────────
+   У каждого кота своё имя, у каждой деревни — название от основателя, как
+   у королевств в WorldBox. Слоги у народов разные: люди звучат по-домашнему,
+   эльфы певуче, орки рыкают, гномы стучат. */
+const SYLLABLES = {
+  human: ["мур", "бар", "вас", "тим", "мяу", "пуш", "сём", "фил", "ры", "жик", "кот", "мо", "ло", "ти", "ня", "сик"],
+  elf: ["эль", "ли", "ара", "ниэ", "тал", "сэ", "ло", "ри", "вэ", "ан", "иль", "фэ", "ми", "лэн", "ая", "ор"],
+  orc: ["гр", "рох", "ург", "заг", "мор", "кх", "дар", "гор", "рык", "шаг", "ог", "рум", "бар", "тук", "ур", "дрг"],
+  gnome: ["дур", "бол", "кам", "тор", "гим", "фар", "нор", "бром", "дин", "гро", "ин", "ок", "лун", "торн", "ир", "бек"],
+};
+const SUFFIX = {
+  human: ["град", "овка", "поль", "ово", "ск", "ино"],
+  elf: ["лесье", "дол", "ирэль", "лориэн", "тэль", "иэн"],
+  orc: ["рог", "грох", "-камень", "дуум", "рык", "мор"],
+  gnome: ["горн", "шахт", "дум", "форт", "камень", "хол"],
+};
+function catName(raceId, rnd = Math.random) {
+  const syl = SYLLABLES[raceId];
+  const n = 2 + (rnd() < 0.3 ? 1 : 0);
+  let name = "";
+  for (let i = 0; i < n; i += 1) name += syl[Math.floor(rnd() * syl.length)];
+  return name.charAt(0).toUpperCase() + name.slice(1);
+}
+function villageName(raceId, founder, rnd = Math.random) {
+  const suf = SUFFIX[raceId];
+  const root = founder.replace(/[аяуюоеиыэё]+$/i, "");
+  const tail = suf[Math.floor(rnd() * suf.length)];
+  return tail.startsWith("-") ? `${founder}${tail}` : `${root}${tail}`;
+}
 const DAY_MS = 180_000; // игровые сутки в настоящих миллисекундах
 
 /**
@@ -212,7 +242,7 @@ export const ERAS = [
   { id: "future", name: "Будущее", days: 6, houses: 12 },
 ];
 
-export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
+export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVillages }) {
   const rand = rng(seed * 7 + 13);
   const storeKey = `world:v${SAVE_VERSION}:${seed}`;
 
@@ -275,7 +305,7 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
     // px/py — где кот нарисован; x/y — клетка, куда идёт. Между ними кот
     // плавно доезжает, и движение видно, а не мигает по клеткам. task —
     // дело, ради которого он остановится (стройка); без дела кот бродит.
-    return { x, y, px: x, py: y, race: r, v, tx: x, ty: y, wait: Math.floor(Math.random() * 8), step: Math.random(), face: 1, gait: 0, task: null, warrior: false, hp: 3, cd: 0 };
+    return { x, y, px: x, py: y, race: r, v, name: catName(RACES[r].id), tx: x, ty: y, wait: Math.floor(Math.random() * 8), step: Math.random(), face: 1, gait: 0, task: null, warrior: false, hp: 3, cd: 0 };
   }
 
   /** Деревня кота; без деревни — он сам себе дом. */
@@ -297,8 +327,9 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
     return best;
   }
 
-  function foundVillage(r, x, y) {
-    state.villages.push({ race: r, x, y });
+  function foundVillage(r, x, y, founder = null) {
+    const who = founder || catName(RACES[r].id);
+    state.villages.push({ race: r, x, y, name: villageName(RACES[r].id, who), founder: who });
     if (!state.homes[r]) state.homes[r] = state.villages[state.villages.length - 1];
     return state.villages.length - 1;
   }
@@ -379,7 +410,7 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
             villages: state.villages,
             relations: state.relations,
             wars: state.wars,
-            cats: state.cats.map((c) => [c.x, c.y, c.race, c.v, c.warrior ? 1 : 0, c.hp]),
+            cats: state.cats.map((c) => [c.x, c.y, c.race, c.v, c.warrior ? 1 : 0, c.hp, c.name]),
             savedAt: Date.now(),
             day: state.day,
             era: state.era,
@@ -406,12 +437,19 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
       state.villages = Array.isArray(saved.villages) ? saved.villages : [];
       state.relations = Array.isArray(saved.relations) && saved.relations.length === 4 ? saved.relations : RACES.map(() => RACES.map(() => "peace"));
       state.wars = Array.isArray(saved.wars) ? saved.wars : [];
-      state.cats = (saved.cats || []).map(([x, y, r, v = 0, w = 0, hp = 3]) => {
+      state.cats = (saved.cats || []).map(([x, y, r, v = 0, w = 0, hp = 3, name = null]) => {
         const c = newCat(x, y, r, v);
         c.warrior = Boolean(w);
         c.hp = hp;
+        if (name) c.name = name;
         return c;
       });
+      for (const v of state.villages) {
+        if (!v.name) {
+          v.founder = v.founder || catName(RACES[v.race].id);
+          v.name = villageName(RACES[v.race].id, v.founder);
+        }
+      }
       state.savedAt = saved.savedAt || Date.now();
       state.day = saved.day || 1;
       state.era = Array.isArray(saved.era) && saved.era.length === 4 ? saved.era : [0, 0, 0, 0];
@@ -500,14 +538,14 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
   /* ── Летопись ─────────────────────────────────────────────────────────── */
 
   const lines = {
-    born: (r) => `У ${RACES[r].plural} родился котёнок.`,
-    settle: (r) => `${RACES[r].name} основали поселение.`,
-    colony: (r) => `${RACES[r].name} основали новую деревню.`,
+    born: (r, name, village) => (name ? `В ${village || "деревне"} у ${RACES[r].plural} родился котёнок ${name}.` : `У ${RACES[r].plural} родился котёнок.`),
+    settle: (r, founder, village) => (founder ? `${founder} из ${RACES[r].plural} основал поселение ${village}.` : `${RACES[r].name} основали поселение.`),
+    colony: (r, founder, village) => (founder ? `${founder} увёл ${RACES[r].plural} на новое место: деревня ${village}.` : `${RACES[r].name} основали новую деревню.`),
     away: (b, h) => `Пока тебя не было: родилось ${b} кот${plural(b)}, построено ${h} дом${plural(h)}.`,
     war: (a, b) => `⚔ ${RACES[a].name} объявили войну ${RACES[b].dat}!`,
     peace: (a, b, ka, kb) => `Мир между ${RACES[a].instr} и ${RACES[b].instr}. Потери: ${ka} и ${kb}.`,
     arson: (a, b) => `${RACES[a].name} подожгли дом ${RACES[b].plural}.`,
-    fallen: (r) => `Пал воин ${RACES[r].plural}.`,
+    fallen: (r, name, village) => `Пал воин ${name || ""} ${RACES[r].plural}${village ? ` из ${village}` : ""}.`.replace("  ", " "),
     built: (r) => `${RACES[r].name} построили себе дом.`,
     grow: (n) => `Пока тебя не было, родилось ${n} кот${plural(n)} — остров растёт от твоей работы.`,
     spawn: (n, r) => `Бог призвал ${n} ${RACES[r].plural}.`,
@@ -521,7 +559,7 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
     bolt: () => "Молния ударила с ясного неба.",
     meteor: (r) => (r == null ? "С неба упал метеорит." : `Метеорит упал рядом с деревней ${RACES[r].plural}.`),
     drown: (n) => `${n} кот${plural(n)} уплыл${n === 1 ? "" : "и"} на плотах: их землю затопило.`,
-    trade: (a, b) => `${RACES[a].name} торгуют с ${RACES[b].plural}.`,
+    trade: (a, b) => `${RACES[a].name} торгуют с ${RACES[b].instr}.`,
     festival: (r) => `У ${RACES[r].plural} праздник урожая.`,
     fishing: () => "Люди-коты вышли в море на рыбалку.",
     forge: () => "В горах гномов-котов стучит кузня.",
@@ -614,6 +652,18 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
         ships: state.ships.filter((sh) => sh.race === r).length,
         mood: mood(r, pop[r], houses[r]),
         center: state.centers[r],
+      })),
+    );
+    onVillages?.(
+      state.villages.map((v, i) => ({
+        name: v.name,
+        founder: v.founder,
+        race: v.race,
+        zone: RACES[v.race].zone,
+        x: v.x,
+        y: v.y,
+        pop: state.cats.filter((c) => c.v === i).length,
+        houses: state.houses.filter((h) => h.v === i).length,
       })),
     );
     hud();
@@ -803,7 +853,7 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
     if (spawnCat(r, vs[Math.floor(Math.random() * vs.length)])) {
       const kitten = state.cats[state.cats.length - 1];
       puff(kitten.x, kitten.y, "#ff6f91", 5, "heart");
-      chronicle("born", r);
+      chronicle("born", r, kitten.name, state.villages[kitten.v]?.name);
       countPop();
       persist();
     }
@@ -832,14 +882,15 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
       if (!inside(x, y) || !race.canStand(tileAt(x, y))) continue;
       if (state.villages.some((v) => Math.max(Math.abs(v.x - x), Math.abs(v.y - y)) < 6)) continue;
       if (state.terr && state.terr[idx(x, y)] !== 255 && state.terr[idx(x, y)] !== r) continue;
-      const nv = foundVillage(r, x, y);
+      const leader = mine[0];
+      const nv = foundVillage(r, x, y, leader.name);
       for (const c of mine.slice(0, 3)) {
         c.v = nv;
         c.tx = x;
         c.ty = y;
         c.wait = 0;
       }
-      chronicle("colony", r);
+      chronicle("colony", r, leader.name, state.villages[nv].name);
       bakeArea(x - 1, y - 2, x + 1, y + 1);
       countPop();
       persist();
@@ -911,7 +962,7 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
     puff(victim.x, victim.y, "#d9d3c4", 6, "dust");
     const w = state.wars.find((o) => (o.a === victim.race && o.b === byRace) || (o.b === victim.race && o.a === byRace));
     if (w) w.kills[victim.race === w.a ? 0 : 1] += 1;
-    if (victim.warrior) chronicle("fallen", victim.race);
+    if (victim.warrior) chronicle("fallen", victim.race, victim.name, state.villages[victim.v]?.name);
   }
 
   function hitHouse(h, byRace) {
@@ -1380,12 +1431,13 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
         const race = RACES[tool.race];
         if (!race.canStand(tileAt(x, y))) return;
         let vi = nearestVillage(tool.race, x, y, 10);
+        const c = newCat(x, y, tool.race, vi < 0 ? 0 : vi);
         if (vi < 0) {
-          vi = foundVillage(tool.race, x, y);
-          chronicle(state.villages.filter((v) => v.race === tool.race).length === 1 ? "settle" : "colony", tool.race);
+          vi = foundVillage(tool.race, x, y, c.name);
+          c.v = vi;
+          chronicle("settle", tool.race, c.name, state.villages[vi].name);
           mark(x, y);
         }
-        const c = newCat(x, y, tool.race, vi);
         state.cats.push(c);
         assignWarrior(c);
         stroke.spawned += 1;
@@ -1400,7 +1452,7 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
         let vi = nearestVillage(tool.race, x, y, 10);
         if (vi < 0) {
           vi = foundVillage(tool.race, x, y);
-          chronicle("settle", tool.race);
+          chronicle("settle", tool.race, state.villages[vi].founder, state.villages[vi].name);
         }
         state.houses.push({ x, y, race: tool.race, v: vi, hp: 2 });
         state.trees.delete(idx(x, y));

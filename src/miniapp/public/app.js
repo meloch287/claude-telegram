@@ -356,22 +356,24 @@ function setupCity(profile) {
   const renderRaces = (races) => {
     ui.pops = races.map((r) => r.pop);
     if (ui.category.sub === "race") renderSub();
-    // Подпись на территории: имя народа и сколько котов, как у королевств в
-    // WorldBox. Пустые территории без подписи.
+  };
+  // Подпись у каждой деревни: название и сколько в ней котов, как у
+  // поселений в WorldBox. Цвет рамки — народа.
+  const renderVillages = (villages) => {
     labels.replaceChildren();
-    for (const race of races) {
-      if (!race.center || race.pop === 0) continue;
+    for (const v of villages) {
       const tag = document.createElement("div");
       tag.className = "wb-label";
-      tag.style.left = `${(race.center.x / 56) * 100}%`;
-      tag.style.top = `${(race.center.y / 44) * 100}%`;
-      tag.style.setProperty("--race-color", race.zone);
-      tag.insertAdjacentHTML("afterbegin", icon(`race-${race.id}`, 14, "wb-label-icon"));
+      tag.style.left = `${((v.x + 0.5) / 56) * 100}%`;
+      tag.style.top = `${((v.y - 1.2) / 44) * 100}%`;
+      tag.style.setProperty("--race-color", v.zone);
+      tag.insertAdjacentHTML("afterbegin", icon(`race-${RACES[v.race].id}`, 14, "wb-label-icon"));
       const name = document.createElement("span");
-      name.append(text(race.name.replace("-коты", "")));
+      name.append(text(v.name));
       const pop = document.createElement("b");
-      pop.append(text(nf.format(race.pop)));
+      pop.append(text(nf.format(v.pop)));
       tag.append(name, pop);
+      tag.title = `Основал ${v.founder}. Домов: ${v.houses}`;
       labels.append(tag);
     }
   };
@@ -398,6 +400,7 @@ function setupCity(profile) {
     canvas,
     onEvent: renderChronicle,
     onRaces: renderRaces,
+    onVillages: renderVillages,
     onHud: renderHud,
   });
 
