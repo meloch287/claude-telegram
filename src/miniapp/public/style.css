@@ -1831,3 +1831,19 @@ h2 {
     animation: none;
   }
 }
+
+/* Панель настроек длиннее рамы: прокручивается внутри, а не обрезается. */
+.wb-settings {
+  max-height: calc(100% - 64px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+
+.wb-settings::after {
+  content: "";
+  display: block;
+  height: 4px;
+}
