@@ -185,7 +185,19 @@ function buildTerrain(seed) {
 /* ── Мир ────────────────────────────────────────────────────────────────── */
 
 const DAY_TICKS = 30 * 180; // сутки — три минуты
-const SAVE_VERSION = 2;
+const SAVE_VERSION = 3;
+
+/**
+ * Эры. Народ переходит в следующую, когда прожил достаточно дней и оброс
+ * домами — или когда бог решил ускорить время. Внешне меняются дома и
+ * корабли: хижины → двухэтажные каменные дома и парусники → башни с огнями и
+ * летучие лодки. Коты остаются котами.
+ */
+export const ERAS = [
+  { id: "dawn", name: "Начало", days: 0, houses: 0 },
+  { id: "medieval", name: "Средневековье", days: 2, houses: 6 },
+  { id: "future", name: "Будущее", days: 6, houses: 12 },
+];
 
 export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
   const rand = rng(seed * 7 + 13);
@@ -207,6 +219,9 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
     chronicle: [],
     pop: [0, 0, 0, 0],
     grownTo: 0, // до какого населения остров дорос от статистики
+    era: [0, 0, 0, 0], // эра каждого народа
+    ships: [], // { x, y, vx, vy, race, wait } — по воде
+    born: Date.now(), // когда остров появился: эры идут по настоящему времени
   };
 
   const idx = (x, y) => y * W + x;
@@ -262,7 +277,14 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
   }
 
   function newCat(x, y, r) {
-    return { x, y, race: r, tx: x, ty: y, wait: Math.floor(Math.random() * 40), step: Math.random(), face: 1 };
+    // px/py — где кот нарисован; x/y — клетка, куда идёт. Между ними кот
+    // плавно доезжает, и движение видно, а не мигает по клеткам.
+    return { x, y, px: x, py: y, race: r, tx: x, ty: y, wait: Math.floor(Math.random() * 40), step: Math.random(), face: 1, gait: 0 };
+  }
+
+  function newShip(x, y, r) {
+    const a = Math.random() * Math.PI * 2;
+    return { x, y, vx: Math.cos(a) * 0.05, vy: Math.sin(a) * 0.05, race: r, wait: 0, face: 1 };
   }
 
   function spawnCat(r, near, spread = 4) {
@@ -330,6 +352,9 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
             cats: state.cats.map((c) => [c.x, c.y, c.race]),
             grownTo: state.grownTo,
             day: state.day,
+            era: state.era,
+            born: state.born,
+            ships: state.ships.map((sh) => [sh.x, sh.y, sh.race]),
             chronicle: state.chronicle.slice(0, 12),
           }),
         );
@@ -351,6 +376,9 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
       state.cats = (saved.cats || []).map(([x, y, r]) => newCat(x, y, r));
       state.grownTo = saved.grownTo || 0;
       state.day = saved.day || 1;
+      state.era = Array.isArray(saved.era) && saved.era.length === 4 ? saved.era : [0, 0, 0, 0];
+      state.born = saved.born || Date.now();
+      state.ships = (saved.ships || []).map(([x, y, r]) => newShip(x, y, r));
       state.chronicle = saved.chronicle || [];
       if (state.homes.length !== 4) return false;
       // Человек с тех пор поработал — остров дорастает.
@@ -399,6 +427,9 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
     song: () => "Эльфы-коты поют в чаще — слышно даже на пустошах.",
     raid: () => "Орки-коты устроили набег на соседей. Никто не пострадал: все коты.",
     newday: (d) => `Настал день ${d}.`,
+    era: (r, e) => `${RACES[r].name} вступили в эру «${ERAS[e].name}».`,
+    ship: (r) => `${RACES[r].name} спустили на воду корабль.`,
+    eraAll: (e) => `Бог ускорил время: на острове эра «${ERAS[e].name}».`,
   };
   function plural(n) {
     const m10 = n % 10;
@@ -422,7 +453,17 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
     for (const c of state.cats) pop[c.race] += 1;
     for (const h of state.houses) houses[h.race] += 1;
     state.pop = pop;
-    onRaces?.(RACES.map((race, r) => ({ ...race, pop: pop[r], houses: houses[r], mood: mood(r, pop[r], houses[r]) })));
+    onRaces?.(
+      RACES.map((race, r) => ({
+        ...race,
+        pop: pop[r],
+        houses: houses[r],
+        era: state.era[r],
+        eraName: ERAS[state.era[r]].name,
+        ships: state.ships.filter((sh) => sh.race === r).length,
+        mood: mood(r, pop[r], houses[r]),
+      })),
+    );
     hud();
   }
 
@@ -436,7 +477,8 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
   }
 
   function hud() {
-    onHud?.({ pop: state.cats.length, day: state.day, night: nightAlpha() > 0.2, trees: state.trees.size, houses: state.houses.length });
+    const era = Math.max(...state.era);
+    onHud?.({ pop: state.cats.length, day: state.day, night: nightAlpha() > 0.2, trees: state.trees.size, houses: state.houses.length, era, eraName: ERAS[era].name });
   }
 
   /* ── Симуляция ────────────────────────────────────────────────────────── */
@@ -444,6 +486,17 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
   function moveCats() {
     for (const c of state.cats) {
       const race = RACES[c.race];
+      // Доезжаем до клетки: четверть клетки за тик — видно, что кот идёт.
+      const ddx = c.x - c.px;
+      const ddy = c.y - c.py;
+      if (Math.abs(ddx) > 0.01 || Math.abs(ddy) > 0.01) {
+        c.px += Math.sign(ddx) * Math.min(Math.abs(ddx), 0.2);
+        c.py += Math.sign(ddy) * Math.min(Math.abs(ddy), 0.2);
+        c.gait += 1;
+        continue;
+      }
+      c.px = c.x;
+      c.py = c.y;
       if (c.wait > 0) {
         c.wait -= 1;
         continue;
@@ -454,17 +507,17 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
           const tx = c.x + Math.round((Math.random() * 2 - 1) * 3);
           const ty = c.y + Math.round((Math.random() * 2 - 1) * 2);
           const far = Math.abs(tx - home.x) + Math.abs(ty - home.y);
-          if (!inside(tx, ty) || far > 16) continue;
+          if (!inside(tx, ty) || far > 18) continue;
           if (race.canStand(tileAt(tx, ty))) {
             c.tx = tx;
             c.ty = ty;
             break;
           }
         }
-        c.wait = 10 + Math.floor(Math.random() * 70);
+        c.wait = 6 + Math.floor(Math.random() * 50);
         continue;
       }
-      c.step += 0.16;
+      c.step += 0.5;
       if (c.step < 1) continue;
       c.step = 0;
       const dx = Math.sign(c.tx - c.x);
@@ -564,6 +617,105 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
       }
     }
     state.meteors = state.meteors.filter((m) => m.t < 36);
+  }
+
+  /** Возраст острова в настоящих днях + игровые дни: эра идёт по большему. */
+  function ageDays() {
+    const real = (Date.now() - state.born) / 86_400_000;
+    return Math.max(real, state.day - 1);
+  }
+
+  function advanceEras() {
+    if (state.tick % 150 !== 0) return;
+    const age = ageDays();
+    let changed = false;
+    RACES.forEach((race, r) => {
+      const next = state.era[r] + 1;
+      if (next >= ERAS.length) return;
+      const houses = state.houses.filter((h) => h.race === r).length;
+      if (age >= ERAS[next].days && houses >= ERAS[next].houses) {
+        state.era[r] = next;
+        chronicle("era", r, next);
+        changed = true;
+      }
+    });
+    if (changed) {
+      bakeAll();
+      countPop();
+      persist();
+    }
+  }
+
+  /** Корабли: с эры Средневековья прибрежные народы выходят в море. */
+  function sailShips() {
+    // Раз в ~20 с каждый народ, доросший до Средневековья, может спустить
+    // корабль: пристань — вода в пяти клетках от любого его дома, а если
+    // деревня совсем сухопутная — ближайшая вода к столице.
+    if (state.tick % 600 === 300 && state.ships.length < 12) {
+      const r = Math.floor(Math.random() * RACES.length);
+      if (state.era[r] >= 1 && state.ships.filter((sh) => sh.race === r).length < 3) {
+        const docks = [];
+        for (const h of state.houses) {
+          if (h.race !== r) continue;
+          for (let dy = -5; dy <= 5; dy += 1) {
+            for (let dx = -5; dx <= 5; dx += 1) {
+              const x = h.x + dx;
+              const y = h.y + dy;
+              if (inside(x, y) && tileAt(x, y) <= T.WATER) docks.push({ x, y });
+            }
+          }
+        }
+        let dock = docks.length ? docks[Math.floor(Math.random() * docks.length)] : null;
+        if (!dock) {
+          const home = state.homes[r];
+          for (let rad = 1; rad <= 12 && !dock; rad += 1) {
+            for (let dy = -rad; dy <= rad && !dock; dy += 1) {
+              for (let dx = -rad; dx <= rad; dx += 1) {
+                if (Math.max(Math.abs(dx), Math.abs(dy)) !== rad) continue;
+                const x = home.x + dx;
+                const y = home.y + dy;
+                if (inside(x, y) && tileAt(x, y) <= T.WATER) {
+                  dock = { x, y };
+                  break;
+                }
+              }
+            }
+          }
+        }
+        if (dock) {
+          state.ships.push(newShip(dock.x, dock.y, r));
+          chronicle("ship", r);
+          countPop();
+          persist();
+        }
+      }
+    }
+    for (const sh of state.ships) {
+      if (sh.wait > 0) {
+        sh.wait -= 1;
+        continue;
+      }
+      const nx = sh.x + sh.vx;
+      const ny = sh.y + sh.vy;
+      const t = tileAt(Math.round(nx), Math.round(ny));
+      if (t <= T.WATER && inside(Math.round(nx), Math.round(ny))) {
+        sh.x = nx;
+        sh.y = ny;
+        if (Math.abs(sh.vx) > 0.001) sh.face = sh.vx > 0 ? 1 : -1;
+        // Лёгкий дрейф курса — не прямые линии.
+        if (Math.random() < 0.02) {
+          const a = Math.atan2(sh.vy, sh.vx) + (Math.random() - 0.5) * 0.8;
+          sh.vx = Math.cos(a) * 0.05;
+          sh.vy = Math.sin(a) * 0.05;
+        }
+      } else {
+        // Берег: постоять у пристани и отчалить в другую сторону.
+        sh.wait = 60 + Math.floor(Math.random() * 120);
+        const a = Math.atan2(sh.vy, sh.vx) + Math.PI + (Math.random() - 0.5) * 1.2;
+        sh.vx = Math.cos(a) * 0.05;
+        sh.vy = Math.sin(a) * 0.05;
+      }
+    }
   }
 
   function ambient() {
@@ -758,6 +910,20 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
         if (!state.meteors.some((m) => Math.abs(m.x - x) < 3 && Math.abs(m.y - y) < 3)) state.meteors.push({ x, y, t: 0 });
         break;
       }
+      case "era": {
+        // Ускорить время: все народы шагают в следующую эру. Одна на штрих.
+        if (stroke.kind === "era") break;
+        const top = Math.max(...state.era);
+        if (top + 1 >= ERAS.length) {
+          stroke.kind = "era-max";
+          break;
+        }
+        state.era = state.era.map((e) => Math.min(ERAS.length - 1, Math.max(e + 1, top + 1)));
+        stroke.kind = "era";
+        stroke.era = top + 1;
+        bakeAll();
+        break;
+      }
       default:
         break;
     }
@@ -796,6 +962,9 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
         break;
       case "bolt":
         chronicle("bolt");
+        break;
+      case "era":
+        chronicle("eraAll", stroke.era);
         break;
       default:
         break;
@@ -853,10 +1022,27 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
     rect(g, "#f2d54a", bx + 6, by + 1, 1, 1);
   }
 
+  /**
+   * Дом народа в его эре. Начало — хижина в клетку; Средневековье —
+   * двухэтажный дом, растёт на клетку вверх; Будущее — башня на полторы
+   * клетки с огнями. Все три рисуются от нижней клетки, поэтому порядок
+   * запекания — по y: нижний дом перекрывает верхний, как в изометрии.
+   */
   function drawHouse(g, h) {
     const race = RACES[h.race];
+    const era = state.era[h.race] || 0;
     const bx = h.x * PX;
     const by = h.y * PX;
+    if (era === 0) {
+      drawHut(g, race, bx, by);
+    } else if (era === 1) {
+      drawTwoStorey(g, race, bx, by);
+    } else {
+      drawTower(g, race, bx, by);
+    }
+  }
+
+  function drawHut(g, race, bx, by) {
     switch (race.id) {
       case "human":
         rect(g, race.wall, bx, by + 3, 8, 5);
@@ -882,7 +1068,6 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
         rect(g, race.roof, bx + 3, by, 2, 1);
         rect(g, "#efe9d6", bx, by + 2, 1, 1);
         rect(g, "#efe9d6", bx + 7, by + 2, 1, 1);
-        rect(g, "#efe9d6", bx + 1, by + 1, 1, 1);
         rect(g, "#3b2f2a", bx + 3, by + 5, 2, 3);
         rect(g, race.banner, bx + 6, by + 4, 1, 2);
         break;
@@ -898,6 +1083,52 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
       default:
         break;
     }
+  }
+
+  /** Двухэтажный дом: 8 в ширину, 14 в высоту, стоит на нижней клетке. */
+  function drawTwoStorey(g, race, bx, by) {
+    const top = by - 6;
+    const stone = race.id === "gnome" ? "#8d8983" : race.id === "orc" ? "#5a4636" : "#cfc4ad";
+    const trim = race.id === "elf" ? "#5b3d22" : "#4a3a2a";
+    // Стены двух этажей, балки, окна, дверь.
+    rect(g, stone, bx, top + 4, 8, 10);
+    rect(g, race.wall, bx + 1, top + 5, 6, 3);
+    rect(g, race.wall, bx + 1, top + 9, 6, 4);
+    rect(g, trim, bx, top + 8, 8, 1);
+    rect(g, "#8fc1dd", bx + 2, top + 6, 1, 1);
+    rect(g, "#8fc1dd", bx + 5, top + 6, 1, 1);
+    rect(g, "#8fc1dd", bx + 5, top + 10, 1, 1);
+    rect(g, "#3b2f2a", bx + 2, top + 10, 2, 4);
+    // Крыша: конёк на две клетки, цвет народа.
+    rect(g, race.roof, bx - 1, top + 3, 10, 1);
+    rect(g, race.roof, bx, top + 2, 8, 1);
+    rect(g, race.roof, bx + 1, top + 1, 6, 1);
+    rect(g, race.roof, bx + 2, top, 4, 1);
+    rect(g, "#141413", bx + 3, top - 1, 2, 1);
+    if (race.id === "gnome") rect(g, race.banner, bx + 6, top + 10, 1, 1);
+    if (race.id === "orc") rect(g, "#efe9d6", bx, top + 1, 1, 2);
+    if (race.id === "elf") rect(g, "#3d6a2c", bx - 1, top + 9, 1, 5);
+    if (race.id === "human") rect(g, race.banner, bx + 7, top + 4, 1, 3);
+  }
+
+  /** Башня будущего: 8 в ширину, 16 в высоту, с огнями и куполом. */
+  function drawTower(g, race, bx, by) {
+    const top = by - 8;
+    const body = race.id === "gnome" ? "#6f7d8a" : race.id === "orc" ? "#4a4a52" : race.id === "elf" ? "#4f7a6a" : "#8a97a8";
+    const glow = race.id === "orc" ? "#ff6a3d" : race.id === "elf" ? "#7dffb0" : race.id === "gnome" ? "#ffd166" : "#7fd4ff";
+    rect(g, body, bx + 1, top + 4, 6, 12);
+    rect(g, "#2b2f3a", bx + 1, top + 4, 1, 12);
+    rect(g, "#c9d3df", bx + 6, top + 4, 1, 12);
+    for (let i = 0; i < 4; i += 1) rect(g, glow, bx + 3, top + 5 + i * 3, 2, 1);
+    rect(g, glow, bx + 2, top + 13, 1, 1);
+    rect(g, glow, bx + 5, top + 13, 1, 1);
+    // Купол и антенна.
+    rect(g, body, bx, top + 3, 8, 1);
+    rect(g, "#c9d3df", bx + 1, top + 2, 6, 1);
+    rect(g, "#c9d3df", bx + 2, top + 1, 4, 1);
+    rect(g, glow, bx + 3, top, 2, 1);
+    rect(g, "#f4efe2", bx + 4, top - 2, 1, 2);
+    rect(g, race.banner, bx + 7, top + 6, 1, 2);
   }
 
   function drawFlag(g, home) {
@@ -939,7 +1170,7 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
 
   function bakeArea(x0, y0, x1, y1) {
     const ax = Math.max(0, x0 - 1);
-    const ay = Math.max(0, y0 - 1);
+    const ay = Math.max(0, y0 - 2);
     const bx = Math.min(W - 1, x1 + 1);
     const by = Math.min(H - 1, y1 + 1);
     for (let y = ay; y <= by; y += 1) for (let x = ax; x <= bx; x += 1) bakeCell(x, y);
@@ -952,7 +1183,9 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
         if (state.trees.has(i)) drawTree(tctx, x, y);
       }
     }
-    for (const h of state.houses) if (h.x >= ax && h.x <= bx && h.y >= ay && h.y <= by + 1) drawHouse(tctx, h);
+    const inArea = state.houses.filter((h) => h.x >= ax && h.x <= bx && h.y >= ay && h.y <= by + 2);
+    inArea.sort((a, b) => a.y - b.y);
+    for (const h of inArea) drawHouse(tctx, h);
     for (const home of state.homes) if (home.x >= ax && home.x <= bx && home.y >= ay && home.y <= by + 1) drawFlag(tctx, home);
   }
 
@@ -962,8 +1195,11 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
 
   function drawCat(c) {
     const race = RACES[c.race];
-    const bx = c.x * PX + 1;
-    const by = c.y * PX + 1;
+    const walking = Math.abs(c.x - c.px) > 0.01 || Math.abs(c.y - c.py) > 0.01;
+    // Походка: на ходу кот чуть подпрыгивает через кадр.
+    const bob = walking && (c.gait >> 2) % 2 === 0 ? -1 : 0;
+    const bx = Math.round(c.px * PX) + 1;
+    const by = Math.round(c.py * PX) + 1 + bob;
     const f = c.face;
     // Тень, тело 6×4, уши, глаза, хвост. Лицо смотрит туда, куда шёл.
     ctx.globalAlpha = 0.25;
@@ -1002,6 +1238,40 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
         break;
       default:
         break;
+    }
+  }
+
+  function drawShip(sh) {
+    const race = RACES[sh.race];
+    const era = state.era[sh.race] || 0;
+    const bx = Math.round(sh.x * PX);
+    const by = Math.round(sh.y * PX) + ((state.tick >> 4) % 2); // качка
+    const f = sh.face;
+    // След на воде.
+    ctx.globalAlpha = 0.5;
+    rect(ctx, "#a9d4ea", f > 0 ? bx - 3 : bx + 8, by + 6, 3, 1);
+    ctx.globalAlpha = 1;
+    if (era >= 2) {
+      // Летучая лодка будущего: корпус, огни, свечение снизу.
+      rect(ctx, "#8a97a8", bx + 1, by + 3, 7, 3);
+      rect(ctx, "#c9d3df", bx + 2, by + 2, 5, 1);
+      rect(ctx, race.banner, bx + 3, by + 1, 3, 1);
+      rect(ctx, "#7fd4ff", f > 0 ? bx + 7 : bx + 1, by + 4, 1, 1);
+      ctx.globalAlpha = 0.6;
+      rect(ctx, "#7fd4ff", bx + 2, by + 6, 5, 1);
+      ctx.globalAlpha = 1;
+      return;
+    }
+    // Парусник: корпус, мачта, парус цвета народа.
+    rect(ctx, "#5b3d22", bx + 1, by + 5, 7, 2);
+    rect(ctx, "#7a5236", bx, by + 4, 9, 1);
+    rect(ctx, "#3b2f2a", bx + 4, by, 1, 5);
+    if (f > 0) {
+      rect(ctx, "#f4efe2", bx + 5, by, 3, 4);
+      rect(ctx, race.banner, bx + 5, by + 1, 3, 1);
+    } else {
+      rect(ctx, "#f4efe2", bx + 1, by, 3, 4);
+      rect(ctx, race.banner, bx + 1, by + 1, 3, 1);
     }
   }
 
@@ -1063,7 +1333,8 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
     ctx.drawImage(terrain, 0, 0);
     for (const s of state.smokes) drawSmoke(s);
     // Коты по y: нижние поверх верхних, как в любой изометрии.
-    const cats = state.cats.slice().sort((a, b) => a.y - b.y);
+    for (const sh of state.ships) drawShip(sh);
+    const cats = state.cats.slice().sort((a, b) => a.py - b.py);
     for (const c of cats) drawCat(c);
     for (const f of state.fires) drawFire(f);
     for (const b of state.bolts) drawBolt(b);
@@ -1073,7 +1344,12 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
       ctx.fillStyle = `rgba(16, 20, 48, ${night})`;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.fillStyle = `rgba(255, 220, 130, ${Math.min(1, night * 1.6)})`;
-      for (const h of state.houses) ctx.fillRect(h.x * PX + 3, h.y * PX + 5, 2, 2);
+      for (const h of state.houses) {
+        const era = state.era[h.race] || 0;
+        ctx.fillRect(h.x * PX + 3, h.y * PX + (era === 0 ? 5 : era === 1 ? 0 : -3), 2, 2);
+        if (era >= 1) ctx.fillRect(h.x * PX + 5, h.y * PX + (era === 1 ? -4 : -6), 1, 1);
+      }
+      for (const sh of state.ships) ctx.fillRect(Math.round(sh.x * PX) + 4, Math.round(sh.y * PX) + 2, 1, 1);
       for (const f of state.fires) ctx.fillRect(f.x * PX + 2, f.y * PX + 2, 4, 4);
     }
     if (cursor) {
@@ -1097,9 +1373,11 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
       last = now;
       state.tick += 1;
       moveCats();
+      sailShips();
       burn();
       fallMeteors();
       breed();
+      advanceEras();
       ambient();
       frame();
       if (state.tick % 90 === 0) hud();
@@ -1148,6 +1426,9 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud }) {
     },
     get day() {
       return state.day;
+    },
+    get era() {
+      return Math.max(...state.era);
     },
   };
 }

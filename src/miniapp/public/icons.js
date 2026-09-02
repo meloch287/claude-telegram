@@ -1,0 +1,381 @@
+/**
+ * Пиксельные значки для панели «Мой город» — свой набор в стиле WorldBox.
+ *
+ * Эмодзи не годятся: на каждом телефоне они разные и рядом с пиксельной
+ * картой выглядят чужими. Здесь каждый значок — сетка 12×12 из символов,
+ * которая на лету собирается в SVG с shape-rendering="crispEdges": резкие
+ * квадраты на любом масштабе, без картинок и без шрифтов.
+ */
+
+const PALETTE = {
+  k: "#1a1512", // контур
+  w: "#f4efe2", // светлый
+  o: "#e8792f", // оранжевый (акцент WorldBox)
+  y: "#f2d54a", // жёлтый
+  r: "#c9402b", // красный
+  g: "#5f8f45", // зелёный
+  G: "#3d6a2c", // тёмно-зелёный
+  b: "#3b7fb0", // вода
+  B: "#1c4a73", // глубина
+  s: "#e2cf94", // песок
+  h: "#a68b58", // холм
+  t: "#7c7a75", // камень
+  T: "#5f5d58", // камень тёмный
+  n: "#8fc1dd", // лёд/снег-тень
+  c: "#d9a066", // шерсть
+  d: "#a86a3b", // шерсть тёмная
+  p: "#c9a2ff", // фиолетовый (молния, будущее)
+  m: "#5b3d22", // дерево-ствол
+  x: "#9a9590", // серый
+};
+
+const ICONS = {
+  // Категории
+  cat: [
+    "............",
+    "..k......k..",
+    "..kk....kk..",
+    "..kckkkkck..",
+    "..kcccccck..",
+    "..kckcckck..",
+    "..kcccccck..",
+    "..kcrccrck..",
+    "..kccrrcck..",
+    "...kccccck..",
+    "....kkkkk...",
+    "............",
+  ],
+  tree: [
+    "............",
+    ".....GG.....",
+    "....GggG....",
+    "...GggggG...",
+    "..GgggggG...",
+    "..GggggggG..",
+    ".GgggggggG..",
+    ".GgggggggG..",
+    "..GGGGGGGG..",
+    ".....mm.....",
+    ".....mm.....",
+    "............",
+  ],
+  terrain: [
+    "............",
+    "......w.....",
+    ".....wtw....",
+    "....wtttw...",
+    "...tttttt...",
+    "...ttTTtt...",
+    "..tttTTttt..",
+    ".tttttttttt.",
+    "hhhhhhhhhhhh",
+    "gggggggggggg",
+    "gggggggggggg",
+    "............",
+  ],
+  disaster: [
+    "............",
+    "........oo..",
+    ".......oyo..",
+    "......oyyo..",
+    ".....oyyo...",
+    "....oyyo....",
+    "...oyyo.....",
+    "..kyyk......",
+    ".kyyyyk.....",
+    ".kyyyyk.....",
+    "..kkkk......",
+    "............",
+  ],
+  other: [
+    "............",
+    "....k.k.....",
+    "...kwkwk.k..",
+    "...kwkwkkwk.",
+    "..kkwwwwwwk.",
+    ".kwkwwwwwwk.",
+    ".kwwwwwwwk..",
+    "..kwwwwwwk..",
+    "..kwwwwwk...",
+    "...kwwwwk...",
+    "...kkkkkk...",
+    "............",
+  ],
+  // Инструменты
+  house: [
+    "............",
+    ".....rr.....",
+    "....rrrr....",
+    "...rrrrrr...",
+    "..rrrrrrrr..",
+    ".rrrrrrrrrr.",
+    "..ssssssss..",
+    "..ssmmssss..",
+    "..ssmmsnss..",
+    "..ssmmssss..",
+    "..kkkkkkkk..",
+    "............",
+  ],
+  house2: [
+    "....rr......",
+    "...rrrr.....",
+    "..rrrrrr....",
+    ".ssssssss...",
+    ".ssnnsnns...",
+    ".ssssssss...",
+    "rrrrrrrrrrr.",
+    "sssssssssss.",
+    "ssnnssmmsss.",
+    "sssssmmssss.",
+    "kkkkkkkkkkk.",
+    "............",
+  ],
+  flowers: [
+    "............",
+    "............",
+    "..r.....y...",
+    ".rrr...yyy..",
+    "..r..w..y...",
+    "..G.www.G...",
+    "..G..w..G...",
+    ".GGG.G.GGG..",
+    "..G..G..G...",
+    "..G..G..G...",
+    "ggggggggggg.",
+    "............",
+  ],
+  water: [
+    "bbbbbbbbbbbb",
+    "bbbnnbbbbbbb",
+    "bbbbbbbbnnbb",
+    "bbbbbbbbbbbb",
+    "bnnbbbbbbbbb",
+    "bbbbbbnnbbbb",
+    "bbbbbbbbbbbb",
+    "bbbbnnbbbbbb",
+    "bbbbbbbbbbnn",
+    "bbbbbbbbbbbb",
+    "bbnnbbbbbbbb",
+    "bbbbbbbbbbbb",
+  ],
+  deep: [
+    "BBBBBBBBBBBB",
+    "BBBbbBBBBBBB",
+    "BBBBBBBBbbBB",
+    "BBBBBBBBBBBB",
+    "BbbBBBBBBBBB",
+    "BBBBBBbbBBBB",
+    "BBBBBBBBBBBB",
+    "BBBBbbBBBBBB",
+    "BBBBBBBBBBbb",
+    "BBBBBBBBBBBB",
+    "BBbbBBBBBBBB",
+    "BBBBBBBBBBBB",
+  ],
+  sand: [
+    "ssssssssssss",
+    "sssshsssssss",
+    "ssssssssshss",
+    "ssssssssssss",
+    "shssssssssss",
+    "sssssshsssss",
+    "ssssssssssss",
+    "ssssshssssss",
+    "sssssssssssh",
+    "ssssssssssss",
+    "sshsssssssss",
+    "ssssssssssss",
+  ],
+  grass: [
+    "gggggggggggg",
+    "gggGgggggggg",
+    "ggggggggGggg",
+    "gggggggggggg",
+    "gGgggggggggg",
+    "ggggggGggggg",
+    "gggggggggggg",
+    "gggggGgggggg",
+    "gggggggggggG",
+    "gggggggggggg",
+    "ggGggggggggg",
+    "gggggggggggg",
+  ],
+  hill: [
+    "hhhhhhhhhhhh",
+    "hhhhhhhhhhhh",
+    "hhhhddhhhhhh",
+    "hhhddddhhhhh",
+    "hhhhhhhhhhhh",
+    "hhhhhhhhhhhh",
+    "hddhhhhhhddh",
+    "dddhhhhhhddd",
+    "hhhhhhhhhhhh",
+    "hhhhhhddhhhh",
+    "hhhhhddddhhh",
+    "hhhhhhhhhhhh",
+  ],
+  stone: [
+    "tttttttttttt",
+    "tttTTttttttt",
+    "ttTxxTtttttt",
+    "ttTxxTttTTtt",
+    "tttTTtttTxTt",
+    "ttttttttTTtt",
+    "tttttttttttt",
+    "tTTtttttTTtt",
+    "TxxTttttTxTt",
+    "TxxTtttttTtt",
+    "tTTttttttttt",
+    "tttttttttttt",
+  ],
+  snow: [
+    "wwwwwwwwwwww",
+    "wwwnwwwwwwww",
+    "wwwwwwwwnwww",
+    "wwwwwwwwwwww",
+    "wnwwwwwwwwww",
+    "wwwwwwnwwwww",
+    "wwwwwwwwwwww",
+    "wwwwwnwwwwww",
+    "wwwwwwwwwwwn",
+    "wwwwwwwwwwww",
+    "wwnwwwwwwwww",
+    "wwwwwwwwwwww",
+  ],
+  fire: [
+    "............",
+    ".......r....",
+    "......rr....",
+    "..r..rrr....",
+    "..rr.rrro...",
+    "..rrrrrooo..",
+    ".rrrroooyo..",
+    ".rrroooyyo..",
+    ".rroooyyyo..",
+    "..rooyyyo...",
+    "...ooooo....",
+    "............",
+  ],
+  bolt: [
+    "............",
+    "......yyyy..",
+    ".....yyyy...",
+    "....yyyy....",
+    "...yyyyyyy..",
+    "..yyyyyyy...",
+    ".....yyy....",
+    "....yyy.....",
+    "...yyy......",
+    "..yy........",
+    ".y..........",
+    "............",
+  ],
+  meteor: [
+    "............",
+    ".........ww.",
+    "........wo..",
+    ".......oy...",
+    "......oyo...",
+    ".....oyyo...",
+    "..kkoyyoo...",
+    ".kTTkyoo....",
+    ".kTtTk......",
+    ".kTTTk......",
+    "..kkk.......",
+    "............",
+  ],
+  hand: [
+    "............",
+    "....k.k.....",
+    "...kwkwk.k..",
+    "...kwkwkkwk.",
+    "..kkwwwwwwk.",
+    ".kwkwwwwwwk.",
+    ".kwwwwwwwk..",
+    "..kwwwwwwk..",
+    "..kwwwwwk...",
+    "...kwwwwk...",
+    "...kkkkkk...",
+    "............",
+  ],
+  erase: [
+    "............",
+    "....ppppp...",
+    "...ppppppp..",
+    "..pppppppp..",
+    "..pppppppp..",
+    "..wwwwwwww..",
+    "..wwwwwwww..",
+    "..wwwwwwww..",
+    "..kkkkkkkk..",
+    "..kkkkkkkk..",
+    "............",
+    "............",
+  ],
+  era: [
+    "............",
+    "..y.........",
+    "..yy........",
+    "..yyy..y....",
+    "..yyyy.yy...",
+    "..yyyyyyyy..",
+    "..yyyyyyyyy.",
+    "..yyyyyyyy..",
+    "..yyyy.yy...",
+    "..yyy..y....",
+    "..yy........",
+    "..y.........",
+  ],
+  ship: [
+    "............",
+    ".....k......",
+    ".....kw.....",
+    ".....kww....",
+    ".....kwww...",
+    ".....kwwww..",
+    ".....k......",
+    ".mmmmmmmmmm.",
+    "..mmmmmmmm..",
+    "...mmmmmm...",
+    "bbbbbbbbbbbb",
+    "bbbbbbbbbbbb",
+  ],
+  reset: [
+    "............",
+    "....kkkk....",
+    "...kwwwwk...",
+    "..kw....wk..",
+    "..kw....wk..",
+    "..kw....k...",
+    "..kw...wkk..",
+    "...kwwwwwwk.",
+    "........kk..",
+    "............",
+    "............",
+    "............",
+  ],
+};
+
+/** SVG-строка значка. Прямоугольники сливаются по строкам — файл короче. */
+export function icon(name, size = 24, className = "") {
+  const rows = ICONS[name];
+  if (!rows) return "";
+  const rects = [];
+  rows.forEach((row, y) => {
+    let x = 0;
+    while (x < row.length) {
+      const ch = row[x];
+      if (ch === ".") {
+        x += 1;
+        continue;
+      }
+      let w = 1;
+      while (x + w < row.length && row[x + w] === ch) w += 1;
+      rects.push(`<rect x="${x}" y="${y}" width="${w}" height="1" fill="${PALETTE[ch] ?? "#f0f"}"/>`);
+      x += w;
+    }
+  });
+  return `<svg class="${className}" width="${size}" height="${size}" viewBox="0 0 12 12" shape-rendering="crispEdges" aria-hidden="true">${rects.join("")}</svg>`;
+}
+
+export const ICON_NAMES = Object.keys(ICONS);

@@ -1,6 +1,7 @@
 import { catSvg } from "./cat-art.js";
 import { achievementSvg } from "./achievement-art.js";
-import { createWorld, RACES, TERRAIN_TOOLS } from "./world.js";
+import { createWorld, RACES, TERRAIN_TOOLS, ERAS } from "./world.js";
+import { icon } from "./icons.js";
 
 const tg = window.Telegram?.WebApp;
 const nf = new Intl.NumberFormat("ru-RU");
@@ -243,32 +244,32 @@ const BRUSHES = [
 const CATEGORIES = [
   {
     id: "cats",
-    icon: "🐱",
+    icon: "cat",
     name: "Коты",
     sub: "race",
     tools: [
-      { id: "cat", icon: "🐱", name: "Кот", kind: "cat", hint: "Веди пальцем по суше — коты выбранного народа появятся по следу." },
-      { id: "house", icon: "🏠", name: "Дом", kind: "house", hint: "Дом для выбранного народа. Гномы строят только в горах и на холмах." },
+      { id: "cat", icon: "cat", name: "Кот", kind: "cat", hint: "Веди пальцем по суше — коты выбранного народа появятся по следу." },
+      { id: "house", icon: "house", name: "Дом", kind: "house", hint: "Дом для выбранного народа. Гномы строят только в горах и на холмах." },
     ],
   },
   {
     id: "nature",
-    icon: "🌲",
+    icon: "tree",
     name: "Природа",
     sub: "brush",
     tools: [
-      { id: "tree", icon: "🌲", name: "Лес", kind: "tree", hint: "Веди пальцем — вырастает лес. Эльфы-коты будут рады." },
-      { id: "flowers", icon: "🌼", name: "Цветы", kind: "flowers", hint: "Цветы растут только на земле." },
+      { id: "tree", icon: "tree", name: "Лес", kind: "tree", hint: "Веди пальцем — вырастает лес. Эльфы-коты будут рады." },
+      { id: "flowers", icon: "flowers", name: "Цветы", kind: "flowers", hint: "Цветы растут только на земле." },
     ],
   },
   {
     id: "terrain",
-    icon: "⛰️",
+    icon: "terrain",
     name: "Ландшафт",
     sub: "brush",
     tools: TERRAIN_TOOLS.map((t) => ({
       id: t.id,
-      swatch: t.swatch,
+      icon: t.id,
       name: t.name,
       kind: "terrain",
       t: t.t,
@@ -282,23 +283,24 @@ const CATEGORIES = [
   },
   {
     id: "disaster",
-    icon: "☄️",
+    icon: "disaster",
     name: "Бедствия",
     sub: null,
     tools: [
-      { id: "fire", icon: "🔥", name: "Огонь", kind: "fire", hint: "Ткни в дерево или дом. Огонь перекидывается на соседей." },
-      { id: "bolt", icon: "⚡", name: "Молния", kind: "bolt", hint: "Бьёт в точку. Коты разбегаются, дерево загорается." },
-      { id: "meteor", icon: "☄️", name: "Метеорит", kind: "meteor", hint: "Падает с неба. Остаётся кратер." },
+      { id: "fire", icon: "fire", name: "Огонь", kind: "fire", hint: "Ткни в дерево или дом. Огонь перекидывается на соседей." },
+      { id: "bolt", icon: "bolt", name: "Молния", kind: "bolt", hint: "Бьёт в точку. Коты разбегаются, дерево загорается." },
+      { id: "meteor", icon: "meteor", name: "Метеорит", kind: "meteor", hint: "Падает с неба. Остаётся кратер." },
     ],
   },
   {
     id: "other",
-    icon: "✋",
+    icon: "other",
     name: "Прочее",
     sub: "brush",
     tools: [
-      { id: "hand", icon: "✋", name: "Рука", kind: "hand", hint: "Двигай карту пальцем. Приблизь кнопкой +, чтобы разглядеть котов." },
-      { id: "erase", icon: "🧽", name: "Стереть", kind: "erase", hint: "Убирает лес, цветы и дома." },
+      { id: "hand", icon: "hand", name: "Рука", kind: "hand", hint: "Двигай карту пальцем. Приблизь кнопкой +, чтобы разглядеть котов." },
+      { id: "erase", icon: "erase", name: "Стереть", kind: "erase", hint: "Убирает лес, цветы и дома." },
+      { id: "era", icon: "era", name: "Эра", kind: "era", hint: "Ткни в карту — все народы шагнут в следующую эру: Начало → Средневековье → Будущее." },
     ],
   },
 ];
@@ -339,17 +341,15 @@ function setupCity(profile) {
     }
   };
 
+  // Сводка по народам — только чтение. Выбор народа один, в панели над
+  // инструментами: два одинаковых переключателя на экране путали.
   const racesList = el("races");
   const renderRaces = (races) => {
     racesList.replaceChildren();
-    races.forEach((race, r) => {
+    for (const race of races) {
       const li = document.createElement("li");
-      li.className = `race${r === ui.race ? " race--on" : ""}`;
-      li.dataset.race = String(r);
+      li.className = "race";
       li.style.setProperty("--race-color", race.id === "elf" ? race.hat : race.fur);
-      li.setAttribute("role", "button");
-      li.tabIndex = 0;
-      li.setAttribute("aria-pressed", String(r === ui.race));
       const name = document.createElement("span");
       name.className = "race-name";
       name.append(text(race.name));
@@ -358,27 +358,19 @@ function setupCity(profile) {
       pop.append(text(nf.format(race.pop)));
       const sub = document.createElement("span");
       sub.className = "race-sub";
-      sub.append(text(`${race.houses} дом${plural(race.houses)} · ${race.mood}`));
-      li.append(name, pop, sub);
-      const choose = () => {
-        setRace(r);
-        // Выбор народа в карточке сразу переключает на котов — иначе зачем.
-        if (ui.category.id !== "cats") setCategory(CATEGORIES[0]);
-      };
-      li.addEventListener("click", choose);
-      li.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          choose();
-        }
-      });
+      const ships = race.ships ? ` · ${race.ships} кораб${race.ships === 1 ? "ль" : race.ships < 5 ? "ля" : "лей"}` : "";
+      sub.append(text(`${race.eraName} · ${race.houses} дом${plural(race.houses)}${ships}`));
+      const mood = document.createElement("span");
+      mood.className = "race-mood";
+      mood.append(text(race.mood));
+      li.append(name, pop, sub, mood);
       racesList.append(li);
-    });
+    }
   };
 
-  const renderHud = ({ pop, day, night }) => {
-    el("hud-pop").textContent = `🐱 ${nf.format(pop)}`;
-    el("hud-day").textContent = `${night ? "🌙" : "☀️"} День ${day}`;
+  const renderHud = ({ pop, day, night, eraName }) => {
+    el("hud-pop").innerHTML = `${icon("cat", 16, "wb-hud-icon")} ${nf.format(pop)}`;
+    el("hud-day").textContent = `${night ? "Ночь" : "День"} ${day} · ${eraName}`;
   };
   el("hud-name").textContent = `Остров №${seed % 10000}`;
 
@@ -404,11 +396,6 @@ function setupCity(profile) {
 
   function setRace(r) {
     ui.race = r;
-    for (const node of racesList.children) {
-      const on = Number(node.dataset.race) === r;
-      node.classList.toggle("race--on", on);
-      node.setAttribute("aria-pressed", String(on));
-    }
     renderSub();
     hint.textContent = `${RACES[r].name}: ${ui.tool.hint}`;
   }
@@ -443,10 +430,11 @@ function setupCity(profile) {
       b.className = "wb-cat";
       b.setAttribute("role", "tab");
       b.setAttribute("aria-selected", String(category === ui.category));
-      const icon = document.createElement("span");
-      icon.setAttribute("aria-hidden", "true");
-      icon.append(text(category.icon));
-      b.append(icon, text(category.name));
+      b.insertAdjacentHTML("afterbegin", icon(category.icon, 22, "wb-cat-icon"));
+      const label = document.createElement("span");
+      label.className = "wb-cat-label";
+      label.append(text(category.name));
+      b.append(label);
       b.addEventListener("click", () => setCategory(category));
       catsRow.append(b);
     }
@@ -459,19 +447,7 @@ function setupCity(profile) {
       b.type = "button";
       b.className = `wb-tool${tool === ui.tool ? " wb-tool--on" : ""}`;
       b.setAttribute("aria-pressed", String(tool === ui.tool));
-      if (tool.swatch) {
-        const sw = document.createElement("span");
-        sw.className = "wb-swatch";
-        sw.style.background = tool.swatch;
-        sw.setAttribute("aria-hidden", "true");
-        b.append(sw);
-      } else {
-        const icon = document.createElement("span");
-        icon.className = "wb-tool-icon";
-        icon.setAttribute("aria-hidden", "true");
-        icon.append(text(tool.icon));
-        b.append(icon);
-      }
+      b.insertAdjacentHTML("afterbegin", icon(tool.icon, 28, "wb-tool-icon"));
       b.append(text(tool.name));
       b.addEventListener("click", () => setTool(tool));
       toolsRow.append(b);
@@ -491,6 +467,7 @@ function setupCity(profile) {
         dot.style.setProperty("--dot", race.id === "elf" ? race.hat : race.fur);
         dot.setAttribute("aria-hidden", "true");
         b.append(dot, text(race.name.replace("-коты", "")));
+        b.title = race.name;
         b.addEventListener("click", () => setRace(r));
         subRow.append(b);
       });
@@ -594,6 +571,7 @@ function setupCity(profile) {
   el("zoom-in").addEventListener("click", () => setZoom(ui.zoom + 1));
   el("zoom-out").addEventListener("click", () => setZoom(ui.zoom - 1));
 
+  el("city-reset").insertAdjacentHTML("afterbegin", icon("reset", 18, "wb-inline-icon"));
   el("city-reset").addEventListener("click", () => {
     const go = () => {
       world.reset();
