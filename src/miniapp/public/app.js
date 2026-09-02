@@ -312,12 +312,20 @@ function setupCity(profile) {
   const wb = document.querySelector(".wb");
   const seed = profile.world?.seed ?? 1;
 
+  // Элементы панели — до создания мира: он сразу зовёт колбэки, которые
+  // рисуют панель, и константы ниже по коду были бы ещё не объявлены.
+  const catsRow = el("wb-cats");
+  const toolsRow = el("wb-tools");
+  const subRow = el("wb-sub");
+  const hint = el("city-hint");
+
   const ui = {
     category: CATEGORIES[0],
     tool: CATEGORIES[0].tools[0],
     race: 0,
     brush: 0,
     zoom: 0,
+    pops: [0, 0, 0, 0],
   };
 
   /* Летопись и народы. */
@@ -341,36 +349,20 @@ function setupCity(profile) {
     }
   };
 
-  // Сводка по народам — только чтение. Выбор народа один, в панели над
-  // инструментами: два одинаковых переключателя на экране путали.
-  const racesList = el("races");
+  // Численность народов держим при себе и показываем прямо в кнопках выбора
+  // народа: отдельные карточки внизу дублировали панель.
   const renderRaces = (races) => {
-    racesList.replaceChildren();
-    for (const race of races) {
-      const li = document.createElement("li");
-      li.className = "race";
-      li.style.setProperty("--race-color", race.id === "elf" ? race.hat : race.fur);
-      const name = document.createElement("span");
-      name.className = "race-name";
-      name.append(text(race.name));
-      const pop = document.createElement("span");
-      pop.className = "race-pop";
-      pop.append(text(nf.format(race.pop)));
-      const sub = document.createElement("span");
-      sub.className = "race-sub";
-      const ships = race.ships ? ` · ${race.ships} кораб${race.ships === 1 ? "ль" : race.ships < 5 ? "ля" : "лей"}` : "";
-      sub.append(text(`${race.eraName} · ${race.houses} дом${plural(race.houses)}${ships}`));
-      const mood = document.createElement("span");
-      mood.className = "race-mood";
-      mood.append(text(race.mood));
-      li.append(name, pop, sub, mood);
-      racesList.append(li);
-    }
+    ui.pops = races.map((r) => r.pop);
+    if (ui.category.sub === "race") renderSub();
   };
 
-  const renderHud = ({ pop, day, night, eraName }) => {
+  const renderHud = ({ pop, day, night, era, eraName }) => {
     el("hud-pop").innerHTML = `${icon("cat", 16, "wb-hud-icon")} ${nf.format(pop)}`;
-    el("hud-day").textContent = `${night ? "Ночь" : "День"} ${day} · ${eraName}`;
+    el("hud-day").textContent = `${night ? "Ночь" : "День"} ${day}`;
+    // Плашка эры слева на карте: римская цифра и название.
+    const plaque = el("hud-era");
+    plaque.innerHTML = `${icon("era", 14, "wb-era-icon")}<span class="wb-era-num">${["I", "II", "III"][era] ?? era + 1}</span><span class="wb-era-name">${eraName}</span>`;
+    plaque.dataset.era = String(era);
   };
   el("hud-name").textContent = `Остров №${seed % 10000}`;
 
@@ -389,10 +381,6 @@ function setupCity(profile) {
 
   /* ── Панель ───────────────────────────────────────────────────────────── */
 
-  const catsRow = el("wb-cats");
-  const toolsRow = el("wb-tools");
-  const subRow = el("wb-sub");
-  const hint = el("city-hint");
 
   function setRace(r) {
     ui.race = r;
@@ -467,7 +455,11 @@ function setupCity(profile) {
         dot.style.setProperty("--dot", race.id === "elf" ? race.hat : race.fur);
         dot.setAttribute("aria-hidden", "true");
         b.append(dot, text(race.name.replace("-коты", "")));
-        b.title = race.name;
+        const count = document.createElement("span");
+        count.className = "wb-chip-count";
+        count.append(text(nf.format(ui.pops[r] ?? 0)));
+        b.append(count);
+        b.title = `${race.name}: ${nf.format(ui.pops[r] ?? 0)}`;
         b.addEventListener("click", () => setRace(r));
         subRow.append(b);
       });
@@ -583,6 +575,7 @@ function setupCity(profile) {
 
   setCategory(CATEGORIES[0]);
   renderChronicle(world.chronicle);
+  if (world.population === 0) hint.textContent = "Остров пуст. Выбери народ и проведи пальцем по суше — там поселятся первые коты. Дома они построят сами.";
 }
 
 

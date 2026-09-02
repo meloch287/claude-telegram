@@ -293,18 +293,18 @@ export function startMiniAppServer(): void {
     }
     // Совпала метка — значит файл тот же, отдаём 304 без тела.
     if (req.headers["if-none-match"] === asset.etag) {
-      res.writeHead(304, { etag: asset.etag, "cache-control": "no-cache" });
+      res.writeHead(304, { etag: asset.etag, "cache-control": "no-store" });
       res.end();
       return;
     }
 
     res.writeHead(200, {
       "content-type": asset.type,
-      // no-cache — это не «не кешируй», а «спроси перед использованием».
-      // Прежние пять минут в WebView Telegram превращались в часы: правка
-      // доезжала до сервера, а пользователь видел старую картинку и считал,
-      // что ничего не изменилось. Перепроверка стоит один 304 на файл.
-      "cache-control": "no-cache",
+      // no-store, а не no-cache: WebView Telegram даже «спроси перед
+      // использованием» умудрялся игнорировать, и после выкатки человек
+      // видел старую панель и писал «ничего не поменялось». Файлов мало и они
+      // маленькие — перекачать при каждом открытии дешевле, чем объяснять.
+      "cache-control": "no-store",
       etag: asset.etag,
       // Мини-апп встраивается только в Telegram; чужие фреймы не нужны.
       "content-security-policy":

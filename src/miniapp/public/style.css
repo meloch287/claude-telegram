@@ -1382,11 +1382,50 @@ h2 {
   margin-right: 2px;
 }
 
-.race-mood {
-  display: block;
-  margin-top: 4px;
+/* Плашка эры слева на карте: как табличка в WorldBox, бронза на тёмном. */
+.wb-era {
+  position: absolute;
+  left: 12px;
+  top: 46px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px 5px 8px;
+  background: rgb(23 21 18 / 88%);
+  color: var(--wb-ink);
+  border: 1px solid var(--wb-brass);
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px #3a2818, 0 2px 8px rgb(0 0 0 / 40%);
   font-size: 0.75rem;
-  color: var(--accent);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  backdrop-filter: blur(4px);
+}
+
+.wb-era-num {
+  color: var(--wb-hot);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 0.9375rem;
+  letter-spacing: 0;
+}
+
+.wb-era[data-era="1"] {
+  border-color: #c9d3df;
+}
+
+.wb-era[data-era="2"] {
+  border-color: #7fd4ff;
+  box-shadow: inset 0 0 0 1px #3a2818, 0 0 12px rgb(127 212 255 / 45%);
+}
+
+.wb-chip-count {
+  padding: 1px 6px;
+  background: rgb(0 0 0 / 35%);
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--wb-muted);
 }
 
 /* Подкатегория: народ (цветная точка) или размер кисти (кружок). */
@@ -1432,59 +1471,6 @@ h2 {
   min-height: 1.4em;
   font-size: 0.9375rem;
   color: var(--page-ink);
-}
-
-/* Карточки народов: цвет шкуры полоской слева, чтобы народ узнавался так
-   же, как на карте. Нажатие выбирает народ для кота и дома. */
-.races {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 10px;
-  margin: 14px 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.race {
-  position: relative;
-  padding: 12px 12px 12px 16px;
-  background: var(--surface);
-  color: var(--ink);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  overflow: hidden;
-}
-
-.race::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 6px;
-  background: var(--race-color, var(--accent));
-}
-
-.race-name {
-  display: block;
-  font-weight: 600;
-  font-size: 0.9375rem;
-}
-
-.race-pop {
-  display: block;
-  margin-top: 2px;
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 1.375rem;
-  font-variant-numeric: tabular-nums;
-  line-height: 1.2;
-}
-
-.race-sub {
-  display: block;
-  margin-top: 2px;
-  font-size: 0.8125rem;
-  color: var(--ink-muted);
 }
 
 .city-h2 {
