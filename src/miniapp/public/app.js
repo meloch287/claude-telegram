@@ -250,6 +250,7 @@ const CATEGORIES = [
     tools: [
       { id: "cat", icon: "cat", name: "Кот", kind: "cat", hint: "Веди пальцем по суше — коты выбранного народа появятся по следу." },
       { id: "house", icon: "house", name: "Дом", kind: "house", hint: "Дом для выбранного народа. Гномы строят только в горах и на холмах." },
+      { id: "war", icon: "war", name: "Война", kind: "war", hint: "Ткни в чужую территорию — выбранный народ объявит ей войну. Лучники, мечи, поджоги." },
     ],
   },
   {
@@ -364,7 +365,7 @@ function setupCity(profile) {
       tag.className = "wb-label";
       tag.style.left = `${(race.center.x / 56) * 100}%`;
       tag.style.top = `${(race.center.y / 44) * 100}%`;
-      tag.style.setProperty("--race-color", race.id === "elf" ? race.hat : race.banner);
+      tag.style.setProperty("--race-color", race.zone);
       tag.insertAdjacentHTML("afterbegin", icon(`race-${race.id}`, 14, "wb-label-icon"));
       const name = document.createElement("span");
       name.append(text(race.name.replace("-коты", "")));
@@ -625,7 +626,11 @@ function setupCity(profile) {
   renderChronicle(world.chronicle);
   // Вкладки поднимаются раньше мира: если мини-апп открылся сразу на городе,
   // start() тогда некому было позвать — и коты стояли как вкопанные.
-  if (!el("panel-city").hidden) world.start();
+  // Ручка для отладки в консоли и автопроверок.
+  window.__world = world;
+  // Мир крутится всегда, даже на вкладке «Кот»: там он просто не рисуется.
+  world.start();
+  if (el("panel-city").hidden) world.stop();
   if (world.population === 0) hint.textContent = "Остров пуст. Выбери народ и проведи пальцем по суше — там поселятся первые коты. Дома они построят сами.";
 }
 
