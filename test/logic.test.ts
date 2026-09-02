@@ -1166,6 +1166,9 @@ test("квоты: только приглашённым, ноль снимает
     process.env.ENCRYPTION_KEY = Buffer.alloc(32, 9).toString("base64");
     process.env.DATA_DIR = ${JSON.stringify(dir)};
     process.env.WORKSPACE_ROOT = ${JSON.stringify(join(dir, "ws"))};
+    // Проверяем личную квоту. Общая доля коопа — отдельный механизм: с ней
+    // «снять квоту» означает «вернуться к доле», и null тут не получить.
+    process.env.COOP_FAIR_SHARE = "off";
 
     const db = await import(${JSON.stringify(dbPath)});
     db.getOrCreateUser(1);
