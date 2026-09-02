@@ -31,35 +31,40 @@
       </header>
 
       <!--
-        Город — отдельная панель до <main>: у него своя шапка и своя логика,
-        а статистика кота остаётся как была.
+        Город — отдельная панель до <main>. Внутри — игровой экран в духе
+        WorldBox: тёмная рама, карта, снизу панель инструментов с категориями.
       -->
       <section class="city" id="panel-city" role="tabpanel" aria-labelledby="tab-city" tabindex="0" hidden>
-        <div class="city-frame">
-          <!-- Вьюпорт прокручивается, когда карта приближена: как в WorldBox. -->
-          <div class="city-viewport" id="city-viewport">
-            <div class="city-stage">
-              <canvas class="city-map" id="city-map" aria-label="Карта континента четырёх кошачьих народов"></canvas>
-              <div class="city-scanlines" aria-hidden="true"></div>
+        <div class="wb">
+          <div class="wb-hud" aria-live="polite">
+            <span class="wb-hud-item" id="hud-name"></span>
+            <span class="wb-hud-item" id="hud-pop"></span>
+            <span class="wb-hud-item" id="hud-day"></span>
+          </div>
+
+          <div class="wb-viewport" id="city-viewport">
+            <div class="wb-stage" id="city-stage">
+              <canvas class="wb-map" id="city-map" aria-label="Карта континента четырёх кошачьих народов. Проведи пальцем, чтобы применить выбранный инструмент."></canvas>
             </div>
           </div>
-          <button class="city-zoom" id="city-zoom" type="button" aria-pressed="false" aria-label="Приблизить карту">🔍</button>
-        </div>
-        <p class="city-caption" id="city-caption"></p>
+          <div class="wb-zoom" role="group" aria-label="Масштаб">
+            <button class="wb-zoom-btn" id="zoom-out" type="button" aria-label="Отдалить">−</button>
+            <span class="wb-zoom-label" id="zoom-label">1×</span>
+            <button class="wb-zoom-btn" id="zoom-in" type="button" aria-label="Приблизить">+</button>
+          </div>
 
-        <div class="powers" role="group" aria-label="Силы бога">
-          <button class="power power--on" type="button" data-power="cat" aria-pressed="true">🐱 Кот</button>
-          <button class="power" type="button" data-power="house" aria-pressed="false">🏠 Дом</button>
-          <button class="power" type="button" data-power="tree" aria-pressed="false">🌲 Дерево</button>
-          <button class="power" type="button" data-power="fire" aria-pressed="false">🔥 Огонь</button>
-          <button class="power" type="button" data-power="meteor" aria-pressed="false">☄️ Метеорит</button>
+          <div class="wb-panel">
+            <div class="wb-sub" id="wb-sub"></div>
+            <div class="wb-tools" id="wb-tools" role="group" aria-label="Инструменты"></div>
+            <div class="wb-cats" id="wb-cats" role="tablist" aria-label="Категории"></div>
+          </div>
         </div>
-        <p class="section-note city-hint" id="city-hint">Выбери силу и ткни в карту.</p>
+        <p class="city-hint" id="city-hint" role="status"></p>
 
         <ul class="races" id="races" role="list"></ul>
 
         <h2 class="city-h2">Летопись</h2>
-        <ol class="chronicle" id="chronicle" role="list" aria-live="polite"></ol>
+        <ol class="chronicle" id="chronicle" role="list"></ol>
         <p class="city-reset-row">
           <button class="button button--ghost" id="city-reset" type="button">Начать остров заново</button>
         </p>

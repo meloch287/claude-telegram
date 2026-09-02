@@ -1,6 +1,6 @@
 import { catSvg } from "./cat-art.js";
 import { achievementSvg } from "./achievement-art.js";
-import { createWorld, RACES } from "./world.js";
+import { createWorld, RACES, TERRAIN_TOOLS } from "./world.js";
 
 const tg = window.Telegram?.WebApp;
 const nf = new Intl.NumberFormat("ru-RU");
@@ -227,41 +227,129 @@ function setupTabs() {
   select(remembered === 1 ? 1 : 0);
 }
 
-/* ── Мой город ────────────────────────────────────────────────────────── */
+/* ── Мой город ────────────────────────────────────────────────────────────
+   Панель инструментов как в WorldBox: снизу категории, над ними инструменты
+   категории, над ними подкатегория — народ для котов и домов или размер
+   кисти для природы и ландшафта. Рисуют протяжкой: палец ведёт — по следу
+   растёт лес или разливается море. Рука двигает карту. */
+
+const ZOOMS = [1, 1.5, 2, 3];
+const BRUSHES = [
+  { size: 0, label: "1", px: 8 },
+  { size: 1, label: "3", px: 13 },
+  { size: 2, label: "5", px: 18 },
+];
+
+const CATEGORIES = [
+  {
+    id: "cats",
+    icon: "🐱",
+    name: "Коты",
+    sub: "race",
+    tools: [
+      { id: "cat", icon: "🐱", name: "Кот", kind: "cat", hint: "Веди пальцем по суше — коты выбранного народа появятся по следу." },
+      { id: "house", icon: "🏠", name: "Дом", kind: "house", hint: "Дом для выбранного народа. Гномы строят только в горах и на холмах." },
+    ],
+  },
+  {
+    id: "nature",
+    icon: "🌲",
+    name: "Природа",
+    sub: "brush",
+    tools: [
+      { id: "tree", icon: "🌲", name: "Лес", kind: "tree", hint: "Веди пальцем — вырастает лес. Эльфы-коты будут рады." },
+      { id: "flowers", icon: "🌼", name: "Цветы", kind: "flowers", hint: "Цветы растут только на земле." },
+    ],
+  },
+  {
+    id: "terrain",
+    icon: "⛰️",
+    name: "Ландшафт",
+    sub: "brush",
+    tools: TERRAIN_TOOLS.map((t) => ({
+      id: t.id,
+      swatch: t.swatch,
+      name: t.name,
+      kind: "terrain",
+      t: t.t,
+      hint:
+        t.id === "water" || t.id === "deep"
+          ? "Разливай море. Дома смоет, коты уплывут к берегу."
+          : t.id === "stone"
+            ? "Поднимай горы. Ходить по ним умеют только гномы-коты."
+            : `Кисть «${t.name.toLowerCase()}»: веди пальцем по карте.`,
+    })),
+  },
+  {
+    id: "disaster",
+    icon: "☄️",
+    name: "Бедствия",
+    sub: null,
+    tools: [
+      { id: "fire", icon: "🔥", name: "Огонь", kind: "fire", hint: "Ткни в дерево или дом. Огонь перекидывается на соседей." },
+      { id: "bolt", icon: "⚡", name: "Молния", kind: "bolt", hint: "Бьёт в точку. Коты разбегаются, дерево загорается." },
+      { id: "meteor", icon: "☄️", name: "Метеорит", kind: "meteor", hint: "Падает с неба. Остаётся кратер." },
+    ],
+  },
+  {
+    id: "other",
+    icon: "✋",
+    name: "Прочее",
+    sub: "brush",
+    tools: [
+      { id: "hand", icon: "✋", name: "Рука", kind: "hand", hint: "Двигай карту пальцем. Приблизь кнопкой +, чтобы разглядеть котов." },
+      { id: "erase", icon: "🧽", name: "Стереть", kind: "erase", hint: "Убирает лес, цветы и дома." },
+    ],
+  },
+];
 
 function setupCity(profile) {
   const canvas = el("city-map");
+  const viewport = el("city-viewport");
+  const stage = el("city-stage");
+  const wb = document.querySelector(".wb");
   const seed = profile.world?.seed ?? 1;
-  const chronicleList = el("chronicle");
-  const racesList = el("races");
 
+  const ui = {
+    category: CATEGORIES[0],
+    tool: CATEGORIES[0].tools[0],
+    race: 0,
+    brush: 0,
+    zoom: 0,
+  };
+
+  /* Летопись и народы. */
+  const chronicleList = el("chronicle");
   const renderChronicle = (items) => {
     chronicleList.replaceChildren();
     if (!items.length) {
       const li = document.createElement("li");
       li.className = "chronicle-empty";
-      li.append(text("Пока тихо. Ткни в карту — и что-нибудь случится."));
+      li.append(text("Пока тихо. Проведи пальцем по карте — и что-нибудь случится."));
       chronicleList.append(li);
       return;
     }
     for (const item of items) {
       const li = document.createElement("li");
-      li.append(text(item.text));
+      const day = document.createElement("span");
+      day.className = "chronicle-day";
+      day.append(text(`Д${item.day ?? 1}`));
+      li.append(day, text(item.text));
       chronicleList.append(li);
     }
   };
 
-  let selectedRace = 0;
+  const racesList = el("races");
   const renderRaces = (races) => {
     racesList.replaceChildren();
     races.forEach((race, r) => {
       const li = document.createElement("li");
-      li.className = `race${r === selectedRace ? " race--on" : ""}`;
-      li.style.setProperty("--race-color", race.fur === "#e8e2cf" ? race.hat : race.fur);
+      li.className = `race${r === ui.race ? " race--on" : ""}`;
+      li.dataset.race = String(r);
+      li.style.setProperty("--race-color", race.id === "elf" ? race.hat : race.fur);
       li.setAttribute("role", "button");
       li.tabIndex = 0;
-      li.setAttribute("aria-pressed", String(r === selectedRace));
-
+      li.setAttribute("aria-pressed", String(r === ui.race));
       const name = document.createElement("span");
       name.className = "race-name";
       name.append(text(race.name));
@@ -272,18 +360,11 @@ function setupCity(profile) {
       sub.className = "race-sub";
       sub.append(text(`${race.houses} дом${plural(race.houses)} · ${race.mood}`));
       li.append(name, pop, sub);
-
       const choose = () => {
-        selectedRace = r;
-        world?.setRace(r);
-        for (const node of racesList.children) {
-          const on = Number(node.dataset.race) === r;
-          node.classList.toggle("race--on", on);
-          node.setAttribute("aria-pressed", String(on));
-        }
-        el("city-hint").textContent = `Выбраны ${race.name.toLowerCase()}: коты и дома будут их.`;
+        setRace(r);
+        // Выбор народа в карточке сразу переключает на котов — иначе зачем.
+        if (ui.category.id !== "cats") setCategory(CATEGORIES[0]);
       };
-      li.dataset.race = String(r);
       li.addEventListener("click", choose);
       li.addEventListener("keydown", (e) => {
         if (e.key === "Enter" || e.key === " ") {
@@ -295,6 +376,12 @@ function setupCity(profile) {
     });
   };
 
+  const renderHud = ({ pop, day, night }) => {
+    el("hud-pop").textContent = `🐱 ${nf.format(pop)}`;
+    el("hud-day").textContent = `${night ? "🌙" : "☀️"} День ${day}`;
+  };
+  el("hud-name").textContent = `Остров №${seed % 10000}`;
+
   world = createWorld({
     seed,
     stats: {
@@ -305,71 +392,221 @@ function setupCity(profile) {
     canvas,
     onEvent: renderChronicle,
     onRaces: renderRaces,
+    onHud: renderHud,
   });
-  renderChronicle(world.chronicle);
 
-  el("city-caption").textContent =
-    `Остров №${seed % 10000}. На нём ${nf.format(world.population)} кот${plural(world.population)} четырёх народов. ` +
-    `Остров растёт от твоей работы с ботом.`;
+  /* ── Панель ───────────────────────────────────────────────────────────── */
 
-  // Силы бога.
-  const powers = document.querySelectorAll(".power");
-  const hints = {
-    cat: "Ткни в сушу — там появится кот выбранного народа.",
-    house: "Ткни в сушу — там встанет дом. Гномы строят в горах.",
-    tree: "Ткни в сушу — вырастет дерево. Эльфы будут рады.",
-    fire: "Ткни в дерево или дом. Осторожно: огонь перекидывается.",
-    meteor: "Ткни куда угодно. Будет кратер.",
-  };
-  powers.forEach((button) => {
-    button.addEventListener("click", () => {
-      powers.forEach((b) => {
-        const on = b === button;
-        b.classList.toggle("power--on", on);
-        b.setAttribute("aria-pressed", String(on));
+  const catsRow = el("wb-cats");
+  const toolsRow = el("wb-tools");
+  const subRow = el("wb-sub");
+  const hint = el("city-hint");
+
+  function setRace(r) {
+    ui.race = r;
+    for (const node of racesList.children) {
+      const on = Number(node.dataset.race) === r;
+      node.classList.toggle("race--on", on);
+      node.setAttribute("aria-pressed", String(on));
+    }
+    renderSub();
+    hint.textContent = `${RACES[r].name}: ${ui.tool.hint}`;
+  }
+
+  function setBrush(i) {
+    ui.brush = i;
+    renderSub();
+  }
+
+  function setTool(tool) {
+    ui.tool = tool;
+    wb.classList.toggle("wb--hand", tool.kind === "hand");
+    // Рука — карта прокручивается пальцем. Кисть — палец рисует, а не скроллит.
+    canvas.style.touchAction = tool.kind === "hand" ? "pan-x pan-y" : "none";
+    renderTools();
+    hint.textContent = ui.category.sub === "race" ? `${RACES[ui.race].name}: ${tool.hint}` : tool.hint;
+    tg?.HapticFeedback?.selectionChanged?.();
+  }
+
+  function setCategory(category) {
+    ui.category = category;
+    renderCats();
+    renderSub();
+    setTool(category.tools[0]);
+  }
+
+  function renderCats() {
+    catsRow.replaceChildren();
+    for (const category of CATEGORIES) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "wb-cat";
+      b.setAttribute("role", "tab");
+      b.setAttribute("aria-selected", String(category === ui.category));
+      const icon = document.createElement("span");
+      icon.setAttribute("aria-hidden", "true");
+      icon.append(text(category.icon));
+      b.append(icon, text(category.name));
+      b.addEventListener("click", () => setCategory(category));
+      catsRow.append(b);
+    }
+  }
+
+  function renderTools() {
+    toolsRow.replaceChildren();
+    for (const tool of ui.category.tools) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = `wb-tool${tool === ui.tool ? " wb-tool--on" : ""}`;
+      b.setAttribute("aria-pressed", String(tool === ui.tool));
+      if (tool.swatch) {
+        const sw = document.createElement("span");
+        sw.className = "wb-swatch";
+        sw.style.background = tool.swatch;
+        sw.setAttribute("aria-hidden", "true");
+        b.append(sw);
+      } else {
+        const icon = document.createElement("span");
+        icon.className = "wb-tool-icon";
+        icon.setAttribute("aria-hidden", "true");
+        icon.append(text(tool.icon));
+        b.append(icon);
+      }
+      b.append(text(tool.name));
+      b.addEventListener("click", () => setTool(tool));
+      toolsRow.append(b);
+    }
+  }
+
+  function renderSub() {
+    subRow.replaceChildren();
+    if (ui.category.sub === "race") {
+      RACES.forEach((race, r) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "wb-chip";
+        b.setAttribute("aria-pressed", String(r === ui.race));
+        const dot = document.createElement("span");
+        dot.className = "wb-dot";
+        dot.style.setProperty("--dot", race.id === "elf" ? race.hat : race.fur);
+        dot.setAttribute("aria-hidden", "true");
+        b.append(dot, text(race.name.replace("-коты", "")));
+        b.addEventListener("click", () => setRace(r));
+        subRow.append(b);
       });
-      world.setPower(button.dataset.power);
-      el("city-hint").textContent = hints[button.dataset.power] ?? "";
-      tg?.HapticFeedback?.selectionChanged?.();
-    });
-  });
+    } else if (ui.category.sub === "brush") {
+      BRUSHES.forEach((brush, i) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "wb-chip";
+        b.setAttribute("aria-pressed", String(i === ui.brush));
+        b.setAttribute("aria-label", `Кисть ${brush.label} клетки`);
+        const dot = document.createElement("span");
+        dot.className = "wb-brush";
+        dot.style.width = `${brush.px}px`;
+        dot.style.height = `${brush.px}px`;
+        dot.setAttribute("aria-hidden", "true");
+        b.append(dot, text(`×${brush.label}`));
+        b.addEventListener("click", () => setBrush(i));
+        subRow.append(b);
+      });
+    }
+  }
 
-  // click, а не pointerdown: при приближенной карте палец сперва скроллит,
-  // и «тык» с началом прокрутки — разные жесты. click срабатывает только на
-  // настоящее касание без движения.
-  canvas.addEventListener("click", (e) => {
-    world.tapAt(e.clientX, e.clientY);
+  /* ── Рисование протяжкой ──────────────────────────────────────────────── */
+
+  let painting = false;
+  let lastCell = null;
+  let pan = null;
+
+  const brushSize = () => (ui.category.sub === "brush" ? BRUSHES[ui.brush].size : 0);
+  const toolFor = () => ({ ...ui.tool, race: ui.race });
+
+  canvas.addEventListener("pointerdown", (e) => {
+    if (ui.tool.kind === "hand") {
+      // Мышью карту тоже можно таскать; палец скроллит вьюпорт сам.
+      if (e.pointerType === "mouse") {
+        pan = { x: e.clientX, y: e.clientY, left: viewport.scrollLeft, top: viewport.scrollTop };
+        canvas.setPointerCapture(e.pointerId);
+      }
+      return;
+    }
+    e.preventDefault();
+    canvas.setPointerCapture(e.pointerId);
+    painting = true;
+    const cell = world.cellAt(e.clientX, e.clientY);
+    lastCell = cell;
+    world.apply(toolFor(), cell.x, cell.y, brushSize());
+    world.setCursor({ ...cell, size: brushSize() });
     tg?.HapticFeedback?.impactOccurred?.("light");
   });
 
-  // Зум ×2: карта шире экрана, вьюпорт прокручивается. Центрируем на том же
-  // месте, куда смотрели, — иначе после нажатия остров уезжает в угол.
-  const zoomButton = el("city-zoom");
-  const frame = zoomButton.closest(".city-frame");
-  const viewport = el("city-viewport");
-  zoomButton.addEventListener("click", () => {
-    const on = !frame.classList.contains("city-frame--zoom");
-    const ratioX = (viewport.scrollLeft + viewport.clientWidth / 2) / viewport.scrollWidth;
-    const ratioY = (viewport.scrollTop + viewport.clientHeight / 2) / viewport.scrollHeight;
-    frame.classList.toggle("city-frame--zoom", on);
-    zoomButton.setAttribute("aria-pressed", String(on));
-    zoomButton.setAttribute("aria-label", on ? "Отдалить карту" : "Приблизить карту");
-    zoomButton.textContent = on ? "🔎" : "🔍";
-    requestAnimationFrame(() => {
-      viewport.scrollLeft = ratioX * viewport.scrollWidth - viewport.clientWidth / 2;
-      viewport.scrollTop = ratioY * viewport.scrollHeight - viewport.clientHeight / 2;
-    });
+  canvas.addEventListener("pointermove", (e) => {
+    if (pan) {
+      viewport.scrollLeft = pan.left - (e.clientX - pan.x);
+      viewport.scrollTop = pan.top - (e.clientY - pan.y);
+      return;
+    }
+    const cell = world.cellAt(e.clientX, e.clientY);
+    if (ui.tool.kind !== "hand") world.setCursor({ ...cell, size: brushSize() });
+    if (!painting) return;
+    if (lastCell && cell.x === lastCell.x && cell.y === lastCell.y) return;
+    // Быстрый жест перескакивает клетки — заполняем промежуток, чтобы линия
+    // леса не рвалась.
+    const steps = Math.max(Math.abs(cell.x - lastCell.x), Math.abs(cell.y - lastCell.y));
+    for (let i = 1; i <= steps; i += 1) {
+      const x = Math.round(lastCell.x + ((cell.x - lastCell.x) * i) / steps);
+      const y = Math.round(lastCell.y + ((cell.y - lastCell.y) * i) / steps);
+      // Коты и дома — не сплошняком по каждой клетке: через одну, иначе от
+      // одного мазка получается стена из котов.
+      if ((ui.tool.kind === "cat" || ui.tool.kind === "house") && (x + y) % 2 !== 0 && steps > 1) continue;
+      world.apply(toolFor(), x, y, brushSize());
+    }
+    lastCell = cell;
   });
+
+  const finish = () => {
+    if (pan) pan = null;
+    if (!painting) return;
+    painting = false;
+    lastCell = null;
+    world.endStroke();
+  };
+  canvas.addEventListener("pointerup", finish);
+  canvas.addEventListener("pointercancel", finish);
+  canvas.addEventListener("pointerleave", () => {
+    world.setCursor(null);
+  });
+
+  /* ── Зум ──────────────────────────────────────────────────────────────── */
+
+  function setZoom(i) {
+    ui.zoom = Math.max(0, Math.min(ZOOMS.length - 1, i));
+    const ratioX = (viewport.scrollLeft + viewport.clientWidth / 2) / Math.max(1, viewport.scrollWidth);
+    const ratioY = (viewport.scrollTop + viewport.clientHeight / 2) / Math.max(1, viewport.scrollHeight);
+    stage.style.width = `${ZOOMS[ui.zoom] * 100}%`;
+    el("zoom-label").textContent = `${ZOOMS[ui.zoom]}×`;
+    viewport.scrollLeft = ratioX * viewport.scrollWidth - viewport.clientWidth / 2;
+    viewport.scrollTop = ratioY * viewport.scrollHeight - viewport.clientHeight / 2;
+    // На приближенной карте рука нужнее: подсказываем, где она.
+    if (ui.zoom > 0 && ui.tool.kind !== "hand") hint.textContent = `${ui.tool.hint} Двигать карту — «Рука» в «Прочее».`;
+  }
+  el("zoom-in").addEventListener("click", () => setZoom(ui.zoom + 1));
+  el("zoom-out").addEventListener("click", () => setZoom(ui.zoom - 1));
 
   el("city-reset").addEventListener("click", () => {
     const go = () => {
       world.reset();
       location.reload();
     };
-    if (tg?.showConfirm) tg.showConfirm("Стереть все вмешательства и вырастить остров заново?", (ok) => ok && go());
-    else if (confirm("Стереть все вмешательства и вырастить остров заново?")) go();
+    if (tg?.showConfirm) tg.showConfirm("Стереть всё и вырастить остров заново?", (ok) => ok && go());
+    else if (confirm("Стереть всё и вырастить остров заново?")) go();
   });
+
+  setCategory(CATEGORIES[0]);
+  renderChronicle(world.chronicle);
 }
+
 
 function plural(n) {
   const m10 = n % 10;
