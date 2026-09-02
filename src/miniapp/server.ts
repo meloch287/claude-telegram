@@ -121,6 +121,12 @@ function buildLimits(userId: number) {
   return rows;
 }
 
+/** Число в 31 бит из id: мир одного человека всегда один и тот же. */
+function worldSeed(userId: number): number {
+  const digest = createHash("sha1").update(`world:${userId}`).digest();
+  return digest.readUInt32BE(0) & 0x7fffffff;
+}
+
 function profilePayload(userId: number) {
   const user = getOrCreateUser(userId);
   const cat = catForTokens(user.total_tokens);
@@ -188,6 +194,11 @@ function profilePayload(userId: number) {
     })),
     achievements: ACHIEVEMENTS.map((a) => ({ ...a, unlocked: unlocked.has(a.id) })),
     botUsername,
+    /**
+     * Сид острова для вкладки «Мой город». Не сам user_id: он бы утёк в
+     * localStorage и в адрес картинки, а перемешанный — просто число.
+     */
+    world: { seed: worldSeed(userId) },
     // Своя квота: null — ограничения нет, и это умолчание.
     quota: quotaLeft(userId),
     limits: buildLimits(userId),

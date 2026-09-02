@@ -16,7 +16,6 @@ import { createDangerGuard } from "./guard.js";
 import {
   describeToolShort,
   chunk,
-  formatUsd,
   formatDuration,
   esc,
   splitCodeBlocks,
@@ -802,7 +801,7 @@ export class Conversation {
 
         const summary =
           message.subtype === "success"
-            ? `✅ Готово · ${formatDuration(message.duration_ms)} · ${formatTokensShort(deltaTokens)} · ${formatUsd(deltaCost)}`
+            ? `✅ Готово · ${formatDuration(message.duration_ms)} · ${formatTokensShort(deltaTokens)}`
             : `⚠️ Прервано: ${esc(message.subtype)}`;
         await output.clearStatus(summary);
 

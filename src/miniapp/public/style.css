@@ -1092,3 +1092,317 @@ h2 {
   font-size: 13px;
   box-shadow: 0 8px 24px rgb(0 0 0 / 22%);
 }
+
+/* ── Вкладки ───────────────────────────────────────────────────────────── */
+
+.tabs {
+  display: flex;
+  gap: 6px;
+  margin-top: 14px;
+  padding: 4px;
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+
+.tab {
+  flex: 1;
+  min-height: 40px;
+  padding: 8px 12px;
+  background: transparent;
+  color: var(--ink-muted);
+  border: none;
+  border-radius: 999px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.tab[aria-selected="true"] {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 10%);
+}
+
+/* ── Мой город ─────────────────────────────────────────────────────────── */
+
+/*
+  Карта — единственное место, где мини-апп уходит от кремового света в
+  ночь: тёмная рама вокруг пиксельного острова делает его картинкой из
+  старой приставки, а не диаграммой. Рама — «бронза» с внутренней тенью,
+  канвас растянут на всю ширину и масштабируется без размытия.
+*/
+.city {
+  margin-top: 16px;
+  animation: city-in 0.5s ease both;
+}
+
+@keyframes city-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.city-frame {
+  position: relative;
+  padding: 8px;
+  background:
+    linear-gradient(135deg, #5a4128, #2f2116 55%, #4a3521);
+  border: 1px solid #1c130c;
+  border-radius: var(--radius-lg);
+  box-shadow:
+    inset 0 0 0 2px #a9814f,
+    inset 0 0 0 3px #3a2818,
+    0 18px 40px rgb(0 0 0 / 35%);
+}
+
+.city-map {
+  display: block;
+  width: 100%;
+  aspect-ratio: 64 / 44;
+  border-radius: 8px;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  touch-action: manipulation;
+  cursor: crosshair;
+  background: #1f4f7a;
+}
+
+/* Лёгкие строки развёртки поверх: дешёвый способ добавить экрану глубины. */
+.city-scanlines {
+  position: absolute;
+  inset: 8px;
+  border-radius: 8px;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgb(0 0 0 / 0%) 0,
+    rgb(0 0 0 / 0%) 3px,
+    rgb(0 0 0 / 7%) 3px,
+    rgb(0 0 0 / 7%) 4px
+  );
+  mix-blend-mode: multiply;
+}
+
+.city-caption {
+  margin: 10px 2px 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 0.9375rem;
+  color: var(--page-ink);
+}
+
+.powers {
+  display: flex;
+  gap: 6px;
+  margin-top: 14px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: none;
+}
+
+.powers::-webkit-scrollbar {
+  display: none;
+}
+
+.power {
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 8px 14px;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font: inherit;
+  font-size: 0.9375rem;
+  cursor: pointer;
+  transition: transform 0.12s ease, background 0.2s ease;
+}
+
+.power:active {
+  transform: scale(0.96);
+}
+
+.power--on {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+}
+
+.city-hint {
+  margin-top: 8px;
+}
+
+/* Карточки народов: цвет шкуры — полоской слева, чтобы народ узнавался
+   так же, как на карте. */
+.races {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.race {
+  position: relative;
+  padding: 12px 12px 12px 16px;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+  cursor: pointer;
+  transition: transform 0.12s ease;
+}
+
+.race::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  background: var(--race-color, var(--accent));
+}
+
+.race--on {
+  outline: 2px solid var(--race-color, var(--accent));
+  outline-offset: -2px;
+}
+
+.race:active {
+  transform: scale(0.98);
+}
+
+.race-name {
+  display: block;
+  font-weight: 600;
+  font-size: 0.9375rem;
+}
+
+.race-pop {
+  display: block;
+  margin-top: 2px;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.375rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+.race-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.8125rem;
+  color: var(--ink-muted);
+}
+
+.city-h2 {
+  margin-top: 24px;
+}
+
+.chronicle {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+
+.chronicle li {
+  padding: 10px 12px;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font-size: 0.9375rem;
+  animation: chron-in 0.35s ease both;
+}
+
+@keyframes chron-in {
+  from {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.chronicle-empty {
+  color: var(--ink-muted);
+}
+
+.city-reset-row {
+  margin: 20px 0 0;
+  text-align: center;
+}
+
+.button--ghost {
+  background: transparent;
+  color: var(--ink-muted);
+  border: 1px solid var(--line);
+  font-weight: 500;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .city,
+  .chronicle li {
+    animation: none;
+  }
+}
+
+/* ── Зум карты ─────────────────────────────────────────────────────────── */
+
+.city-viewport {
+  overflow: auto;
+  border-radius: 8px;
+  scrollbar-width: none;
+  /* Прокрутка пальцем — да, но клик по клетке не должен превращаться в скролл. */
+  touch-action: pan-x pan-y;
+  overscroll-behavior: contain;
+}
+
+.city-viewport::-webkit-scrollbar {
+  display: none;
+}
+
+.city-stage {
+  position: relative;
+  width: 100%;
+}
+
+.city-frame--zoom .city-stage {
+  width: 220%;
+}
+
+.city-scanlines {
+  inset: 0;
+}
+
+.city-zoom {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  background: rgb(250 249 245 / 88%);
+  color: var(--ink);
+  border: 1px solid #a9814f;
+  border-radius: 999px;
+  font-size: 18px;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgb(0 0 0 / 30%);
+}
+
+.city-zoom[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+}

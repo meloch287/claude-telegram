@@ -14,16 +14,63 @@
 
     <div id="app" hidden>
       <header class="page-header">
-        <h1>Мой Claude-кот</h1>
+        <h1 id="page-title">Мой Claude-кот</h1>
         <p class="plan" id="plan-line"></p>
+        <!--
+          Две вкладки: кот со статистикой и город. Настоящие tabs с ролями —
+          переключение стрелками и понятное чтение с экрана.
+        -->
+        <div class="tabs" role="tablist" aria-label="Разделы">
+          <button class="tab" role="tab" id="tab-cat" aria-selected="true" aria-controls="panel-cat" type="button">
+            Кот
+          </button>
+          <button class="tab" role="tab" id="tab-city" aria-selected="false" aria-controls="panel-city" tabindex="-1" type="button">
+            Мой город
+          </button>
+        </div>
       </header>
+
+      <!--
+        Город — отдельная панель до <main>: у него своя шапка и своя логика,
+        а статистика кота остаётся как была.
+      -->
+      <section class="city" id="panel-city" role="tabpanel" aria-labelledby="tab-city" tabindex="0" hidden>
+        <div class="city-frame">
+          <!-- Вьюпорт прокручивается, когда карта приближена: как в WorldBox. -->
+          <div class="city-viewport" id="city-viewport">
+            <div class="city-stage">
+              <canvas class="city-map" id="city-map" aria-label="Карта континента четырёх кошачьих народов"></canvas>
+              <div class="city-scanlines" aria-hidden="true"></div>
+            </div>
+          </div>
+          <button class="city-zoom" id="city-zoom" type="button" aria-pressed="false" aria-label="Приблизить карту">🔍</button>
+        </div>
+        <p class="city-caption" id="city-caption"></p>
+
+        <div class="powers" role="group" aria-label="Силы бога">
+          <button class="power power--on" type="button" data-power="cat" aria-pressed="true">🐱 Кот</button>
+          <button class="power" type="button" data-power="house" aria-pressed="false">🏠 Дом</button>
+          <button class="power" type="button" data-power="tree" aria-pressed="false">🌲 Дерево</button>
+          <button class="power" type="button" data-power="fire" aria-pressed="false">🔥 Огонь</button>
+          <button class="power" type="button" data-power="meteor" aria-pressed="false">☄️ Метеорит</button>
+        </div>
+        <p class="section-note city-hint" id="city-hint">Выбери силу и ткни в карту.</p>
+
+        <ul class="races" id="races" role="list"></ul>
+
+        <h2 class="city-h2">Летопись</h2>
+        <ol class="chronicle" id="chronicle" role="list" aria-live="polite"></ol>
+        <p class="city-reset-row">
+          <button class="button button--ghost" id="city-reset" type="button">Начать остров заново</button>
+        </p>
+      </section>
 
       <!--
         tabindex="-1" обязателен: без него активация skip-ссылки в части
         WebView проскроллит страницу, но не переставит фокус, и следующий Tab
         продолжит с прежнего места.
       -->
-      <main id="main" tabindex="-1">
+      <main id="main" tabindex="-1" role="tabpanel" aria-labelledby="tab-cat">
         <section class="hero" aria-labelledby="hero-name">
           <div class="hero-art">
             <div id="hero-cat" class="cat-art cat-art--large"></div>

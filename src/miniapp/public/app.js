@@ -1,5 +1,6 @@
 import { catSvg } from "./cat-art.js";
 import { achievementSvg } from "./achievement-art.js";
+import { createWorld, RACES } from "./world.js";
 
 const tg = window.Telegram?.WebApp;
 const nf = new Intl.NumberFormat("ru-RU");
@@ -53,15 +54,13 @@ function render(profile) {
   renderCoop(profile.coop ?? []);
   renderQuota(profile.quota ?? null);
 
-  // Статистика бота: токены и деньги здесь про один и тот же период, поэтому
-  // их можно ставить рядом.
+  // Статистика бота. Денег и отказов здесь нет: сумма «по API» пугала и ничего
+  // не решала, а число отклонённых инструментов — служебное.
   const stats = [
     [nf.format(bot.tokens), "токенов в боте"],
-    [`${bot.costUsd.toFixed(2)}`, "стоило бы по API"],
     [nf.format(bot.messages), "сообщений"],
     [nf.format(totals.sessions), "сессий"],
     [nf.format(totals.toolsAllowed), "инструментов разрешено"],
-    [nf.format(totals.toolsDenied), "отклонено"],
     [nf.format(totals.streakDays), "дней подряд"],
     [nf.format(today.tokens), "токенов сегодня"],
   ];
@@ -170,6 +169,214 @@ function render(profile) {
   }
 
   setupShare(profile);
+  setupTabs();
+  setupCity(profile);
+}
+
+/* ── Вкладки ──────────────────────────────────────────────────────────────
+   Переключение по клику и стрелками, как положено role="tablist". Панель
+   города при этом не пересоздаётся: мир продолжает жить, просто не рисуется,
+   пока его не видно, — и не жжёт батарею. */
+
+let world = null;
+
+function setupTabs() {
+  const tabs = [el("tab-cat"), el("tab-city")];
+  const panels = [el("main"), el("panel-city")];
+  const title = el("page-title");
+
+  const select = (index) => {
+    tabs.forEach((tab, i) => {
+      const on = i === index;
+      tab.setAttribute("aria-selected", String(on));
+      tab.tabIndex = on ? 0 : -1;
+      panels[i].hidden = !on;
+    });
+    title.textContent = index === 0 ? "Мой Claude-кот" : "Мой город";
+    if (index === 1) world?.start();
+    else world?.stop();
+    // Кнопка «поделиться» — про кота: на карте она сбивает с толку.
+    if (tg?.MainButton) {
+      if (index === 0) tg.MainButton.show();
+      else tg.MainButton.hide();
+    }
+    try {
+      localStorage.setItem("tab", String(index));
+    } catch {
+      /* ничего */
+    }
+  };
+
+  tabs.forEach((tab, i) => {
+    tab.addEventListener("click", () => select(i));
+    tab.addEventListener("keydown", (e) => {
+      if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+      e.preventDefault();
+      const next = (i + (e.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+      select(next);
+      tabs[next].focus();
+    });
+  });
+
+  let remembered = 0;
+  try {
+    remembered = Number(localStorage.getItem("tab") || 0);
+  } catch {
+    /* ничего */
+  }
+  select(remembered === 1 ? 1 : 0);
+}
+
+/* ── Мой город ────────────────────────────────────────────────────────── */
+
+function setupCity(profile) {
+  const canvas = el("city-map");
+  const seed = profile.world?.seed ?? 1;
+  const chronicleList = el("chronicle");
+  const racesList = el("races");
+
+  const renderChronicle = (items) => {
+    chronicleList.replaceChildren();
+    if (!items.length) {
+      const li = document.createElement("li");
+      li.className = "chronicle-empty";
+      li.append(text("Пока тихо. Ткни в карту — и что-нибудь случится."));
+      chronicleList.append(li);
+      return;
+    }
+    for (const item of items) {
+      const li = document.createElement("li");
+      li.append(text(item.text));
+      chronicleList.append(li);
+    }
+  };
+
+  let selectedRace = 0;
+  const renderRaces = (races) => {
+    racesList.replaceChildren();
+    races.forEach((race, r) => {
+      const li = document.createElement("li");
+      li.className = `race${r === selectedRace ? " race--on" : ""}`;
+      li.style.setProperty("--race-color", race.fur === "#e8e2cf" ? race.hat : race.fur);
+      li.setAttribute("role", "button");
+      li.tabIndex = 0;
+      li.setAttribute("aria-pressed", String(r === selectedRace));
+
+      const name = document.createElement("span");
+      name.className = "race-name";
+      name.append(text(race.name));
+      const pop = document.createElement("span");
+      pop.className = "race-pop";
+      pop.append(text(nf.format(race.pop)));
+      const sub = document.createElement("span");
+      sub.className = "race-sub";
+      sub.append(text(`${race.houses} дом${plural(race.houses)} · ${race.mood}`));
+      li.append(name, pop, sub);
+
+      const choose = () => {
+        selectedRace = r;
+        world?.setRace(r);
+        for (const node of racesList.children) {
+          const on = Number(node.dataset.race) === r;
+          node.classList.toggle("race--on", on);
+          node.setAttribute("aria-pressed", String(on));
+        }
+        el("city-hint").textContent = `Выбраны ${race.name.toLowerCase()}: коты и дома будут их.`;
+      };
+      li.dataset.race = String(r);
+      li.addEventListener("click", choose);
+      li.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          choose();
+        }
+      });
+      racesList.append(li);
+    });
+  };
+
+  world = createWorld({
+    seed,
+    stats: {
+      tokens: profile.totals?.tokens ?? 0,
+      sessions: profile.totals?.sessions ?? 0,
+      streakDays: profile.totals?.streakDays ?? 0,
+    },
+    canvas,
+    onEvent: renderChronicle,
+    onRaces: renderRaces,
+  });
+  renderChronicle(world.chronicle);
+
+  el("city-caption").textContent =
+    `Остров №${seed % 10000}. На нём ${nf.format(world.population)} кот${plural(world.population)} четырёх народов. ` +
+    `Остров растёт от твоей работы с ботом.`;
+
+  // Силы бога.
+  const powers = document.querySelectorAll(".power");
+  const hints = {
+    cat: "Ткни в сушу — там появится кот выбранного народа.",
+    house: "Ткни в сушу — там встанет дом. Гномы строят в горах.",
+    tree: "Ткни в сушу — вырастет дерево. Эльфы будут рады.",
+    fire: "Ткни в дерево или дом. Осторожно: огонь перекидывается.",
+    meteor: "Ткни куда угодно. Будет кратер.",
+  };
+  powers.forEach((button) => {
+    button.addEventListener("click", () => {
+      powers.forEach((b) => {
+        const on = b === button;
+        b.classList.toggle("power--on", on);
+        b.setAttribute("aria-pressed", String(on));
+      });
+      world.setPower(button.dataset.power);
+      el("city-hint").textContent = hints[button.dataset.power] ?? "";
+      tg?.HapticFeedback?.selectionChanged?.();
+    });
+  });
+
+  // click, а не pointerdown: при приближенной карте палец сперва скроллит,
+  // и «тык» с началом прокрутки — разные жесты. click срабатывает только на
+  // настоящее касание без движения.
+  canvas.addEventListener("click", (e) => {
+    world.tapAt(e.clientX, e.clientY);
+    tg?.HapticFeedback?.impactOccurred?.("light");
+  });
+
+  // Зум ×2: карта шире экрана, вьюпорт прокручивается. Центрируем на том же
+  // месте, куда смотрели, — иначе после нажатия остров уезжает в угол.
+  const zoomButton = el("city-zoom");
+  const frame = zoomButton.closest(".city-frame");
+  const viewport = el("city-viewport");
+  zoomButton.addEventListener("click", () => {
+    const on = !frame.classList.contains("city-frame--zoom");
+    const ratioX = (viewport.scrollLeft + viewport.clientWidth / 2) / viewport.scrollWidth;
+    const ratioY = (viewport.scrollTop + viewport.clientHeight / 2) / viewport.scrollHeight;
+    frame.classList.toggle("city-frame--zoom", on);
+    zoomButton.setAttribute("aria-pressed", String(on));
+    zoomButton.setAttribute("aria-label", on ? "Отдалить карту" : "Приблизить карту");
+    zoomButton.textContent = on ? "🔎" : "🔍";
+    requestAnimationFrame(() => {
+      viewport.scrollLeft = ratioX * viewport.scrollWidth - viewport.clientWidth / 2;
+      viewport.scrollTop = ratioY * viewport.scrollHeight - viewport.clientHeight / 2;
+    });
+  });
+
+  el("city-reset").addEventListener("click", () => {
+    const go = () => {
+      world.reset();
+      location.reload();
+    };
+    if (tg?.showConfirm) tg.showConfirm("Стереть все вмешательства и вырастить остров заново?", (ok) => ok && go());
+    else if (confirm("Стереть все вмешательства и вырастить остров заново?")) go();
+  });
+}
+
+function plural(n) {
+  const m10 = n % 10;
+  const m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return "";
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return "а";
+  return "ов";
 }
 
 const LIMIT_STATUSES = {
@@ -606,8 +813,7 @@ function compactTokens(value) {
 function showTip(index, centerX, width) {
   const day = chartDays[index];
   const tip = el("chart-tip");
-  const money = day.costUsd > 0 ? ` · $${day.costUsd.toFixed(2)}` : "";
-  tip.textContent = `${dayFull(day.day)} · ${nf.format(day.tokens)} токенов${money}`;
+  tip.textContent = `${dayFull(day.day)} · ${nf.format(day.tokens)} токенов`;
   tip.hidden = false;
   // Не даём подсказке уехать за край экрана — на узком телефоне это заметно.
   const half = tip.offsetWidth / 2;

@@ -77,7 +77,7 @@ import { MODELS, commitKeyboard } from "./bot/keyboards.js";
 import { isScreenId, renderScreen, type ScreenId } from "./bot/screens.js";
 import { checkAchievements, renderUnlocked, unlockedIds } from "./achievements.js";
 import { ACHIEVEMENTS, CAT_LEVELS, catForTokens, formatTokens, nextCat } from "./cats.js";
-import { esc, formatUsd } from "./agent/render.js";
+import { esc } from "./agent/render.js";
 import { limitTitle, percentOf, toMillis, WINDOWS } from "./limits.js";
 import { subscriptionUsage } from "./subscription-usage.js";
 import { saveTelegramFile } from "./bot/attachments.js";
@@ -143,6 +143,26 @@ const bot = new Bot(
   config.botToken,
   tgFetch ? { client: { baseFetchConfig: tgFetch } } : undefined,
 );
+
+/**
+ * Сеть до телеграма иногда отваливается на несколько секунд. Без повтора
+ * ответ пропадает совсем: человек видит «печатает», потом тишину и пишет
+ * «ау». Повторяем отправку — телеграм отвечает отказом (GrammyError) на
+ * настоящие ошибки, а сюда попадают только обрывы связи.
+ */
+bot.api.config.use(async (prev, method, payload, signal) => {
+  const паузы = [1000, 3000, 7000];
+  for (let попытка = 0; ; попытка += 1) {
+    try {
+      return await prev(method, payload, signal);
+    } catch (error) {
+      const сетевая = error instanceof HttpError;
+      if (!сетевая || попытка >= паузы.length) throw error;
+      console.warn(`[tg] ${method}: связь оборвалась, повтор через ${паузы[попытка]} мс`);
+      await new Promise((готово) => setTimeout(готово, паузы[попытка]));
+    }
+  }
+});
 
 /** Владелец — первый в списке из .env. Он один распоряжается доступом. */
 function ownerId(): number | undefined {
@@ -597,7 +617,25 @@ async function showScreen(ctx: CommandContext<Context>, id: ScreenId): Promise<v
 
 bot.command("menu", async (ctx) => showScreen(ctx, "menu"));
 bot.command("mode", async (ctx) => showScreen(ctx, "mode"));
-bot.command("model", async (ctx) => showScreen(ctx, "model"));
+bot.command("model", async (ctx) => {
+  // «/model claude-fable-5-1» ставит модель по ID напрямую: новые модели
+  // выходят чаще, чем мы правим список кнопок.
+  const raw = (ctx.match ?? "").trim();
+  if (raw) {
+    if (!/^[a-z0-9._-]+$/i.test(raw)) {
+      await ctx.reply("Так модель не называется. Пример: /model claude-fable-5-1");
+      return;
+    }
+    const model = raw === "default" ? null : raw;
+    setModel(ctx.from!.id, model);
+    const session = getSession(ctx.chat.id);
+    if (session && model) await session.conversation.setModel(model);
+    const label = MODELS.find(([id]) => id === (model ?? ""))?.[1] ?? model;
+    await ctx.reply(`Модель: ${label ?? "по умолчанию"}`);
+    return;
+  }
+  await showScreen(ctx, "model");
+});
 
 /**
  * Забрать репозиторий в рабочую папку проекта.
@@ -1210,16 +1248,15 @@ bot.command("stats", async (ctx) => {
         ? `До «${esc(next.name)}»: ${formatTokens(next.threshold - user.total_tokens)} токенов`
         : "Максимальный уровень достигнут",
       "",
-      // Токены и деньги ставим рядом только там, где они про один период:
-      // импортированная история идёт отдельной строкой, стоимости у неё нет.
-      `В боте: ${formatTokens(user.total_tokens - user.history_tokens)} токенов · ${formatUsd(user.total_cost_usd)}`,
+      // Импортированная история идёт отдельной строкой: у неё другая природа.
+      `В боте: ${formatTokens(user.total_tokens - user.history_tokens)} токенов`,
       ...(user.history_tokens > 0
         ? [`Импортировано: ${formatTokens(user.history_tokens)} токенов (без стоимости)`]
         : []),
       `Всего с историей: ${formatTokens(user.total_tokens)} токенов`,
       `Сегодня: ${formatTokens(today.tokens)} токенов`,
       `Сообщений: ${user.total_messages - user.history_messages} · сессий: ${user.total_sessions}`,
-      `Инструментов разрешено: ${user.tools_allowed} · отклонено: ${user.tools_denied}`,
+      `Инструментов разрешено: ${user.tools_allowed}`,
       `Серия дней подряд: ${user.streak_days}`,
     ].join("\n"),
     { parse_mode: "HTML" },
