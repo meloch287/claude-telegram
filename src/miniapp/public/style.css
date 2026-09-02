@@ -1709,3 +1709,14 @@ h2 {
 .wb-settings[hidden] {
   display: none;
 }
+
+/* Шапка на узком экране: переносится, не растягивает раму. */
+.wb-hud {
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: 0.75rem;
+}
+
+.wb-hud-alive {
+  font-size: 0.6875rem;
+}

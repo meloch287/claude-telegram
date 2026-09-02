@@ -378,14 +378,14 @@ function setupCity(profile) {
   const renderHud = ({ pop, day, night, era, eraName, alive, paused }) => {
     el("hud-pop").innerHTML = `${icon("cat", 16, "wb-hud-icon")} ${nf.format(pop)}`;
     el("hud-day").textContent = `${paused ? "Пауза · " : ""}${night ? "Ночь" : "День"} ${day}`;
-    el("hud-alive").textContent = `Живёт ${aliveText(alive)}`;
+    el("hud-alive").textContent = `жив ${aliveText(alive)}`;
     el("set-alive").textContent = `Остров живёт ${aliveText(alive)} — с ${new Date(Date.now() - alive).toLocaleDateString("ru-RU")}.`;
     // Плашка эры слева на карте: римская цифра и название.
     const plaque = el("hud-era");
     plaque.innerHTML = `${icon("era", 14, "wb-era-icon")}<span class="wb-era-num">${["I", "II", "III"][era] ?? era + 1}</span><span class="wb-era-name">${eraName}</span>`;
     plaque.dataset.era = String(era);
   };
-  el("hud-name").textContent = `Остров №${seed % 10000}`;
+  el("hud-name").textContent = `№${seed % 10000}`;
 
   world = createWorld({
     seed,
