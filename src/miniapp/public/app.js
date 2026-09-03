@@ -410,11 +410,8 @@ function setupCity(profile) {
       pop.append(text(nf.format(v.pop)));
       tag.append(name, pop);
       if (atWar[v.race]) tag.insertAdjacentHTML("beforeend", icon("war", 12, "wb-label-war"));
-      // Склад: брёвна и камень, плюс верфь, если есть.
-      const stock = document.createElement("span");
-      stock.className = "wb-label-stock";
-      stock.innerHTML = `${icon("log", 11)}${v.wood}${icon("rock", 11)}${v.stone}${v.shipyard ? icon("ship", 11) : ""}`;
-      tag.append(stock);
+      // Склад в подпись не выносим: экономика работает в фоне, а место на
+      // карте дорого. Цифры остаются в подсказке по нажатию.
       tag.title = `Основал ${v.founder}. Домов: ${v.houses}. Брёвен ${v.wood}, камня ${v.stone}${v.shipyard ? ", есть верфь" : ""}`;
       labels.append(tag);
     }

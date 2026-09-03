@@ -1874,11 +1874,6 @@ h2 {
   max-height: calc(100% - 20px);
 }
 
-.wb-label {
-  flex-wrap: wrap;
-  justify-content: center;
-  row-gap: 1px;
-}
 
 .wb-label-stock {
   flex-basis: 100%;
