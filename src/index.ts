@@ -1477,15 +1477,9 @@ async function runTask(ctx: Context, prompt: string): Promise<boolean> {
   const chatId = ctx.chat?.id;
   if (userId === undefined || chatId === undefined) return false;
 
-  const остаток = quotaLeft(userId);
-  if (остаток && остаток.left <= 0) {
-    await ctx.reply(
-      `📊 Суточная квота исчерпана: ${formatTokens(остаток.used)} из ${formatTokens(остаток.limit)} токенов.\n\n` +
-        "Она обнулится завтра. Или попроси того, кто тебя позвал, поднять предел.",
-    );
-    return false;
-  }
-
+  // Внутренняя суточная квота больше не блокирует: она отказывала «квота
+  // исчерпана», хотя лимитов подписки хватало с запасом (04.09.2026). Расход
+  // по-прежнему считается и виден в списке пользователей.
   recordMessage(userId);
   try {
     const session = ensureSession({

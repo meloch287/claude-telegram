@@ -55,6 +55,34 @@ services:
     networks:
       - claude
 
+  # Запасная расшифровка голосовых: faster-whisper на CPU, интерфейс OpenAI.
+  #
+  # Основной сервис (Polza) платный, и когда на нём кончаются деньги, голосовые
+  # переставали работать вовсе. Этот контейнер бесплатный и без внешних
+  # зависимостей: бот переключается на него сам при любой ошибке основного
+  # (см. src/bot/voice.ts). Модель small — компромисс между русским качеством
+  # и памятью: около гигабайта, на 8 ядрах голосовое в 20 секунд разбирает за
+  # несколько секунд. Веса тянутся с HuggingFace при первом запросе и лежат в
+  # ./whisper-cache, пересборка их не трогает.
+  whisper:
+    image: fedirz/faster-whisper-server:latest-cpu
+    container_name: claude-whisper
+    restart: unless-stopped
+    environment:
+      WHISPER__MODEL: Systran/faster-whisper-small
+      WHISPER__INFERENCE_DEVICE: cpu
+      WHISPER__COMPUTE_TYPE: int8
+      # Выгружать модель из памяти не даём: иначе каждый голос ждёт её загрузки.
+      WHISPER__TTL: -1
+    volumes:
+      - ./whisper-cache:/root/.cache/huggingface
+    deploy:
+      resources:
+        limits:
+          memory: 2500M
+    networks:
+      - claude
+
   # Свой сервер Bot API — снимает потолок в 20 МБ на приём и 50 МБ на отправку.
   #
   # Облачный Bot API этих пределов не двигает: архив на сорок мегабайт до бота

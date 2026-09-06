@@ -7,3 +7,5 @@ workspaces/
 .DS_Store
 proxy/
 claude-home/
+whisper-cache/
+last-deploy-report.txt

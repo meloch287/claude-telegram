@@ -20,19 +20,49 @@ export class TranscriptionNotConfigured extends Error {
 }
 
 export function transcriptionConfigured(): boolean {
-  return Boolean(config.whisperUrl);
+  return Boolean(config.whisperUrl || config.whisperFallbackUrl);
 }
 
-export async function transcribe(audio: Buffer, fileName: string): Promise<string> {
-  if (!config.whisperUrl) throw new TranscriptionNotConfigured();
+interface Backend {
+  name: string;
+  url: string;
+  model: string;
+  token: string;
+  viaProxy: boolean;
+}
 
+function backends(): Backend[] {
+  const list: Backend[] = [];
+  if (config.whisperUrl) {
+    list.push({
+      name: "основной",
+      url: config.whisperUrl,
+      model: config.whisperModel,
+      token: config.whisperToken,
+      viaProxy: config.whisperViaProxy,
+    });
+  }
+  if (config.whisperFallbackUrl) {
+    list.push({
+      name: "запасной",
+      url: config.whisperFallbackUrl,
+      model: config.whisperFallbackModel,
+      token: config.whisperFallbackToken,
+      // Запасной — локальный контейнер, прокси ему ни к чему.
+      viaProxy: false,
+    });
+  }
+  return list;
+}
+
+async function transcribeWith(backend: Backend, audio: Buffer, fileName: string): Promise<string> {
   const form = new FormData();
   form.append("file", new Blob([new Uint8Array(audio)]), fileName);
-  if (config.whisperModel) form.append("model", config.whisperModel);
+  if (backend.model) form.append("model", backend.model);
   form.append("language", "ru");
 
   const headers: Record<string, string> = {};
-  if (config.whisperToken) headers.Authorization = `Bearer ${config.whisperToken}`;
+  if (backend.token) headers.Authorization = `Bearer ${backend.token}`;
 
   // По умолчанию идём напрямую, а не через канал до Anthropic.
   //
@@ -43,12 +73,22 @@ export async function transcribe(audio: Buffer, fileName: string): Promise<strin
   // Если сервис всё же закрыт, включается WHISPER_VIA_PROXY=1.
   const init: RequestInit = { method: "POST", body: form, headers };
   const proxy = activeProxyUrl();
-  if (config.whisperViaProxy && proxy) {
+  if (backend.viaProxy && proxy) {
     const { ProxyAgent } = await import("undici");
     (init as { dispatcher?: unknown }).dispatcher = new ProxyAgent(proxy);
   }
 
-  const response = await fetch(config.whisperUrl, init);
+  // Локальный whisper на CPU может думать десятки секунд — даём запас, но не
+  // вечность: зависший запрос хуже честного отказа.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 120_000);
+  init.signal = controller.signal;
+  let response: Response;
+  try {
+    response = await fetch(backend.url, init);
+  } finally {
+    clearTimeout(timer);
+  }
   if (!response.ok) {
     throw new Error(`сервис расшифровки ответил ${response.status}`);
   }
@@ -57,4 +97,26 @@ export async function transcribe(audio: Buffer, fileName: string): Promise<strin
   const text = (payload.text ?? payload.transcription ?? "").trim();
   if (!text) throw new Error("сервис вернул пустую расшифровку");
   return text;
+}
+
+/**
+ * Пробует бэкенды по очереди: основной, затем запасной. Любая ошибка
+ * основного (402 «нет денег», 401, 5xx, сеть, таймаут) — повод перейти к
+ * запасному, а не отказывать человеку. В ошибке итог по каждому.
+ */
+export async function transcribe(audio: Buffer, fileName: string): Promise<string> {
+  const chain = backends();
+  if (chain.length === 0) throw new TranscriptionNotConfigured();
+
+  const failures: string[] = [];
+  for (const backend of chain) {
+    try {
+      return await transcribeWith(backend, audio, fileName);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      failures.push(`${backend.name}: ${reason}`);
+      console.warn(`[voice] ${backend.name} (${backend.url}) не справился: ${reason}`);
+    }
+  }
+  throw new Error(failures.join("; "));
 }

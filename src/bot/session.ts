@@ -16,28 +16,6 @@ import {
   saveChat,
 } from "../db.js";
 import { checkAchievements, renderUnlocked } from "../achievements.js";
-import type { RateLimitUpdate } from "../agent/conversation.js";
-
-/** Человеческие названия окон: 'seven_day_opus' в чате читать невозможно. */
-const LIMIT_NAMES: Record<string, string> = {
-  five_hour: "пятичасовое окно",
-  seven_day: "недельный лимит",
-  seven_day_opus: "недельный лимит Opus",
-  seven_day_sonnet: "недельный лимит Sonnet",
-  seven_day_overage_included: "недельный лимит с перерасходом",
-  overage: "перерасход",
-};
-
-function renderLimitWarning(limit: RateLimitUpdate): string {
-  const name = LIMIT_NAMES[limit.limitType] ?? limit.limitType;
-  const percent =
-    limit.utilization === undefined ? "" : ` — выбрано ${Math.round(limit.utilization)}%`;
-  const resets = limit.resetsAt
-    ? `\nОбнулится: ${new Date(limit.resetsAt * 1000).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}`
-    : "";
-  const head = limit.status === "rejected" ? "🚫 Лимит исчерпан" : "⚠️ Лимит на исходе";
-  return `${head}: ${name}${percent}${resets}`;
-}
 
 export interface ChatSession {
   conversation: Conversation;
@@ -149,13 +127,11 @@ export function ensureSession(options: EnsureOptions): ChatSession {
       if (unlocked.length > 0) void notify(renderUnlocked(unlocked));
     },
     onRateLimit: (limit) => {
+      // Только запись для /status и мини-аппа. В чат про лимиты не пишем:
+      // SDK присылал «лимит исчерпан», когда по факту запаса было полно, и
+      // это только пугало (04.09.2026). Если запрос реально отклонён, ошибка
+      // и так придёт ответом на сообщение.
       recordRateLimit(userId, limit);
-      // Упереться в лимит посреди работы и не понять почему — худшее, что может
-      // случиться. Поэтому предупреждение и отказ уходят в чат сразу, не
-      // дожидаясь, пока пользователь откроет мини-апп.
-      // Обновление из /usage статуса не несёт — тревожить по нему нечем.
-      if (limit.status === undefined || limit.status === "allowed") return;
-      void notify(renderLimitWarning(limit));
     },
   });
 

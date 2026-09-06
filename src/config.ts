@@ -76,6 +76,14 @@ export const config = {
   whisperToken: optional("WHISPER_TOKEN", ""),
   /** Слать голос через тот же прокси, что и запросы к Anthropic. Обычно не нужно. */
   whisperViaProxy: optional("WHISPER_VIA_PROXY", "") === "1",
+  /**
+   * Запасная расшифровка: тот же интерфейс, обычно локальный faster-whisper в
+   * соседнем контейнере. Включается, когда основной сервис отвечает ошибкой —
+   * например, кончились деньги на Polza. Бесплатно и без внешней зависимости.
+   */
+  whisperFallbackUrl: optional("WHISPER_FALLBACK_URL", ""),
+  whisperFallbackModel: optional("WHISPER_FALLBACK_MODEL", ""),
+  whisperFallbackToken: optional("WHISPER_FALLBACK_TOKEN", ""),
 
   /**
    * Озвучка ответов. Адрес сервиса с интерфейсом OpenAI (POST /v1/audio/speech).
