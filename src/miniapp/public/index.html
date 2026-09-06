@@ -81,6 +81,9 @@
             </div>
             <div class="wb-settings-sub">Карта</div>
             <div class="wb-maps" id="wb-maps" role="group" aria-label="Выбор карты"></div>
+            <div id="wb-ach"></div>
+            <div id="wb-top"></div>
+            <button class="button button--ghost wb-settings-reset" id="city-story" type="button">Поделиться историей острова</button>
             <button class="button button--ghost wb-settings-reset" id="city-reset" type="button">Начать остров заново</button>
           </div>
 
@@ -135,15 +138,6 @@
           </div>
         </section>
 
-        <!--
-          Лимиты идут сразу после героя: это единственная секция, статус которой
-          бывает «горит». Прятать её за котами и достижениями неправильно.
-        -->
-        <section aria-labelledby="limits-heading">
-          <h2 id="limits-heading">Лимиты подписки</h2>
-          <p class="section-note" id="limits-note"></p>
-          <ul class="limits" id="limits" role="list" hidden></ul>
-        </section>
 
         <section aria-labelledby="stats-heading">
           <h2 id="stats-heading">Статистика</h2>
@@ -161,18 +155,6 @@
           Кооп показывается только тем, кто делит подписку: одинокому владельцу
           таблица из одной строки не нужна.
         -->
-        <!-- Своя квота: только тем, кому её поставили. -->
-        <section aria-labelledby="quota-heading" id="quota" hidden>
-          <h2 id="quota-heading">Суточная квота</h2>
-          <div class="limit-head">
-            <span class="limit-name" id="quota-name">Сегодня</span>
-            <span class="limit-percent" id="quota-value"></span>
-          </div>
-          <div class="progress-track" id="quota-track" aria-labelledby="quota-name">
-            <div class="progress-fill" id="quota-fill"></div>
-          </div>
-          <p class="section-note" id="quota-left"></p>
-        </section>
 
         <section aria-labelledby="coop-heading" id="coop-section" hidden>
           <h2 id="coop-heading">Кооп</h2>

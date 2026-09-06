@@ -16,8 +16,8 @@
  * Живое — коты, огонь, метеориты, ночь — рисуется каждый кадр поверх.
  */
 
-export const W = 56;
-export const H = 44;
+export const W = 84;
+export const H = 66;
 export const PX = 8;
 
 /* ── Ландшафт ───────────────────────────────────────────────────────────── */
@@ -128,6 +128,24 @@ export const RACES = [
     likes: (t) => (t === T.MOUNTAIN ? 3 : t === T.HILL ? 2 : 0),
     canStand: (t) => walkable(t) || t === T.MOUNTAIN,
     canBuild: (t) => t === T.MOUNTAIN || t === T.HILL,
+  },
+  {
+    id: "robot",
+    name: "Коты-роботы",
+    plural: "котов-роботов",
+    dat: "котам-роботам",
+    instr: "котами-роботами",
+    fur: "#8a97a8",
+    dark: "#5a6472",
+    hat: "#7fd4ff",
+    roof: "#7fd4ff",
+    wall: "#c9d3df",
+    banner: "#7fd4ff",
+    zone: "#7fd4ff",
+    minEra: 2,
+    likes: (t) => (t === T.MOUNTAIN ? 3 : t === T.HILL ? 2 : t === T.SAND ? 1 : 0),
+    canStand: (t) => walkable(t) || t === T.MOUNTAIN,
+    canBuild: (t) => t >= T.SAND && t <= T.MOUNTAIN,
   },
 ];
 
@@ -272,7 +290,7 @@ export function renderPreview(canvas, seed, mapId) {
 /* ── Мир ────────────────────────────────────────────────────────────────── */
 
 const DAY_TICKS = 30 * 180; // сутки — три минуты
-const SAVE_VERSION = 7;
+const SAVE_VERSION = 8; // 8: карта 84×66, воронки, распад народов
 
 /* ── Экономика ──────────────────────────────────────────────────────────
    Ничего не строится из воздуха. Кот рубит дерево минуту и приносит пять
@@ -285,6 +303,35 @@ const COST = {
   shipyard: { wood: 20, stone: 0 },
 };
 const CHOP_TICKS = 1800; // минута на дерево
+// Воронка от взрыва выпадает из территории и зарастает: метеорит — полторы
+// минуты, молния — полминуты. Иначе бомбить чужую землю бессмысленно.
+const CRATER_METEOR_TICKS = 2700;
+const CRATER_BOLT_TICKS = 900;
+const CRATER_NUKE_TICKS = 5400; // три минуты — пустошь надолго
+const NUKE_R = 7;
+// Времена года сменяются с игровым днём: четыре дня — год.
+const SEASONS = [
+  { id: "spring", name: "Весна" },
+  { id: "summer", name: "Лето" },
+  { id: "autumn", name: "Осень" },
+  { id: "winter", name: "Зима" },
+];
+const WEATHER = {
+  clear: { name: "Ясно" },
+  rain: { name: "Дождь" },
+  storm: { name: "Гроза" },
+  drought: { name: "Засуха" },
+  snow: { name: "Снегопад" },
+};
+const VOLCANO_ERUPT_TICKS = 240; // сколько течёт лава
+const LAVA_TTL = 420; // сколько клетка лавы горит, прежде чем застыть камнем
+const LAVA_FLOW = 7; // запас хода: дальше семи клеток от жерла лава не уходит
+const FOOD_PER_FISH = 6;
+const FOOD_PER_HARVEST = 5;
+const WALL_COST = 20;
+const ORE_CHANCE = 0.3;
+const GOLD_CHANCE = 0.12;
+const JOB_NAMES = { fisher: "рыбаком", farmer: "фермером", smith: "кузнецом", healer: "лекарем", priest: "жрецом" };
 const MINE_TICKS = 1800;
 const LOGS_PER_TREE = 5;
 const STONE_PER_DIG = 5;
@@ -298,8 +345,10 @@ const SYLLABLES = {
   elf: ["эль", "ли", "ара", "ниэ", "тал", "сэ", "ло", "ри", "вэ", "ан", "иль", "фэ", "ми", "лэн", "ая", "ор"],
   orc: ["гр", "рох", "ург", "заг", "мор", "кх", "дар", "гор", "рык", "шаг", "ог", "рум", "бар", "тук", "ур", "дрг"],
   gnome: ["дур", "бол", "кам", "тор", "гим", "фар", "нор", "бром", "дин", "гро", "ин", "ок", "лун", "торн", "ир", "бек"],
+  robot: ["зет", "икс", "бип", "рок", "мех", "кло", "вольт", "нео", "бит", "трон", "ом", "цикл", "ал", "гир", "дрон", "юнит"],
 };
 const SUFFIX = {
+  robot: ["-7", "-9", "порт", "блок", "ядро", "сектор"],
   human: ["град", "овка", "поль", "ово", "ск", "ино"],
   elf: ["лесье", "дол", "ирэль", "лориэн", "тэль", "иэн"],
   orc: ["рог", "грох", "-камень", "дуум", "рык", "мор"],
@@ -351,8 +400,8 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     tick: 0,
     day: 1,
     chronicle: [],
-    pop: [0, 0, 0, 0],
-    era: [0, 0, 0, 0], // эра каждого народа
+    pop: RACES.map(() => 0),
+    era: RACES.map(() => 0), // эра каждого народа
     ships: [], // { x, y, vx, vy, race, wait } — по воде
     born: Date.now(), // когда остров появился: эры идут по настоящему времени
     particles: [], // { x, y, vx, vy, ttl, life, color } — сердечки, пыль, искры
@@ -363,7 +412,34 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     projectiles: [], // стрелы и лучи: { x, y, tx, ty, color, kind, race }
     savedAt: Date.now(),
     terr: null, // Uint8Array: чья территория у клетки, 255 — ничья
-    centers: [null, null, null, null], // центр территории народа, для подписи
+    craters: [], // { x, y, r, ttl } — воронки от взрывов: земля там ничья, пока не заживёт
+    nukes: [], // { x, y, t } — атомные бомбы: падение, вспышка, гриб
+    needBake: false, // перепечь весь ландшафт перед кадром (после распада народа)
+    animals: [], // { kind, x, y, px, py, tx, ty, wait, face, hp }
+    volcanoes: [], // { x, y, erupt } — постоянные, erupt > 0 пока извергается
+    lava: new Map(), // idx → { ttl, flow }: течёт, пока есть запас хода, потом застывает камнем
+    weather: { kind: "clear", ttl: 1500 },
+    seasonId: null, // чтобы поймать смену сезона
+    kings: RACES.map(() => null), // { name, since } — правитель народа
+    faith: RACES.map(() => 50), // вера народа в бога (тебя), 0..100
+    graves: [], // { x, y, name, race } — надгробия героев
+    farms: new Set(), // idx — поля: жёлтые грядки, дают еду
+    roads: new Set(), // idx — дороги (и мосты через реки)
+    roadLinks: [], // { a, b, path: [idx] } — дорога между двумя деревнями
+    caravans: [], // { path, i, race, to } — кот с тележкой едет по дороге
+    walls: new Map(), // idx → { race, hp }
+    towers: [], // { x, y, race, cd }
+    pirates: [], // { x, y, vx, vy, wait, face, hp }
+    quake: { ttl: 0 }, // тряска экрана
+    tsunami: null, // { x, y, dx, dy, t, len }
+    blessed: RACES.map(() => 0), // ttl благословения народа
+    cursed: RACES.map(() => 0), // ttl проклятия
+    ufo: null, // { x, y, tx, ty, t, phase }
+    islandAch: [], // id достижений острова
+    flags: {}, // разовые события: nuked, plagueSurvived, eruption, piratesBeaten…
+    discovered: [], // id открытых карт
+    lastVisit: Date.now(),
+    centers: RACES.map(() => null), // центр территории народа, для подписи
   };
   // Настройки игрока: подсветка территорий, подписи, скорость, пауза.
   const options = { territories: true, labels: true, speed: 1, paused: false };
@@ -397,7 +473,15 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     // px/py — где кот нарисован; x/y — клетка, куда идёт. Между ними кот
     // плавно доезжает, и движение видно, а не мигает по клеткам. task —
     // дело, ради которого он остановится (стройка); без дела кот бродит.
-    return { x, y, px: x, py: y, race: r, v, name: catName(RACES[r].id), tx: x, ty: y, wait: Math.floor(Math.random() * 8), step: Math.random(), face: 1, gait: 0, task: null, warrior: false, hp: 3, cd: 0 };
+    const c = { x, y, px: x, py: y, race: r, v, name: catName(RACES[r].id), tx: x, ty: y, wait: Math.floor(Math.random() * 8), step: Math.random(), face: 1, gait: 0, task: null, warrior: false, hp: 3, cd: 0, job: null, hero: false, king: false };
+    // Герой — один на полсотни: живучий и бьёт втрое, имя попадёт в летопись.
+    if (Math.random() < 0.02 && state.cats.length >= 8) {
+      c.hero = true;
+      c.hp = 30;
+      c.warrior = true;
+      chronicle("hero", r, c.name);
+    }
+    return c;
   }
 
   /** Деревня кота; без деревни — он сам себе дом. */
@@ -421,8 +505,15 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
 
   function foundVillage(r, x, y, founder = null) {
     const who = founder || catName(RACES[r].id);
-    state.villages.push({ race: r, x, y, name: villageName(RACES[r].id, who), founder: who, wood: 0, stone: 0, shipyard: null });
-    if (!state.homes[r]) state.homes[r] = state.villages[state.villages.length - 1];
+    state.villages.push({ race: r, x, y, name: villageName(RACES[r].id, who), founder: who, wood: 0, stone: 0, food: 12, unrest: 0, shipyard: null, temple: null, ore: 0, gold: 0, weapons: 0 });
+    if (!state.homes[r]) {
+      state.homes[r] = state.villages[state.villages.length - 1];
+      // Первый основатель народа — его первый король.
+      if (!state.kings[r]) {
+        state.kings[r] = { name: who, since: state.tick };
+        chronicle("crown", r, who);
+      }
+    }
     return state.villages.length - 1;
   }
 
@@ -471,9 +562,55 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       else if (t === T.GRASS && rand() < 0.08) state.flowers.add(i);
       else if (t === T.HILL && rand() < 0.04) state.trees.add(i);
     }
+    carveRivers();
     // Как в WorldBox: новый мир пуст. Народ появляется там, где бог
     // поставил первого кота, дома коты строят себе сами.
-    state.homes = [null, null, null, null];
+    state.homes = RACES.map(() => null);
+  }
+
+  /**
+   * Реки: от гор к морю. Высоты у мира нет, есть тайлы, поэтому русло
+   * спускается по типу земли (снег → гора → холм → трава → песок → вода),
+   * чуть петляя. Две-три реки на остров, вдоль них потом селятся коты.
+   */
+  function carveRivers() {
+    const peaks = [];
+    for (let i = 0; i < W * H; i += 1) if (state.tiles[i] >= T.MOUNTAIN) peaks.push(i);
+    if (!peaks.length) return;
+    const count = 2 + Math.floor(rand() * 2);
+    for (let n = 0; n < count; n += 1) {
+      let i = peaks[Math.floor(rand() * peaks.length)];
+      let x = i % W;
+      let y = (i / W) | 0;
+      const path = [];
+      for (let step = 0; step < 90; step += 1) {
+        const cur = state.tiles[idx(x, y)];
+        if (cur <= T.WATER && step > 2) break;
+        const opts = [];
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const nx = x + dx;
+          const ny = y + dy;
+          if (!inside(nx, ny)) continue;
+          const t = state.tiles[idx(nx, ny)];
+          if (t > cur) continue;
+          if (path.includes(idx(nx, ny))) continue;
+          // Ниже — лучше; равное — можно, с шумом, чтобы русло петляло.
+          opts.push({ nx, ny, score: (cur - t) * 2 + rand() });
+        }
+        if (!opts.length) break;
+        opts.sort((a, b) => b.score - a.score);
+        const pick = opts[0];
+        x = pick.nx;
+        y = pick.ny;
+        path.push(idx(x, y));
+      }
+      if (path.length < 6) continue;
+      for (const p of path) {
+        if (state.tiles[p] > T.WATER) state.tiles[p] = T.WATER;
+        state.trees.delete(p);
+        state.flowers.delete(p);
+      }
+    }
   }
 
   /* ── Сохранение ───────────────────────────────────────────────────────── */
@@ -503,13 +640,27 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
             relations: state.relations,
             wars: state.wars,
             allies: state.allies,
-            cats: state.cats.map((c) => [c.x, c.y, c.race, c.v, c.warrior ? 1 : 0, c.hp, c.name]),
+            cats: state.cats.map((c) => [c.x, c.y, c.race, c.v, c.warrior ? 1 : 0, c.hp, c.name, c.job || null, c.hero ? 1 : 0, c.king ? 1 : 0, c.sick ? 1 : 0]),
             savedAt: Date.now(),
             day: state.day,
             era: state.era,
             born: state.born,
             ships: state.ships.map((sh) => [sh.x, sh.y, sh.race]),
             chronicle: state.chronicle.slice(0, 12),
+            volcanoes: state.volcanoes,
+            kings: state.kings,
+            faith: state.faith,
+            graves: state.graves.slice(-40),
+            farms: [...state.farms],
+            roads: [...state.roads],
+            roadLinks: state.roadLinks,
+            walls: [...state.walls],
+            towers: state.towers,
+            lastVisit: Date.now(),
+            blessed: state.blessed,
+            cursed: state.cursed,
+            islandAch: state.islandAch,
+            flags: state.flags,
           }),
         );
       } catch {
@@ -526,21 +677,45 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       state.trees = new Set(saved.trees || []);
       state.flowers = new Set(saved.flowers || []);
       state.houses = saved.houses || [];
-      state.homes = Array.isArray(saved.homes) ? saved.homes.map((h) => h || null) : [null, null, null, null];
+      state.homes = Array.isArray(saved.homes) ? saved.homes.map((h) => h || null) : RACES.map(() => null);
       state.villages = Array.isArray(saved.villages) ? saved.villages : [];
       for (const v of state.villages) {
         v.wood = v.wood || 0;
         v.stone = v.stone || 0;
         v.shipyard = v.shipyard || null;
+        v.food = v.food ?? 12;
+        v.unrest = v.unrest || 0;
+        v.temple = v.temple || null;
+        v.ore = v.ore || 0;
+        v.gold = v.gold || 0;
+        v.weapons = v.weapons || 0;
       }
+      state.roads = new Set(saved.roads || []);
+      state.roadLinks = Array.isArray(saved.roadLinks) ? saved.roadLinks : [];
+      state.walls = new Map((saved.walls || []).map(([i, c]) => [i, c]));
+      state.towers = Array.isArray(saved.towers) ? saved.towers : [];
+      state.kings = Array.isArray(saved.kings) && saved.kings.length === RACES.length ? saved.kings : RACES.map(() => null);
+      state.faith = Array.isArray(saved.faith) && saved.faith.length === RACES.length ? saved.faith : RACES.map(() => 50);
+      state.graves = Array.isArray(saved.graves) ? saved.graves : [];
+      state.farms = new Set(saved.farms || []);
+      state.lastVisit = saved.lastVisit || Date.now();
+      state.islandAch = Array.isArray(saved.islandAch) ? saved.islandAch : [];
+      state.flags = saved.flags && typeof saved.flags === "object" ? saved.flags : {};
+      state.blessed = Array.isArray(saved.blessed) && saved.blessed.length === RACES.length ? saved.blessed : RACES.map(() => 0);
+      state.cursed = Array.isArray(saved.cursed) && saved.cursed.length === RACES.length ? saved.cursed : RACES.map(() => 0);
       for (const h of state.houses) if (h.lvl === undefined) h.lvl = 0;
-      state.relations = Array.isArray(saved.relations) && saved.relations.length === 4 ? saved.relations : RACES.map(() => RACES.map(() => "peace"));
+      state.relations = Array.isArray(saved.relations) && saved.relations.length === RACES.length ? saved.relations : RACES.map(() => RACES.map(() => "peace"));
       state.wars = Array.isArray(saved.wars) ? saved.wars : [];
+      state.volcanoes = Array.isArray(saved.volcanoes) ? saved.volcanoes : [];
       state.allies = Array.isArray(saved.allies) ? saved.allies : [];
-      state.cats = (saved.cats || []).map(([x, y, r, v = 0, w = 0, hp = 3, name = null]) => {
+      state.cats = (saved.cats || []).map(([x, y, r, v = 0, w = 0, hp = 3, name = null, job = null, hero = 0, king = 0, sick = 0]) => {
         const c = newCat(x, y, r, v);
         c.warrior = Boolean(w);
         c.hp = hp;
+        c.job = job || null;
+        c.hero = Boolean(hero);
+        c.king = Boolean(king);
+        c.sick = Boolean(sick);
         if (name) c.name = name;
         return c;
       });
@@ -552,7 +727,7 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       }
       state.savedAt = saved.savedAt || Date.now();
       state.day = saved.day || 1;
-      state.era = Array.isArray(saved.era) && saved.era.length === 4 ? saved.era : [0, 0, 0, 0];
+      state.era = Array.isArray(saved.era) && saved.era.length === RACES.length ? saved.era : RACES.map(() => 0);
       state.born = saved.born || Date.now();
       state.ships = (saved.ships || []).map(([x, y, r]) => newShip(x, y, r));
       state.chronicle = saved.chronicle || [];
@@ -575,7 +750,7 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     state.trees = new Set();
     state.flowers = new Set();
     state.houses = [];
-    state.homes = [null, null, null, null];
+    state.homes = RACES.map(() => null);
     state.villages = [];
     state.relations = RACES.map(() => RACES.map(() => "peace"));
     state.wars = [];
@@ -672,6 +847,53 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     stone: () => "Бог воздвиг горы.",
     fire: () => "Пожар! Коты бегут.",
     bolt: () => "Молния ударила с ясного неба.",
+    season: (s) => ({ spring: "Пришла весна: тает снег, на лугах цветы.", summer: "Лето: жара, поля зреют.", autumn: "Осень: лес рыжеет, коты запасаются.", winter: "Зима: снег лёг на остров, реки встали." })[s],
+    weather: (k) => ({ rain: "Пошёл дождь — пожары гаснут.", storm: "Гроза! Молнии бьют сами.", drought: "Засуха: земля трескается, лес сохнет.", snow: "Снегопад укрыл остров.", clear: "Небо прояснилось." })[k],
+    volcano: () => "Бог поднял вулкан.",
+    crown: (r, name) => `${name} коронован: у ${RACES[r].plural} есть король.`,
+    kingDied: (r, old, heir) => `Король ${old} ${RACES[r].plural} умер. Трон занял ${heir}.`,
+    kingFell: (r, name) => `Король ${name} ${RACES[r].plural} пал в бою — смута!`,
+    hero: (r, name) => `У ${RACES[r].plural} родился герой ${name}: в десять раз сильнее любого кота.`,
+    heroFell: (r, name) => `Герой ${name} ${RACES[r].plural} погиб. На месте гибели — камень с именем.`,
+    job: (r, name, job) => `${name} из ${RACES[r].plural} стал ${JOB_NAMES[job]}.`,
+    hunger: (r, v) => `В ${v} голод: ${RACES[r].name} ропщут.`,
+    revolt: (r, v, to) => `Бунт в ${v}: деревня отделилась от ${RACES[r].plural} и присягнула ${RACES[to].dat}.`,
+    temple: (r, v) => `${RACES[r].name} возвели храм в ${v}.`,
+    prayer: (r) => `Жрец ${RACES[r].plural} молится богу. Вера крепнет.`,
+    faithLow: (r) => `Бог давно не заходил: культ ${RACES[r].plural} слабеет.`,
+    healed: (r, name) => `Лекарь ${RACES[r].plural} выходил ${name}.`,
+    road: (r, a, b) => `${RACES[r].name} проложили дорогу из ${a} в ${b}.`,
+    caravan: (r, a, b) => `Караван из ${a} довёз еду и брёвна в ${b}.`,
+    walls: (r, v) => `${RACES[r].name} обнесли ${v} стеной с башнями.`,
+    wallDown: (r) => `Стена ${RACES[r].plural} проломлена!`,
+    seaTrade: (a, b) => `Корабли ${RACES[a].plural} торгуют с ${RACES[b].instr} по морю.`,
+    pirate: () => "На горизонте чёрный парус: пираты-коты!",
+    pirateSink: (r) => `Пираты потопили корабль ${RACES[r].plural}.`,
+    pirateRaid: (r, v) => `Пираты разграбили ${v} у ${RACES[r].plural}.`,
+    pirateDead: (r) => `Воины ${RACES[r].plural} отбили пиратов — те пошли ко дну.`,
+    ore: (r) => `Шахтёры ${RACES[r].plural} нашли железную руду.`,
+    plague: (r) => (r == null ? "На остров пришла чума." : `Чума у ${RACES[r].plural}: больные кашляют, лекари сбиваются с лап.`),
+    plagueEnd: () => "Чума отступила.",
+    quake: () => "Землетрясение! Дома трещат, горы растут.",
+    tsunami: () => "Цунами! Волна идёт на берег.",
+    bless: (r) => `Бог благословил ${RACES[r].plural}: котята, сила и покой.`,
+    curse: (r) => `Бог проклял ${RACES[r].plural}: пожары, бесплодие и ропот.`,
+    blessEnd: (r) => `Благословение ${RACES[r].plural} иссякло.`,
+    curseEnd: (r) => `Проклятие ${RACES[r].plural} снято.`,
+    ufo: () => "В небе тарелка: гости из будущего.",
+    robots: (v) => `Из будущего прибыли коты-роботы: их база — ${v}.`,
+    robotsLocked: () => "Коты-роботы появятся только в эре Будущего.",
+    achievement: (t) => `Достижение острова: «${t}».`,
+    discover: (name) => `Корабли открыли новую землю: «${name}». Теперь туда можно переселиться.`,
+    ufoTaken: (r, n) => `Тарелка забрала ${n} ${RACES[r].plural} и улетела.`,
+    gold: (r, v) => `В горах у ${v} нашли золото! Казна ${RACES[r].plural} полнеет.`,
+    weapons: (r) => `Кузнец ${RACES[r].plural} выковал оружие: воины бьют сильнее.`,
+    eruption: (r) => (r == null ? "Вулкан проснулся: лава течёт по склонам." : `Вулкан извергается рядом с землёй ${RACES[r].plural}!`),
+    wolf: (r, name) => `Волки напали на ${name} из ${RACES[r].plural}.`,
+    dragon: (r) => (r == null ? "Над горами кружит дракон." : `Дракон сжёг дом ${RACES[r].plural}.`),
+    mouse: (r, name) => `${name} из ${RACES[r].plural} поймал мышь.`,
+    nuke: (r) => (r == null ? "Атомный взрыв выжег пустошь." : `Атомный гриб встал над землёй ${RACES[r].plural}.`),
+    collapse: (r) => `Город ${RACES[r].plural} пал: имя забыто, склады пусты. Всё заново.`,
     meteor: (r) => (r == null ? "С неба упал метеорит." : `Метеорит упал рядом с деревней ${RACES[r].plural}.`),
     drown: (n) => `${n} кот${plural(n)} уплыл${n === 1 ? "" : "и"} на плотах: их землю затопило.`,
     trade: (a, b) => `${RACES[a].name} торгуют с ${RACES[b].instr}.`,
@@ -692,6 +914,13 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return "а";
     return "ов";
   }
+  function season() {
+    return SEASONS[(((state.day - 1) % 4) + 4) % 4];
+  }
+  const isWinter = () => season().id === "winter";
+  const isSpring = () => season().id === "spring";
+  const raining = () => state.weather.kind === "rain" || state.weather.kind === "storm";
+
   function chronicle(kind, ...args) {
     const line = lines[kind]?.(...args);
     if (!line) return;
@@ -711,7 +940,7 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     const terr = new Uint8Array(W * H).fill(255);
     const dist = new Float32Array(W * H).fill(Infinity);
     const seeds = [];
-    const perRace = [0, 0, 0, 0];
+    const perRace = RACES.map(() => 0);
     for (const h of state.houses) perRace[h.race] += 1;
     for (const h of state.houses) seeds.push({ x: h.x, y: h.y, r: h.race });
     for (const v of state.villages) seeds.push({ x: v.x, y: v.y, r: v.race });
@@ -737,6 +966,17 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
         }
       }
     }
+    // Воронки: пока не заросли, эта земля ничья — у народа в территории дыра.
+    for (const cr of state.craters) {
+      for (let dy = -cr.r; dy <= cr.r; dy += 1) {
+        for (let dx = -cr.r; dx <= cr.r; dx += 1) {
+          if (dx * dx + dy * dy > cr.r * cr.r + 1) continue;
+          const x = cr.x + dx;
+          const y = cr.y + dy;
+          if (inside(x, y)) terr[idx(x, y)] = 255;
+        }
+      }
+    }
     state.terr = terr;
     const sums = RACES.map(() => ({ x: 0, y: 0, n: 0 }));
     for (let i = 0; i < W * H; i += 1) {
@@ -750,13 +990,69 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     bakeOverlay();
   }
 
+  /**
+   * Народ без жителей или без единой клетки земли распадается: деревни и их
+   * названия исчезают, склады брёвен и камня — вместе с ними, дома сносятся.
+   * Выжившие коты (когда землю выжгли воронки) основывают новую деревню с
+   * новым именем и пустым складом — ресурсы собирают заново.
+   */
+  function collapseRace(r) {
+    if (!state.villages.some((v) => v.race === r)) return false;
+    const remap = new Map();
+    const kept = [];
+    state.villages.forEach((v, i) => {
+      if (v.race === r) return;
+      remap.set(i, kept.length);
+      kept.push(v);
+    });
+    state.villages = kept;
+    state.roadLinks = state.roadLinks.map((l) => ({ ...l, a: remap.get(l.a), b: remap.get(l.b) })).filter((l) => l.a !== undefined && l.b !== undefined);
+    state.homes[r] = null;
+    state.kings[r] = null;
+    state.faith[r] = 50;
+    state.houses = state.houses.filter((h) => h.race !== r);
+    for (const h of state.houses) h.v = remap.get(h.v) ?? 0;
+    state.ships = state.ships.filter((sh) => sh.race !== r);
+    for (const [i, wl] of [...state.walls]) if (wl.race === r) state.walls.delete(i);
+    state.towers = state.towers.filter((t) => t.race !== r);
+    state.roadLinks = state.roadLinks.filter((l) => state.villages[l.a]?.race !== r && state.villages[l.b]?.race !== r);
+    state.caravans = state.caravans.filter((cv) => cv.race !== r);
+    for (const c of state.cats) {
+      if (c.race === r) {
+        c.task = null;
+        c.v = -1;
+        continue;
+      }
+      c.v = remap.get(c.v) ?? 0;
+      if (c.task && c.task.v !== undefined) c.task.v = remap.get(c.task.v) ?? 0;
+    }
+    const survivors = state.cats.filter((c) => c.race === r);
+    if (survivors.length) {
+      const first = survivors[0];
+      const nv = foundVillage(r, first.x, first.y, first.name);
+      for (const c of survivors) c.v = nv;
+    }
+    chronicle("collapse", r);
+    state.needBake = true;
+    return true;
+  }
+
   function countPop() {
-    const pop = [0, 0, 0, 0];
-    const houses = [0, 0, 0, 0];
+    const pop = RACES.map(() => 0);
+    const houses = RACES.map(() => 0);
     for (const c of state.cats) pop[c.race] += 1;
     for (const h of state.houses) houses[h.race] += 1;
     state.pop = pop;
     computeTerritory();
+    let collapsed = false;
+    for (let r = 0; r < RACES.length; r += 1) {
+      if (pop[r] === 0 || !state.centers[r]) collapsed = collapseRace(r) || collapsed;
+    }
+    if (collapsed) {
+      for (const h of state.houses) houses[h.race] = 0;
+      for (const h of state.houses) houses[h.race] += 1;
+      computeTerritory();
+    }
     onRaces?.(
       RACES.map((race, r) => ({
         ...race,
@@ -785,6 +1081,15 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
         houses: state.houses.filter((h) => h.v === i).length,
         wood: v.wood || 0,
         stone: v.stone || 0,
+        food: v.food || 0,
+        unrest: v.unrest || 0,
+        temple: Boolean(v.temple),
+        ore: v.ore || 0,
+        gold: v.gold || 0,
+        weapons: v.weapons || 0,
+        walls: state.towers.some((t) => t.race === v.race && state.homes[v.race] === v),
+        king: state.homes[v.race] === v ? state.kings[v.race]?.name ?? null : null,
+        faith: state.faith[v.race],
         shipyard: Boolean(v.shipyard),
       })),
     });
@@ -803,6 +1108,13 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
   function hud() {
     const era = Math.max(...state.era);
     onHud?.({
+      ach: state.islandAch.map((id) => ISLAND_ACH.find((a) => a.id === id)?.title).filter(Boolean),
+      achTotal: ISLAND_ACH.length,
+      discovered: state.discovered,
+      score: state.cats.length * 3 + state.houses.length * 2 + state.day * 10 + Math.max(...state.era) * 50 + state.villages.length * 5 + state.islandAch.length * 20,
+      kings: state.kings.map((k, r) => (k ? { race: RACES[r].name, name: k.name } : null)).filter(Boolean),
+      season: season().name,
+      weather: WEATHER[state.weather.kind]?.name ?? "",
       pop: state.cats.length,
       day: state.day,
       night: nightAlpha() > 0.2,
@@ -868,8 +1180,21 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
           }
         }
         // Почти без передышки: кот, который стоит, выглядит сломанным.
-        c.wait = Math.floor(Math.random() * 6);
+        // Зимой — наоборот, отсиживаются: снег, холодно.
+        c.wait = Math.floor(Math.random() * (isWinter() ? 24 : 6));
         continue;
+      }
+      // Чужая стена — стоп: воин будет её ломать (towersTick), мирный обойдёт.
+      {
+        const nx0 = c.x + Math.sign(c.tx - c.x);
+        const ny0 = c.y + Math.sign(c.ty - c.y);
+        const wl = state.walls.get(idx(nx0, ny0));
+        if (wl && wl.race !== c.race) {
+          c.tx = c.x;
+          c.ty = c.y;
+          c.wait = 10;
+          continue;
+        }
       }
       c.step += 0.5;
       if (c.step < 1) continue;
@@ -912,7 +1237,69 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     }
     if (t.kind === "mine") {
       puff(t.x, t.y, "#c9d3df", 5, "spark");
-      if (village) village.stone += STONE_PER_DIG;
+      if (village) {
+        village.stone += STONE_PER_DIG;
+        if (Math.random() < ORE_CHANCE) {
+          village.ore += 1;
+          if (village.ore === 1) chronicle("ore", c.race);
+        }
+        if (tileAt(t.x, t.y) === T.SNOW && Math.random() < GOLD_CHANCE) {
+          village.gold += 1;
+          puff(t.x, t.y, "#ffd23a", 6, "spark");
+          chronicle("gold", c.race, village.name);
+        }
+      }
+      return;
+    }
+    if (t.kind === "fish") {
+      if (village) village.food = (village.food || 0) + FOOD_PER_FISH;
+      puff(t.x, t.y, "#5b9fcc", 4, "dust");
+      return;
+    }
+    if (t.kind === "farm") {
+      if (village) village.food = (village.food || 0) + FOOD_PER_HARVEST + (season().id === "summer" ? 3 : 0) - (isWinter() ? 4 : 0);
+      state.farms.add(idx(t.x, t.y));
+      puff(t.x, t.y, "#e0c05a", 4, "dust");
+      bakeArea(t.x, t.y, t.x, t.y);
+      return;
+    }
+    if (t.kind === "smith") {
+      if (village) {
+        if (village.ore > 0) {
+          village.ore -= 1;
+          village.weapons += 1;
+          if (village.weapons === 1) chronicle("weapons", c.race);
+        } else village.stone = Math.max(0, village.stone - 1);
+      }
+      puff(t.x, t.y, "#ffd23a", 3, "spark");
+      return;
+    }
+    if (t.kind === "heal") {
+      const who = t.who;
+      if (who && state.cats.includes(who)) {
+        who.hp = who.hero ? 30 : 3;
+        who.sick = false;
+        puff(who.x, who.y, "#7dff9a", 4, "heart");
+        if (Math.random() < 0.4) chronicle("healed", c.race, who.name);
+      }
+      return;
+    }
+    if (t.kind === "pray") {
+      state.faith[c.race] = Math.min(100, state.faith[c.race] + 4);
+      puff(t.x, t.y, "#fff3a3", 5, "spark");
+      if (Math.random() < 0.25) chronicle("prayer", c.race);
+      return;
+    }
+    if (t.kind === "temple") {
+      if (village && !village.temple) {
+        village.temple = { x: t.x, y: t.y };
+        state.trees.delete(idx(t.x, t.y));
+        puff(t.x, t.y, "#f5f7f9", 8, "spark");
+        chronicle("temple", c.race, village.name);
+        bakeArea(t.x - 1, t.y - 3, t.x + 1, t.y + 1);
+        countPop();
+        persist();
+      }
       return;
     }
     if (t.kind === "upgrade") {
@@ -1080,6 +1467,16 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
         return;
       }
     }
+    // 1б. Храм: с эры Средневековья, за камень, один на деревню.
+    if (!village.temple && era >= 1 && houses.length >= 4 && village.stone >= 15 && !mine.some((c) => c.task?.kind === "temple")) {
+      const site = pickSite(r, village);
+      const worker = site && idleCatNear(vi, site.x, site.y);
+      if (worker) {
+        village.stone -= 15;
+        assign(worker, { kind: "temple", x: site.x, y: site.y, ttl: 260, v: vi });
+        return;
+      }
+    }
     // 2. Верфь.
     if (wantShipyard && village.wood >= COST.shipyard.wood && !mine.some((c) => c.task?.kind === "shipyard")) {
       const shore = nearestShore(village);
@@ -1124,6 +1521,16 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
 
   /** Лес отрастает: раз в двадцать секунд на лесной клетке без дерева всходит новое. */
   function regrow() {
+    if (state.weather.kind === "drought") return;
+    if (isSpring() && state.tick % 40 === 0) {
+      const x = Math.floor(Math.random() * W);
+      const y = Math.floor(Math.random() * H);
+      const i = idx(x, y);
+      if (state.tiles[i] === T.GRASS && !state.trees.has(i) && !state.flowers.has(i) && !state.houses.some((h) => h.x === x && h.y === y)) {
+        state.flowers.add(i);
+        bakeArea(x, y, x, y);
+      }
+    }
     if (state.tick % 600 !== 100) return;
     for (let attempt = 0; attempt < 20; attempt += 1) {
       const i = Math.floor(Math.random() * W * H);
@@ -1155,12 +1562,21 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
   }
 
   function breed() {
-    if (state.tick % Math.max(120, Math.round(540 / fertility)) !== 0 || state.cats.length >= 260) return;
+    // Коты плодятся сами: деревня и без домов кормит троих, каждый дом —
+    // ещё четверых. Раньше без домов рождений не было вовсе, и остров
+    // замирал, пока коты копили брёвна. Потолок — под большую карту.
+    if (state.tick % Math.max(90, Math.round(420 / fertility)) !== 0 || state.cats.length >= 400) return;
     const r = Math.floor(Math.random() * RACES.length);
     const vs = villagesOf(r);
     if (!vs.length || state.pop[r] === 0) return;
     const houses = state.houses.filter((h) => h.race === r).length;
-    if (state.pop[r] >= houses * 4 + 1) return;
+    const capacity = houses * 4 + vs.length * 3 + 1;
+    if (state.pop[r] >= capacity) return;
+    // Голод — не до котят; крепкая вера — наоборот.
+    if (vs.every((i) => (state.villages[i].food || 0) <= 0)) return;
+    if (state.faith[r] < 60 && Math.random() < 0.15) return;
+    if (state.cursed[r] > 0) return;
+    if (state.blessed[r] > 0 && Math.random() < 0.5 && state.pop[r] < capacity - 1) spawnCat(r, vs[Math.floor(Math.random() * vs.length)]);
     if (spawnCat(r, vs[Math.floor(Math.random() * vs.length)])) {
       const kitten = state.cats[state.cats.length - 1];
       puff(kitten.x, kitten.y, "#ff6f91", 5, "heart");
@@ -1191,7 +1607,7 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       const x = Math.round(village.x + Math.cos(a) * d);
       const y = Math.round(village.y + Math.sin(a) * d * 0.8);
       if (!inside(x, y) || !race.canStand(tileAt(x, y))) continue;
-      if (state.villages.some((v) => Math.max(Math.abs(v.x - x), Math.abs(v.y - y)) < 6)) continue;
+      if (state.villages.some((v) => Math.max(Math.abs(v.x - x), Math.abs(v.y - y)) < 8)) continue;
       if (state.terr && state.terr[idx(x, y)] !== 255 && state.terr[idx(x, y)] !== r) continue;
       const leader = mine[0];
       const nv = foundVillage(r, x, y, leader.name);
@@ -1327,7 +1743,742 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     state.particles.push({ x: victim.x * PX + 1, y: victim.y * PX + 1, vx: 0, vy: -0.25, ttl: 60, life: 60, color: "#ffffff", kind: "ghost" });
     const w = state.wars.find((o) => (o.a === victim.race && o.b === byRace) || (o.b === victim.race && o.a === byRace));
     if (w) w.kills[victim.race === w.a ? 0 : 1] += 1;
-    if (victim.warrior) chronicle("fallen", victim.race, victim.name, state.villages[victim.v]?.name);
+    if (victim.hero) {
+      state.graves.push({ x: victim.x, y: victim.y, name: victim.name, race: victim.race });
+      chronicle("heroFell", victim.race, victim.name);
+      bakeArea(victim.x, victim.y, victim.x, victim.y);
+    } else if (victim.warrior) chronicle("fallen", victim.race, victim.name, state.villages[victim.v]?.name);
+    if (victim.king) {
+      chronicle("kingFell", victim.race, victim.name);
+      state.flags.kingFell = true;
+      state.kings[victim.race] = null;
+      // Смута: без короля деревни ропщут вдвое сильнее.
+      for (const v of state.villages) if (v.race === victim.race) v.unrest = Math.min(100, (v.unrest || 0) + 25);
+      succession(victim.race, null);
+    }
+  }
+
+  /** Наследование: трон занимает герой, иначе случайный взрослый кот народа. */
+  function succession(r, old) {
+    const same = state.cats.filter((c) => c.race === r && !c.king);
+    if (!same.length) {
+      state.kings[r] = null;
+      return;
+    }
+    const heir = same.find((c) => c.hero) || same[Math.floor(Math.random() * same.length)];
+    for (const c of state.cats) if (c.race === r) c.king = false;
+    heir.king = true;
+    state.kings[r] = { name: heir.name, since: state.tick };
+    if (old) chronicle("kingDied", r, old, heir.name);
+    else chronicle("crown", r, heir.name);
+  }
+
+  /** Правители: король стареет и умирает раз в несколько дней; корона — у кота. */
+  function kingsTick() {
+    if (state.tick % 600 !== 300) return;
+    for (let r = 0; r < RACES.length; r += 1) {
+      const k = state.kings[r];
+      const has = state.cats.some((c) => c.race === r && c.king);
+      if (k && !has) {
+        // Король записан, но кота с короной нет (старый снимок) — коронуем.
+        const same = state.cats.filter((c) => c.race === r);
+        const named = same.find((c) => c.name === k.name) || same[0];
+        if (named) named.king = true;
+        else state.kings[r] = null;
+        continue;
+      }
+      if (!k && state.pop[r] > 0) {
+        succession(r, null);
+        continue;
+      }
+      if (k && state.tick - k.since > DAY_TICKS * 2 && Math.random() < 0.08) {
+        const old = k.name;
+        succession(r, old);
+      }
+    }
+  }
+
+  /**
+   * Профессии. Деревня раздаёт дела свободным котам: рыбак у верфи, фермер на
+   * лугу, кузнец с эры Средневековья, лекарь при раненых, жрец при храме.
+   * Еда копится в деревне и тратится на котов; без еды — голод и ропот.
+   */
+  function jobsTick() {
+    if (state.tick % 120 !== 60 || !state.villages.length) return;
+    const vi = Math.floor(Math.random() * state.villages.length);
+    const v = state.villages[vi];
+    const r = v.race;
+    const mine = state.cats.filter((c) => c.v === vi);
+    if (!mine.length) return;
+    const idle = mine.filter((c) => !c.task && !c.warrior && !c.job && !c.king);
+    const count = (job) => mine.filter((c) => c.job === job).length;
+    const give = (c, job) => {
+      c.job = job;
+      if (Math.random() < 0.5) chronicle("job", r, c.name, job);
+    };
+    if (idle.length && v.shipyard && count("fisher") < 1 + Math.floor(mine.length / 12)) give(idle.pop(), "fisher");
+    if (idle.length && count("farmer") < 1 + Math.floor(mine.length / 8)) give(idle.pop(), "farmer");
+    if (idle.length && (state.era[r] || 0) >= 1 && v.stone >= 10 && count("smith") < 1) give(idle.pop(), "smith");
+    if (idle.length && count("healer") < 1 && mine.length >= 6) give(idle.pop(), "healer");
+    if (idle.length && v.temple && count("priest") < 1) give(idle.pop(), "priest");
+    // Работа: рыбак и фермер ходят на промысел, кузнец точит, лекарь лечит, жрец молится.
+    for (const c of mine) {
+      if (c.task || !c.job) continue;
+      if (c.job === "fisher" && v.shipyard) assign(c, { kind: "fish", x: v.shipyard.x, y: v.shipyard.y, ttl: 240, v: vi });
+      else if (c.job === "farmer") {
+        const site = nearestFarmSite(v);
+        if (site) assign(c, { kind: "farm", x: site.x, y: site.y, ttl: 300, v: vi });
+      } else if (c.job === "smith") assign(c, { kind: "smith", x: v.x, y: v.y, ttl: 360, v: vi });
+      else if (c.job === "healer") {
+        const sick = mine.find((o) => o !== c && o.hp < (o.hero ? 30 : 3));
+        if (sick) assign(c, { kind: "heal", x: sick.x, y: sick.y, ttl: 90, v: vi, who: sick });
+      } else if (c.job === "priest" && v.temple) assign(c, { kind: "pray", x: v.temple.x, y: v.temple.y, ttl: 300, v: vi });
+    }
+    // Еда: каждый кот ест понемногу; мыши и промысел пополняют.
+    // Зимой еда уходит вдвое быстрее, летом поля щедрее.
+    v.food = (v.food || 0) - Math.ceil(mine.length / (isWinter() ? 3 : 6));
+    if (v.gold > 0 && state.tick % 600 === 60) {
+      v.gold -= 1;
+      v.unrest = Math.max(0, (v.unrest || 0) - 10);
+    }
+    if (v.food < 0) {
+      v.food = 0;
+      v.unrest = Math.min(100, (v.unrest || 0) + 6);
+      if (Math.random() < 0.2) chronicle("hunger", r, v.name);
+    } else {
+      v.unrest = Math.max(0, (v.unrest || 0) - 2);
+    }
+    // Война затянулась — недовольство.
+    if (state.wars.some((wr) => (wr.a === r || wr.b === r) && wr.ttl < 1800)) v.unrest = Math.min(100, v.unrest + 3);
+    // Вера: с храмом и жрецом растёт, без внимания бога падает.
+    if (v.temple && count("priest")) state.faith[r] = Math.min(100, state.faith[r] + 1);
+    if (state.faith[r] > 60) v.unrest = Math.max(0, v.unrest - 1);
+    if (state.faith[r] < 20) v.unrest = Math.min(100, v.unrest + 1);
+    if (v.unrest >= 100) revolt(vi);
+  }
+
+  function nearestFarmSite(village, radius = 6) {
+    let best = null;
+    let bestD = Infinity;
+    for (let dy = -radius; dy <= radius; dy += 1) {
+      for (let dx = -radius; dx <= radius; dx += 1) {
+        const x = village.x + dx;
+        const y = village.y + dy;
+        if (!inside(x, y)) continue;
+        const i = idx(x, y);
+        if (tileAt(x, y) !== T.GRASS || state.trees.has(i)) continue;
+        if (state.houses.some((h) => h.x === x && h.y === y)) continue;
+        if (state.terr && state.terr[i] !== 255 && state.terr[i] !== village.race) continue;
+        const d = dx * dx + dy * dy;
+        if (d < bestD) {
+          bestD = d;
+          best = { x, y };
+        }
+      }
+    }
+    return best;
+  }
+
+  /**
+   * Бунт: деревня отделяется и присягает соседу — союзнику, а если его нет,
+   * тому, кто ближе. Коты и дома меняют народ, склады остаются деревне.
+   */
+  function revolt(vi) {
+    const v = state.villages[vi];
+    const r = v.race;
+    if (state.homes[r] === v || villagesOf(r).length < 2) {
+      v.unrest = 60;
+      return;
+    }
+    const others = RACES.map((_, o) => o).filter((o) => o !== r && state.pop[o] > 0);
+    if (!others.length) {
+      v.unrest = 60;
+      return;
+    }
+    const ally = others.find((o) => allied(r, o));
+    let to = ally ?? null;
+    if (to === null) {
+      let bestD = Infinity;
+      for (const o of others) {
+        const home = state.homes[o];
+        if (!home) continue;
+        const d = Math.abs(home.x - v.x) + Math.abs(home.y - v.y);
+        if (d < bestD) {
+          bestD = d;
+          to = o;
+        }
+      }
+    }
+    if (to === null) to = others[0];
+    v.race = to;
+    v.unrest = 0;
+    for (const c of state.cats) if (c.v === vi) { c.race = to; c.king = false; c.task = null; }
+    for (const h of state.houses) if (h.v === vi) h.race = to;
+    chronicle("revolt", r, v.name, to);
+    state.needBake = true;
+    countPop();
+    persist();
+  }
+
+  /** Дорога между двумя деревнями: по суше прямой линией, через реку — мост. */
+  function layRoad(ai, bi) {
+    const a = state.villages[ai];
+    const b = state.villages[bi];
+    const path = [];
+    let x = a.x;
+    let y = a.y;
+    const dx = Math.abs(b.x - a.x);
+    const dy = Math.abs(b.y - a.y);
+    const sx = a.x < b.x ? 1 : -1;
+    const sy = a.y < b.y ? 1 : -1;
+    let err = dx - dy;
+    for (let guard = 0; guard < 200; guard += 1) {
+      if (!(x === a.x && y === a.y) && !(x === b.x && y === b.y)) {
+        const t = tileAt(x, y);
+        if (t === T.DEEP || t >= T.MOUNTAIN) return false; // море и горы дорога не берёт
+        path.push(idx(x, y));
+      }
+      if (x === b.x && y === b.y) break;
+      const e2 = err * 2;
+      if (e2 > -dy) { err -= dy; x += sx; }
+      if (e2 < dx) { err += dx; y += sy; }
+    }
+    for (const i of path) {
+      state.roads.add(i);
+      state.trees.delete(i);
+      state.flowers.delete(i);
+    }
+    state.roadLinks.push({ a: ai, b: bi, path });
+    chronicle("road", a.race, a.name, b.name);
+    state.needBake = true;
+    return true;
+  }
+
+  function roadsTick() {
+    if (state.tick % 900 === 450) {
+      for (let r = 0; r < RACES.length; r += 1) {
+        const vs = villagesOf(r);
+        for (let i = 0; i < vs.length; i += 1) {
+          for (let j = i + 1; j < vs.length; j += 1) {
+            const a = state.villages[vs[i]];
+            const b = state.villages[vs[j]];
+            if (Math.abs(a.x - b.x) + Math.abs(a.y - b.y) > 26) continue;
+            if (state.roadLinks.some((l) => (l.a === vs[i] && l.b === vs[j]) || (l.a === vs[j] && l.b === vs[i]))) continue;
+            if (a.wood >= 2 && layRoad(vs[i], vs[j])) {
+              a.wood -= 2;
+              persist();
+              return;
+            }
+          }
+        }
+      }
+    }
+    // Караваны: сытая деревня делится с соседкой по дороге.
+    if (state.tick % 600 === 120 && state.roadLinks.length && state.caravans.length < 6) {
+      const l = state.roadLinks[Math.floor(Math.random() * state.roadLinks.length)];
+      const a = state.villages[l.a];
+      const b = state.villages[l.b];
+      if (a && b && a.race === b.race && l.path.length > 2) {
+        const rich = a.food >= b.food ? [a, b, l.path] : [b, a, [...l.path].reverse()];
+        if (rich[0].food > 20) {
+          rich[0].food -= 8;
+          rich[0].wood = Math.max(0, rich[0].wood - 3);
+          state.caravans.push({ path: rich[2], i: 0, race: a.race, to: rich[1], from: rich[0], t: 0 });
+        }
+      }
+    }
+    for (const cv of [...state.caravans]) {
+      cv.t += 1;
+      if (cv.t % 5 !== 0) continue;
+      cv.i += 1;
+      if (cv.i >= cv.path.length) {
+        cv.to.food = (cv.to.food || 0) + 8;
+        cv.to.wood += 3;
+        state.caravans = state.caravans.filter((o) => o !== cv);
+        if (Math.random() < 0.5) chronicle("caravan", cv.race, cv.from.name, cv.to.name);
+      }
+    }
+  }
+
+  /** Стены с башнями вокруг столицы — с эры Средневековья, за камень. */
+  function wallsTick() {
+    if (state.tick % 900 !== 700) return;
+    for (let r = 0; r < RACES.length; r += 1) {
+      const home = state.homes[r];
+      if (!home || (state.era[r] || 0) < 1 || home.stone < WALL_COST) continue;
+      if (state.towers.some((t) => t.race === r)) continue;
+      const R = 3;
+      const cells = [];
+      for (let dy = -R; dy <= R; dy += 1) {
+        for (let dx = -R; dx <= R; dx += 1) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== R) continue;
+          const x = home.x + dx;
+          const y = home.y + dy;
+          if (!inside(x, y) || tileAt(x, y) <= T.WATER || tileAt(x, y) >= T.MOUNTAIN) continue;
+          if (state.houses.some((h) => h.x === x && h.y === y) || state.villages.some((v) => v.x === x && v.y === y)) continue;
+          if (state.roads.has(idx(x, y))) continue; // ворота — где дорога
+          cells.push({ x, y, corner: Math.abs(dx) === R && Math.abs(dy) === R });
+        }
+      }
+      if (cells.length < 8) continue;
+      home.stone -= WALL_COST;
+      for (const c of cells) {
+        state.walls.set(idx(c.x, c.y), { race: r, hp: 3 });
+        state.trees.delete(idx(c.x, c.y));
+        if (c.corner) state.towers.push({ x: c.x, y: c.y, race: r, cd: 0 });
+      }
+      chronicle("walls", r, home.name);
+      state.needBake = true;
+      persist();
+    }
+  }
+
+  function towersTick() {
+    for (const t of state.towers) {
+      if (t.cd > 0) {
+        t.cd -= 1;
+        continue;
+      }
+      const foe = state.cats.find((c) => c.warrior && atWar(t.race, c.race) && Math.abs(c.x - t.x) <= 4 && Math.abs(c.y - t.y) <= 4);
+      if (!foe) continue;
+      foe.hp -= 1;
+      puff(foe.x, foe.y, "#e0242f", 3, "hit");
+      state.particles.push({ x: t.x * PX + 4, y: t.y * PX - 2, vx: (foe.x - t.x) * 0.9, vy: (foe.y - t.y) * 0.9, ttl: 10, life: 10, color: "#f4efe2", kind: "spark" });
+      t.cd = 40;
+      if (foe.hp <= 0) killCat(foe, t.race);
+    }
+    // Вражеские воины ломают стены, если упёрлись.
+    if (state.tick % 30 === 0 && state.walls.size) {
+      for (const c of state.cats) {
+        if (!c.warrior) continue;
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const i = idx(c.x + dx, c.y + dy);
+          const wl = state.walls.get(i);
+          if (!wl || !atWar(c.race, wl.race)) continue;
+          wl.hp -= 1;
+          puff(c.x + dx, c.y + dy, "#8c8780", 3, "dust");
+          if (wl.hp <= 0) {
+            state.walls.delete(i);
+            state.towers = state.towers.filter((t) => idx(t.x, t.y) !== i);
+            chronicle("wallDown", wl.race);
+            state.needBake = true;
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  /** Морская торговля и пираты. */
+  function seaTick() {
+    // Торговля: корабль у чужой верфи — обмен едой и брёвнами.
+    if (state.tick % 300 === 150) {
+      for (const sh of state.ships) {
+        if (sh.wait <= 0) continue;
+        const v = state.villages.find((o) => o.shipyard && o.race !== sh.race && !atWar(o.race, sh.race) && Math.abs(o.shipyard.x - sh.x) <= 3 && Math.abs(o.shipyard.y - sh.y) <= 3);
+        if (!v) continue;
+        const home = state.homes[sh.race];
+        v.food = (v.food || 0) + 6;
+        v.wood += 2;
+        if (home) {
+          home.food = (home.food || 0) + 6;
+          home.wood += 2;
+        }
+        if (Math.random() < 0.5) chronicle("seaTrade", sh.race, v.race);
+      }
+    }
+    // Пираты: с эры Средневековья, в открытом море.
+    if (state.tick % 1800 === 900 && state.pirates.length < 2 && Math.max(...state.era) >= 1 && state.ships.length + state.villages.filter((v) => v.shipyard).length > 0) {
+      for (let attempt = 0; attempt < 40; attempt += 1) {
+        const x = Math.floor(Math.random() * W);
+        const y = Math.floor(Math.random() * H);
+        if (state.tiles[idx(x, y)] !== T.DEEP) continue;
+        const a = Math.random() * Math.PI * 2;
+        state.pirates.push({ x, y, vx: Math.cos(a) * 0.06, vy: Math.sin(a) * 0.06, wait: 0, face: 1, hp: 4 });
+        chronicle("pirate");
+        break;
+      }
+    }
+    for (const p of [...state.pirates]) {
+      if (p.wait > 0) {
+        p.wait -= 1;
+      } else {
+        // Курс на ближайший корабль или верфь.
+        let target = null;
+        let bestD = Infinity;
+        for (const sh of state.ships) {
+          const d = Math.abs(sh.x - p.x) + Math.abs(sh.y - p.y);
+          if (d < bestD) { bestD = d; target = { x: sh.x, y: sh.y }; }
+        }
+        for (const v of state.villages) {
+          if (!v.shipyard) continue;
+          const d = Math.abs(v.shipyard.x - p.x) + Math.abs(v.shipyard.y - p.y);
+          if (d < bestD) { bestD = d; target = v.shipyard; }
+        }
+        if (target && Math.random() < 0.1) {
+          const a = Math.atan2(target.y - p.y, target.x - p.x);
+          p.vx = Math.cos(a) * 0.06;
+          p.vy = Math.sin(a) * 0.06;
+        }
+        const nx = p.x + p.vx;
+        const ny = p.y + p.vy;
+        if (inside(Math.round(nx), Math.round(ny)) && tileAt(Math.round(nx), Math.round(ny)) <= T.WATER) {
+          p.x = nx;
+          p.y = ny;
+          if (Math.abs(p.vx) > 0.001) p.face = p.vx > 0 ? 1 : -1;
+        } else {
+          p.wait = 40;
+          const a = Math.atan2(p.vy, p.vx) + Math.PI + (Math.random() - 0.5);
+          p.vx = Math.cos(a) * 0.06;
+          p.vy = Math.sin(a) * 0.06;
+        }
+      }
+      // Абордаж и грабёж.
+      const victim = state.ships.find((sh) => Math.abs(sh.x - p.x) <= 1.5 && Math.abs(sh.y - p.y) <= 1.5);
+      if (victim && state.tick % 20 === 0) {
+        state.ships = state.ships.filter((sh) => sh !== victim);
+        puff(Math.round(victim.x), Math.round(victim.y), "#5b3d22", 8, "dust");
+        chronicle("pirateSink", victim.race);
+      }
+      if (state.tick % 240 === 0) {
+        const yard = state.villages.find((v) => v.shipyard && Math.abs(v.shipyard.x - p.x) <= 2.5 && Math.abs(v.shipyard.y - p.y) <= 2.5);
+        if (yard) {
+          yard.food = Math.max(0, (yard.food || 0) - 5);
+          yard.wood = Math.max(0, yard.wood - 5);
+          yard.unrest = Math.min(100, (yard.unrest || 0) + 5);
+          chronicle("pirateRaid", yard.race, yard.name);
+          p.wait = 30;
+        }
+      }
+      // Воины на берегу отстреливаются.
+      if (state.tick % 45 === 0) {
+        const guard = state.cats.find((c) => c.warrior && Math.abs(c.x - p.x) <= 3 && Math.abs(c.y - p.y) <= 3);
+        if (guard) {
+          p.hp -= 1;
+          puff(Math.round(p.x), Math.round(p.y), "#e0242f", 3, "hit");
+          if (p.hp <= 0) {
+            state.pirates = state.pirates.filter((o) => o !== p);
+            puff(Math.round(p.x), Math.round(p.y), "#5b3d22", 8, "dust");
+            chronicle("pirateDead", guard.race);
+            state.flags.piratesBeaten = true;
+          }
+        }
+      }
+    }
+  }
+
+  /* ── Бедствия: чума, землетрясение, цунами, благословение, НЛО ── */
+  function plagueTick() {
+    const sick = state.cats.filter((c) => c.sick);
+    // Сама приходит редко и только в людный остров.
+    if (!sick.length && state.tick % 3000 === 1500 && state.cats.length >= 25 && Math.random() < 0.25) {
+      const c = state.cats[Math.floor(Math.random() * state.cats.length)];
+      c.sick = true;
+      chronicle("plague", c.race);
+      return;
+    }
+    if (!sick.length) {
+      if (state.plagueWas) {
+        state.plagueWas = false;
+        state.flags.plagueEnded = true;
+        chronicle("plagueEnd");
+      }
+      return;
+    }
+    state.plagueWas = true;
+    if (state.tick % 30 === 0) {
+      for (const s of sick) {
+        for (const c of state.cats) {
+          if (c.sick || Math.abs(c.x - s.x) > 1 || Math.abs(c.y - s.y) > 1) continue;
+          if (Math.random() < 0.25) c.sick = true;
+        }
+      }
+    }
+    if (state.tick % 240 === 0) {
+      for (const s of [...sick]) {
+        s.hp -= 1;
+        s.wait = Math.max(s.wait, 8);
+        if (s.hp <= 0) killCat(s, null);
+      }
+    }
+    // Лекари бегут к больным.
+    if (state.tick % 60 === 0) {
+      for (const h of state.cats) {
+        if (h.job !== "healer" || h.task) continue;
+        const patient = sick.find((s) => s.v === h.v);
+        if (patient) assign(h, { kind: "heal", x: patient.x, y: patient.y, ttl: 60, v: h.v, who: patient });
+      }
+    }
+  }
+
+  function startQuake(x, y) {
+    state.quake = { ttl: 60, x, y };
+    chronicle("quake");
+    const R = 9;
+    for (const h of [...state.houses]) {
+      if (Math.abs(h.x - x) > R || Math.abs(h.y - y) > R) continue;
+      if (Math.random() < 0.45) {
+        state.houses = state.houses.filter((o) => o !== h);
+        puff(h.x, h.y, "#c9b48a", 8, "dust");
+      }
+    }
+    for (const [i, wl] of [...state.walls]) {
+      const wx = i % W;
+      const wy = (i / W) | 0;
+      if (Math.abs(wx - x) <= R && Math.abs(wy - y) <= R && Math.random() < 0.5) {
+        state.walls.delete(i);
+        state.towers = state.towers.filter((t) => idx(t.x, t.y) !== i);
+      }
+    }
+    // Горы растут: холмы становятся горами, кое-где трескается земля.
+    for (let i = 0; i < 14; i += 1) {
+      const cx = x + Math.round((Math.random() * 2 - 1) * R);
+      const cy = y + Math.round((Math.random() * 2 - 1) * R);
+      if (!inside(cx, cy)) continue;
+      const j = idx(cx, cy);
+      if (state.tiles[j] === T.HILL) state.tiles[j] = T.MOUNTAIN;
+      else if (state.tiles[j] === T.GRASS && Math.random() < 0.3) state.tiles[j] = T.HILL;
+    }
+    for (const c of state.cats) {
+      if (Math.abs(c.x - x) <= R && Math.abs(c.y - y) <= R) {
+        c.wait = 0;
+        c.tx = c.x + Math.sign(c.x - x || 1) * 3;
+        c.ty = c.y + Math.sign(c.y - y || 1) * 2;
+      }
+    }
+    state.needBake = true;
+    countPop();
+    persist();
+  }
+  function quakeTick() {
+    if (state.quake.ttl > 0) state.quake.ttl -= 1;
+    if (state.tick % 4200 === 2100 && state.houses.length >= 10 && Math.random() < 0.3) {
+      const h = state.houses[Math.floor(Math.random() * state.houses.length)];
+      startQuake(h.x, h.y);
+    }
+  }
+
+  function startTsunami(x, y) {
+    // Точка старта — в море; волна идёт к ближайшему берегу.
+    if (tileAt(x, y) > T.WATER) {
+      let best = null;
+      let bestD = Infinity;
+      for (let i = 0; i < W * H; i += 1) {
+        if (state.tiles[i] !== T.DEEP) continue;
+        const d = Math.abs((i % W) - x) + Math.abs(((i / W) | 0) - y);
+        if (d < bestD) { bestD = d; best = i; }
+      }
+      if (best === null) return;
+      x = best % W;
+      y = (best / W) | 0;
+    }
+    let target = null;
+    let bestD = Infinity;
+    for (let i = 0; i < W * H; i += 1) {
+      if (state.tiles[i] < T.SAND) continue;
+      const d = Math.abs((i % W) - x) + Math.abs(((i / W) | 0) - y);
+      if (d < bestD) { bestD = d; target = i; }
+    }
+    if (target === null) return;
+    const tx = target % W;
+    const ty = (target / W) | 0;
+    const a = Math.atan2(ty - y, tx - x);
+    state.tsunami = { x, y, dx: Math.cos(a) * 0.35, dy: Math.sin(a) * 0.35, t: 0, len: 9 };
+    chronicle("tsunami");
+  }
+  function tsunamiTick() {
+    if (!state.tsunami) {
+      if (state.tick % 6000 === 3000 && Math.random() < 0.2 && state.villages.some((v) => v.shipyard)) {
+        const v = state.villages.find((o) => o.shipyard);
+        startTsunami(v.shipyard.x + 6, v.shipyard.y);
+      }
+      return;
+    }
+    const ts = state.tsunami;
+    ts.t += 1;
+    ts.x += ts.dx;
+    ts.y += ts.dy;
+    const cx = Math.round(ts.x);
+    const cy = Math.round(ts.y);
+    if (!inside(cx, cy) || ts.t > 260) {
+      state.tsunami = null;
+      return;
+    }
+    // Фронт волны: перпендикуляр длиной len; на суше смывает первые две клетки.
+    const nx = -ts.dy / 0.35;
+    const ny = ts.dx / 0.35;
+    let onLand = false;
+    for (let k = -ts.len; k <= ts.len; k += 1) {
+      const x = Math.round(cx + nx * k);
+      const y = Math.round(cy + ny * k);
+      if (!inside(x, y)) continue;
+      const i = idx(x, y);
+      if (state.tiles[i] >= T.SAND) {
+        onLand = true;
+        ts.depth = (ts.depth || 0);
+        state.trees.delete(i);
+        state.flowers.delete(i);
+        state.farms.delete(i);
+        state.houses = state.houses.filter((h) => !(h.x === x && h.y === y));
+        for (const c of [...state.cats]) if (c.x === x && c.y === y) killCat(c, null);
+        bakeArea(x, y, x, y);
+      }
+      for (const sh of [...state.ships]) if (Math.abs(sh.x - x) <= 1 && Math.abs(sh.y - y) <= 1) state.ships = state.ships.filter((o) => o !== sh);
+    }
+    if (onLand) {
+      ts.land = (ts.land || 0) + 1;
+      if (ts.land > 2) {
+        state.tsunami = null;
+        countPop();
+        persist();
+      }
+    }
+  }
+
+  function blessTick() {
+    for (let r = 0; r < RACES.length; r += 1) {
+      if (state.blessed[r] > 0) {
+        state.blessed[r] -= 1;
+        if (state.blessed[r] === 0) chronicle("blessEnd", r);
+        else if (state.tick % 20 === 0 && state.homes[r]) puff(state.homes[r].x + Math.round(Math.random() * 4 - 2), state.homes[r].y + Math.round(Math.random() * 2 - 1), "#ffd23a", 1, "heart");
+        for (const v of state.villages) if (v.race === r && state.tick % 120 === 0) v.unrest = Math.max(0, (v.unrest || 0) - 3);
+      }
+      if (state.cursed[r] > 0) {
+        state.cursed[r] -= 1;
+        if (state.cursed[r] === 0) chronicle("curseEnd", r);
+        else {
+          if (state.tick % 20 === 0 && state.homes[r]) puff(state.homes[r].x + Math.round(Math.random() * 4 - 2), state.homes[r].y + Math.round(Math.random() * 2 - 1), "#4a4643", 1, "dust");
+          if (state.tick % 300 === 0) {
+            const hs = state.houses.filter((h) => h.race === r);
+            if (hs.length) {
+              const h = hs[Math.floor(Math.random() * hs.length)];
+              if (!state.fires.some((f) => f.x === h.x && f.y === h.y)) state.fires.push({ x: h.x, y: h.y, ttl: 60 });
+            }
+          }
+          for (const v of state.villages) if (v.race === r && state.tick % 120 === 0) v.unrest = Math.min(100, (v.unrest || 0) + 3);
+        }
+      }
+    }
+  }
+
+  /** Коты-роботы: прилетают сами, когда кто-то дошёл до Будущего. */
+  function robotsTick() {
+    if (state.tick % 1800 !== 900) return;
+    const ri = RACES.findIndex((r) => r.id === "robot");
+    if (ri < 0 || state.pop[ri] > 0 || Math.max(...state.era) < 2 || Math.random() < 0.3) return;
+    for (let attempt = 0; attempt < 300; attempt += 1) {
+      const x = Math.floor(Math.random() * W);
+      const y = Math.floor(Math.random() * H);
+      if (state.tiles[idx(x, y)] < T.SAND || state.tiles[idx(x, y)] > T.MOUNTAIN) continue;
+      if (state.terr && state.terr[idx(x, y)] !== 255) continue;
+      if (attempt < 150 && state.tiles[idx(x, y)] < T.HILL) continue; // сначала ищем горы, потом любую свободную сушу
+      const vi = foundVillage(ri, x, y);
+      state.era[ri] = 2;
+      for (let i = 0; i < 6; i += 1) spawnCat(ri, vi, 3);
+      puff(x, y, "#7fd4ff", 20, "spark");
+      chronicle("robots", state.villages[vi].name);
+      countPop();
+      persist();
+      break;
+    }
+  }
+
+  const ISLAND_ACH = [
+    { id: "first", title: "Первое поселение", test: () => state.villages.length >= 1 },
+    { id: "four", title: "Четыре народа живут вместе", test: () => RACES.slice(0, 4).every((_, r) => state.pop[r] > 0) },
+    { id: "hundred", title: "Сто котов", test: () => state.cats.length >= 100 },
+    { id: "future", title: "Эра Будущего", test: () => Math.max(...state.era) >= 2 },
+    { id: "nuke", title: "Пережил атомную бомбу", test: () => state.flags.nuked && state.cats.length > 0 },
+    { id: "plague", title: "Пережили чуму", test: () => state.flags.plagueEnded },
+    { id: "eruption", title: "Видели извержение", test: () => state.flags.eruption },
+    { id: "pirates", title: "Пираты отбиты", test: () => state.flags.piratesBeaten },
+    { id: "temple", title: "Первый храм", test: () => state.villages.some((v) => v.temple) },
+    { id: "king", title: "Король пал в бою", test: () => state.flags.kingFell },
+    { id: "robots", title: "Гости из будущего", test: () => RACES.some((r, i) => r.id === "robot" && state.pop[i] > 0) },
+    { id: "hour", title: "Остров живёт час", test: () => Date.now() - state.born > 3_600_000 },
+    { id: "walls", title: "Крепость", test: () => state.towers.length >= 4 },
+  ];
+  function achTick() {
+    if (state.tick % 300 !== 150) return;
+    for (const a of ISLAND_ACH) {
+      if (state.islandAch.includes(a.id)) continue;
+      let ok = false;
+      try { ok = Boolean(a.test()); } catch { ok = false; }
+      if (!ok) continue;
+      state.islandAch.push(a.id);
+      chronicle("achievement", a.title);
+      if (state.homes.find(Boolean)) { const h = state.homes.find(Boolean); puff(h.x, h.y, "#ffd23a", 10, "spark"); }
+      persist();
+    }
+  }
+  const discoverKey = `world:discovered:${seed}`;
+  function loadDiscovered() {
+    try { state.discovered = JSON.parse(localStorage.getItem(discoverKey) || "[]"); } catch { state.discovered = []; }
+    if (!Array.isArray(state.discovered)) state.discovered = [];
+  }
+  function discoverTick() {
+    if (state.tick % 3600 !== 1800) return;
+    if (Math.max(...state.era) < 1 || state.ships.length < 2) return;
+    const known = new Set([...state.discovered, map, "island"]);
+    const left = MAPS.filter((m) => !known.has(m.id));
+    if (!left.length || Math.random() < 0.4) return;
+    const found = left[Math.floor(Math.random() * left.length)];
+    state.discovered.push(found.id);
+    try { localStorage.setItem(discoverKey, JSON.stringify(state.discovered)); } catch { /* пусть */ }
+    chronicle("discover", found.name);
+  }
+
+  function ufoTick() {
+    if (!state.ufo) {
+      if (Math.max(...state.era) >= 2 && state.tick % 2400 === 1200 && Math.random() < 0.35 && state.villages.length) {
+        const v = state.villages[Math.floor(Math.random() * state.villages.length)];
+        const fromLeft = Math.random() < 0.5;
+        state.ufo = { x: fromLeft ? -4 : W + 4, y: Math.max(2, v.y - 3), tx: v.x, ty: v.y, t: 0, phase: "fly", taken: 0, race: v.race };
+        chronicle("ufo");
+      }
+      return;
+    }
+    const u = state.ufo;
+    u.t += 1;
+    if (u.phase === "fly") {
+      u.x += Math.sign(u.tx - u.x) * 0.3;
+      if (Math.abs(u.x - u.tx) < 0.4) {
+        u.x = u.tx;
+        u.phase = "beam";
+        u.t = 0;
+      }
+    } else if (u.phase === "beam") {
+      if (u.t % 40 === 20 && u.taken < 3) {
+        const c = state.cats.find((o) => Math.abs(o.x - u.tx) <= 2 && Math.abs(o.y - u.ty) <= 2);
+        if (c) {
+          state.cats = state.cats.filter((o) => o !== c);
+          puff(c.x, c.y, "#7fd4ff", 6, "spark");
+          u.taken += 1;
+        }
+      }
+      if (u.t > 150) {
+        u.phase = "leave";
+        u.t = 0;
+        if (u.taken) chronicle("ufoTaken", u.race, u.taken);
+        countPop();
+        persist();
+      }
+    } else {
+      u.x += 0.5;
+      u.y -= 0.15;
+      if (u.x > W + 6 || u.y < -6) state.ufo = null;
+    }
+  }
+
+  /** Вера гаснет, когда бог (ты) долго не заходил. Зовётся при старте. */
+  function faithDecay(elapsedMs) {
+    const days = Math.floor(elapsedMs / 86_400_000);
+    if (days <= 0) return;
+    for (let r = 0; r < RACES.length; r += 1) {
+      if (state.pop[r] === 0) continue;
+      state.faith[r] = Math.max(0, state.faith[r] - days * 12);
+      if (state.faith[r] < 20) chronicle("faithLow", r);
+    }
   }
 
   function hitHouse(h, byRace) {
@@ -1432,7 +2583,7 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
         if (duel) target.anim = { kind: "brawl", t: 14, dx: -c.face, dy: 0 };
         puff(target.x, target.y, "#fff3a3", 3, "spark");
         if (isCat) {
-          target.hp -= 1;
+          target.hp -= c.hero ? 3 : 1 + (state.blessed[c.race] > 0 ? 1 : 0) + (state.villages[c.v]?.weapons > 0 ? 1 : 0) + (state.cats.some((o) => o.race === c.race && o.job === "smith") ? 1 : 0);
           target.hit = 5;
           if (!duel) target.anim = { kind: "knock", t: 8, dx: c.face, dy: 0 };
           puff(target.x, target.y, "#e0242f", 3, "hit");
@@ -1465,7 +2616,7 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       if (!tg) continue;
       if ("px" in tg) {
         if (!state.cats.includes(tg)) continue;
-        tg.hp -= 1;
+        tg.hp -= p.hero ? 3 : 1;
         tg.hit = 5;
         tg.anim = { kind: "knock", t: 6, dx: Math.sign(p.tx - p.x) || 1, dy: 0 };
         puff(tg.x, tg.y, p.kind === "blaster" ? "#7fd4ff" : "#e0242f", 3, "hit");
@@ -1513,6 +2664,350 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     state.bolts = state.bolts.filter((b) => b.ttl > 0);
   }
 
+  /** Воронки зарастают: когда истекает срок, территория возвращается народу. */
+  function healCraters() {
+    if (!state.craters.length) return;
+    let healed = false;
+    for (const cr of state.craters) {
+      cr.ttl -= 1;
+      if (cr.ttl <= 0) healed = true;
+    }
+    if (!healed) return;
+    state.craters = state.craters.filter((cr) => cr.ttl > 0);
+    countPop();
+  }
+
+  /**
+   * Атомная бомба. Падает 40 тиков, потом взрыв радиусом NUKE_R: всё живое в
+   * округе гибнет, лес и дома исчезают, в центре остаётся озеро-кратер, по
+   * краю горит. Территория выпадает на три минуты — пустошь.
+   */
+  /** Молния в клетку: пожар, коты рядом гибнут, воронка. Зовёт и бог, и гроза. */
+  function strikeBolt(x, y) {
+    state.bolts.push({ x, y, ttl: 12 });
+    const i = idx(x, y);
+    if (state.trees.has(i) || state.houses.some((h) => h.x === x && h.y === y)) state.fires.push({ x, y, ttl: 50 });
+    for (const c of [...state.cats]) {
+      const dx = Math.abs(c.x - x);
+      const dy = Math.abs(c.y - y);
+      if (dx <= 1 && dy <= 1) {
+        killCat(c, null);
+      } else if (dx <= 2 && dy <= 2) {
+        c.tx = c.x + Math.sign(c.x - x || 1) * 3;
+        c.ty = c.y + Math.sign(c.y - y || 1) * 2;
+        c.wait = 0;
+      }
+    }
+    state.craters.push({ x, y, r: 1, ttl: CRATER_BOLT_TICKS });
+    countPop();
+  }
+
+  /** Погода: меняется сама, по сезону. Дождь тушит, гроза бьёт, засуха сушит. */
+  function weatherTick() {
+    const wth = state.weather;
+    wth.ttl -= 1;
+    if (wth.ttl <= 0) {
+      const s = season().id;
+      const roll = Math.random();
+      let kind = "clear";
+      if (s === "winter") kind = roll < 0.45 ? "snow" : roll < 0.6 ? "storm" : "clear";
+      else if (s === "summer") kind = roll < 0.25 ? "rain" : roll < 0.4 ? "storm" : roll < 0.6 ? "drought" : "clear";
+      else kind = roll < 0.35 ? "rain" : roll < 0.5 ? "storm" : "clear";
+      if (kind !== wth.kind) chronicle("weather", kind);
+      wth.kind = kind;
+      wth.ttl = 900 + Math.floor(Math.random() * 1500);
+    }
+    if (wth.kind === "storm" && state.tick % 210 === 0) {
+      // Гроза бьёт сама — в случайную сушу.
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        const x = Math.floor(Math.random() * W);
+        const y = Math.floor(Math.random() * H);
+        if (state.tiles[idx(x, y)] >= T.SAND) {
+          strikeBolt(x, y);
+          break;
+        }
+      }
+    }
+    if (raining() && state.fires.length && state.tick % 3 === 0) {
+      for (const f of state.fires) f.ttl -= 4;
+    }
+  }
+
+  /** Смена сезона ловится по дню; зимой перепекаем снег. */
+  function seasonTick() {
+    const id = season().id;
+    if (state.seasonId === id) return;
+    const first = state.seasonId === null;
+    state.seasonId = id;
+    if (!first) chronicle("season", id);
+    bakeSeason();
+  }
+
+  /* ── Животные ── */
+  const ANIMALS = {
+    mouse: { max: 10, on: (t) => t === T.GRASS || t === T.SAND, speed: 1 },
+    bird: { max: 6, on: () => true, speed: 1 },
+    deer: { max: 5, on: (t) => t === T.FOREST || t === T.GRASS, speed: 1 },
+    wolf: { max: 3, on: (t) => t === T.HILL || t === T.FOREST, speed: 1 },
+    dragon: { max: 1, on: () => true, speed: 1 },
+  };
+  function spawnAnimal(kind) {
+    const spec = ANIMALS[kind];
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const x = Math.floor(Math.random() * W);
+      const y = Math.floor(Math.random() * H);
+      const t = state.tiles[idx(x, y)];
+      if (kind === "dragon" ? t < T.MOUNTAIN : kind === "bird" ? t <= T.WATER : !spec.on(t)) continue;
+      state.animals.push({ kind, x, y, px: x, py: y, tx: x, ty: y, wait: 0, face: 1, hp: kind === "dragon" ? 12 : kind === "wolf" ? 4 : 1, cd: 0 });
+      return true;
+    }
+    return false;
+  }
+  function animalsTick() {
+    if (state.tick % 300 === 0) {
+      // Заселение: мыши и птицы всегда, олени в лесу, волки в холмах,
+      // дракон — редко и только когда есть кого пугать.
+      for (const kind of Object.keys(ANIMALS)) {
+        const have = state.animals.filter((a) => a.kind === kind).length;
+        if (have >= ANIMALS[kind].max) continue;
+        const chance = kind === "dragon" ? (state.cats.length >= 20 ? 0.08 : 0) : kind === "wolf" ? 0.5 : 0.8;
+        if (Math.random() < chance) spawnAnimal(kind);
+      }
+    }
+    const night = nightAlpha() > 0.25;
+    for (const a of [...state.animals]) {
+      const ddx = a.x - a.px;
+      const ddy = a.y - a.py;
+      if (Math.abs(ddx) > 0.01 || Math.abs(ddy) > 0.01) {
+        const sp = a.kind === "bird" || a.kind === "dragon" ? 0.25 : 0.15;
+        a.px += Math.sign(ddx) * Math.min(Math.abs(ddx), sp);
+        a.py += Math.sign(ddy) * Math.min(Math.abs(ddy), sp);
+        continue;
+      }
+      a.px = a.x;
+      a.py = a.y;
+      if (a.cd > 0) a.cd -= 1;
+      if (a.wait > 0) {
+        a.wait -= 1;
+        continue;
+      }
+      // Волк ночью идёт на одинокого кота; дракон — на дома.
+      if (a.kind === "wolf" && night && a.cd === 0) {
+        const prey = state.cats.find((c) => Math.abs(c.x - a.x) <= 4 && Math.abs(c.y - a.y) <= 3 && !c.warrior);
+        if (prey) {
+          if (Math.abs(prey.x - a.x) <= 1 && Math.abs(prey.y - a.y) <= 1) {
+            prey.hp -= 1;
+            puff(prey.x, prey.y, "#e0242f", 3, "hit");
+            prey.tx = prey.x + Math.sign(prey.x - a.x || 1) * 4;
+            prey.ty = prey.y + Math.sign(prey.y - a.y || 1) * 3;
+            prey.wait = 0;
+            a.cd = 90;
+            if (prey.hp <= 0) {
+              chronicle("wolf", prey.race, prey.name);
+              killCat(prey, null);
+            }
+          } else {
+            a.tx = prey.x;
+            a.ty = prey.y;
+            a.face = Math.sign(prey.x - a.x) || a.face;
+            if (a.x !== a.tx || a.y !== a.ty) { const nx = a.x + Math.sign(a.tx - a.x); const ny = a.y + Math.sign(a.ty - a.y); if (inside(nx, ny) && state.tiles[idx(nx, ny)] >= T.SAND) { a.x = nx; a.y = ny; } }
+            continue;
+          }
+        }
+      }
+      if (a.kind === "dragon" && a.cd === 0 && state.houses.length && Math.random() < 0.02) {
+        const h = state.houses[Math.floor(Math.random() * state.houses.length)];
+        a.tx = h.x;
+        a.ty = h.y;
+        a.cd = 600;
+        a.target = h;
+      }
+      if (a.kind === "dragon" && a.target && a.x === a.target.x && a.y === a.target.y) {
+        if (!state.fires.some((f) => f.x === a.x && f.y === a.y)) state.fires.push({ x: a.x, y: a.y, ttl: 60 });
+        chronicle("dragon", a.target.race);
+        a.target = null;
+      }
+      // Воины отбиваются: волк рядом с воином получает урон.
+      if ((a.kind === "wolf" || a.kind === "dragon") && a.cd % 30 === 0) {
+        const guard = state.cats.find((c) => c.warrior && Math.abs(c.x - a.x) <= 2 && Math.abs(c.y - a.y) <= 2);
+        if (guard) {
+          a.hp -= 1;
+          puff(a.x, a.y, "#e0242f", 3, "hit");
+          if (a.hp <= 0) {
+            state.animals = state.animals.filter((o) => o !== a);
+            puff(a.x, a.y, "#d9d3c4", 6, "dust");
+            continue;
+          }
+        }
+      }
+      // Мышь рядом с котом — поймана (кот сыт, сердечко).
+      if (a.kind === "mouse") {
+        const hunter = state.cats.find((c) => Math.abs(c.x - a.x) <= 1 && Math.abs(c.y - a.y) <= 1);
+        if (hunter) {
+          state.animals = state.animals.filter((o) => o !== a);
+          puff(a.x, a.y, "#ff6f91", 2, "heart");
+          if (Math.random() < 0.15) chronicle("mouse", hunter.race, hunter.name);
+          continue;
+        }
+      }
+      if (a.x === a.tx && a.y === a.ty) {
+        const spec = ANIMALS[a.kind];
+        for (let attempt = 0; attempt < 6; attempt += 1) {
+          const range = a.kind === "bird" || a.kind === "dragon" ? 6 : 3;
+          const tx = a.x + Math.round((Math.random() * 2 - 1) * range);
+          const ty = a.y + Math.round((Math.random() * 2 - 1) * range * 0.7);
+          if (!inside(tx, ty)) continue;
+          const t = state.tiles[idx(tx, ty)];
+          if (a.kind === "bird" || a.kind === "dragon" ? true : spec.on(t) || t === T.GRASS) {
+            a.tx = tx;
+            a.ty = ty;
+            a.face = Math.sign(tx - a.x) || a.face;
+            break;
+          }
+        }
+        a.wait = a.kind === "bird" ? 2 : 6 + Math.floor(Math.random() * 20);
+        continue;
+      }
+      const nx = a.x + Math.sign(a.tx - a.x);
+      const ny = a.y + Math.sign(a.ty - a.y);
+      if (inside(nx, ny)) {
+        a.x = nx;
+        a.y = ny;
+      } else {
+        a.tx = a.x;
+        a.ty = a.y;
+      }
+    }
+  }
+
+  /* ── Вулкан и лава ── */
+  function volcanoTick() {
+    for (const v of state.volcanoes) {
+      // Спящий вулкан просыпается сам — примерно раз в три игровых дня.
+      if (v.erupt <= 0 && state.tick % 300 === 0 && Math.random() < 300 / (DAY_TICKS * 3)) {
+        v.erupt = VOLCANO_ERUPT_TICKS;
+        const near = state.homes.find((h) => h && Math.abs(h.x - v.x) < 12 && Math.abs(h.y - v.y) < 10);
+        chronicle("eruption", near ? near.race : null);
+        state.flags.eruption = true;
+      }
+      if (v.erupt > 0) {
+        v.erupt -= 1;
+        if (v.erupt % 6 === 0) {
+          // Выплеск: лава у жерла и растекается вниз.
+          for (const [dx, dy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) {
+            const x = v.x + dx;
+            const y = v.y + dy;
+            if (inside(x, y) && (dx === 0 && dy === 0 ? true : Math.random() < 0.5)) state.lava.set(idx(x, y), { ttl: LAVA_TTL, flow: LAVA_FLOW });
+          }
+          puff(v.x, v.y, "#ff6a00", 3, "spark");
+        }
+      }
+    }
+    if (!state.lava.size) return;
+    if (state.tick % 6 === 0) {
+      const spread = [];
+      for (const [i, cell] of state.lava) {
+        if (cell.ttl < LAVA_TTL - 30 || cell.flow <= 0) continue; // растекается только свежая и с запасом хода
+        const x = i % W;
+        const y = (i / W) | 0;
+        const cur = state.tiles[i];
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const nx = x + dx;
+          const ny = y + dy;
+          if (!inside(nx, ny)) continue;
+          const j = idx(nx, ny);
+          if (state.lava.has(j)) continue;
+          const t = state.tiles[j];
+          if (t <= T.WATER) continue; // в море шипит и гаснет
+          if (t > cur) continue; // вверх не течёт
+          // Вниз по склону — почти наверняка, по ровному — с трудом.
+          if (Math.random() < (t < cur ? 0.7 : 0.3)) spread.push([j, cell.flow - 1]);
+        }
+      }
+      for (const [j, flow] of spread) if (!state.lava.has(j)) state.lava.set(j, { ttl: LAVA_TTL, flow });
+    }
+    // Лава жжёт всё: лес, дома, котов, животных.
+    for (const [i, cell] of state.lava) {
+      const x = i % W;
+      const y = (i / W) | 0;
+      const ttl = cell.ttl;
+      if (ttl === LAVA_TTL) {
+        state.trees.delete(i);
+        state.flowers.delete(i);
+        const had = state.houses.length;
+        state.houses = state.houses.filter((h) => !(h.x === x && h.y === y));
+        if (state.houses.length !== had) countPop();
+        for (const c of [...state.cats]) if (c.x === x && c.y === y) killCat(c, null);
+        state.animals = state.animals.filter((a) => !(a.x === x && a.y === y) || a.kind === "bird" || a.kind === "dragon");
+        bakeArea(x, y, x, y);
+      }
+      cell.ttl = ttl - 1;
+      if (cell.ttl <= 0) {
+        state.lava.delete(i);
+        // Застыла камнем.
+        if (state.tiles[i] > T.WATER) state.tiles[i] = T.MOUNTAIN;
+        bakeArea(x - 1, y - 1, x + 1, y + 1);
+        if (state.lava.size === 0) {
+          countPop();
+          persist();
+        }
+      }
+    }
+    for (const c of state.cats) {
+      if (state.lava.has(idx(c.tx, c.ty))) {
+        c.tx = c.x;
+        c.ty = c.y;
+      }
+    }
+  }
+
+  function fallNukes() {
+    for (const n of state.nukes) {
+      n.t += 1;
+      if (n.t !== 40) continue;
+      const R = NUKE_R;
+      const edgeTrees = [];
+      for (let dy = -R; dy <= R; dy += 1) {
+        for (let dx = -R; dx <= R; dx += 1) {
+          const d = dx * dx + dy * dy;
+          if (d > R * R + 2) continue;
+          const x = n.x + dx;
+          const y = n.y + dy;
+          if (!inside(x, y)) continue;
+          const i = idx(x, y);
+          if (state.trees.has(i) && d >= (R - 2) * (R - 2)) edgeTrees.push({ x, y });
+          if (state.tiles[i] >= T.SAND) state.tiles[i] = d <= 5 ? T.WATER : T.SAND;
+          state.trees.delete(i);
+          state.flowers.delete(i);
+          state.houses = state.houses.filter((h) => !(h.x === x && h.y === y));
+        }
+      }
+      for (const e of edgeTrees) if (!state.fires.some((f) => f.x === e.x && f.y === e.y)) state.fires.push({ x: e.x, y: e.y, ttl: 60 });
+      for (const c of [...state.cats]) {
+        const dx = Math.abs(c.x - n.x);
+        const dy = Math.abs(c.y - n.y);
+        if (dx <= R + 1 && dy <= R + 1) {
+          killCat(c, null);
+        } else if (dx <= R + 5 && dy <= R + 5) {
+          c.tx = c.x + Math.sign(c.x - n.x || 1) * 6;
+          c.ty = c.y + Math.sign(c.y - n.y || 1) * 5;
+          c.wait = 0;
+        }
+      }
+      state.ships = state.ships.filter((sh) => Math.abs(sh.x - n.x) > R + 1 || Math.abs(sh.y - n.y) > R + 1);
+      state.craters.push({ x: n.x, y: n.y, r: R + 1, ttl: CRATER_NUKE_TICKS });
+      const near = state.homes.find((h) => h && Math.abs(h.x - n.x) < 12 && Math.abs(h.y - n.y) < 10);
+      puff(n.x, n.y, "#fff3a3", 40, "spark");
+      puff(n.x, n.y, "#4a4643", 30, "dust");
+      chronicle("nuke", near ? near.race : null);
+      state.flags.nuked = true;
+      bakeArea(n.x - R - 1, n.y - R - 1, n.x + R + 1, n.y + R + 1);
+      countPop();
+      persist();
+    }
+    state.nukes = state.nukes.filter((n) => n.t < 170);
+  }
+
   function fallMeteors() {
     for (const m of state.meteors) {
       m.t += 1;
@@ -1532,13 +3027,20 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
             state.houses = state.houses.filter((h) => !(h.x === x && h.y === y));
           }
         }
-        for (const c of state.cats) {
-          if (Math.abs(c.x - m.x) <= 3 && Math.abs(c.y - m.y) <= 3) {
+        // В эпицентре (две клетки) коты гибнут, дальше — разбегаются. Раньше
+        // метеорит только пугал, и «убить кота» было невозможно ничем.
+        for (const c of [...state.cats]) {
+          const dx = Math.abs(c.x - m.x);
+          const dy = Math.abs(c.y - m.y);
+          if (dx <= 2 && dy <= 2) {
+            killCat(c, null);
+          } else if (dx <= 3 && dy <= 3) {
             c.tx = c.x + Math.sign(c.x - m.x || 1) * 4;
             c.ty = c.y + Math.sign(c.y - m.y || 1) * 3;
             c.wait = 0;
           }
         }
+        state.craters.push({ x: m.x, y: m.y, r: 3, ttl: CRATER_METEOR_TICKS });
         const near = state.homes.find((h) => h && Math.abs(h.x - m.x) < 8 && Math.abs(h.y - m.y) < 6);
         puff(m.x, m.y, "#ffb347", 16, "spark");
         chronicle("meteor", near ? near.race : null);
@@ -1661,9 +3163,11 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     const kinds = ["trade", "festival", "forge", "song", "raid"];
     if (state.villages.some((v) => v.shipyard)) kinds.push("fishing");
     const kind = kinds[Math.floor(Math.random() * kinds.length)];
-    const a = Math.floor(Math.random() * 4);
-    let b = Math.floor(Math.random() * 4);
-    if (b === a) b = (a + 1) % 4;
+    const alive = RACES.map((_, r) => r).filter((r) => state.pop[r] > 0);
+    if (alive.length < 2) return;
+    const a = alive[Math.floor(Math.random() * alive.length)];
+    let b = alive[Math.floor(Math.random() * alive.length)];
+    if (b === a) b = alive[(alive.indexOf(a) + 1) % alive.length];
     chronicle(kind, a, b);
   }
 
@@ -1806,9 +3310,16 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
         break;
       }
       case "cat": {
+        if (RACES[tool.race].minEra && Math.max(...state.era) < RACES[tool.race].minEra) {
+          if (!state.robotsHint || state.tick - state.robotsHint > 300) {
+            state.robotsHint = state.tick;
+            chronicle("robotsLocked");
+          }
+          break;
+        }
         const race = RACES[tool.race];
         if (!race.canStand(tileAt(x, y))) return;
-        let vi = nearestVillage(tool.race, x, y, 10);
+        let vi = nearestVillage(tool.race, x, y, 14);
         const c = newCat(x, y, tool.race, vi < 0 ? 0 : vi);
         if (vi < 0) {
           vi = foundVillage(tool.race, x, y, c.name);
@@ -1824,10 +3335,11 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
         break;
       }
       case "house": {
+        if (RACES[tool.race].minEra && Math.max(...state.era) < RACES[tool.race].minEra) break;
         const race = RACES[tool.race];
         if (!race.canBuild(tileAt(x, y))) return;
         if (state.houses.some((h) => h.x === x && h.y === y)) return;
-        let vi = nearestVillage(tool.race, x, y, 10);
+        let vi = nearestVillage(tool.race, x, y, 14);
         if (vi < 0) {
           vi = foundVillage(tool.race, x, y);
           chronicle("settle", tool.race, state.villages[vi].founder, state.villages[vi].name);
@@ -1850,21 +3362,62 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
         break;
       }
       case "bolt": {
-        state.bolts.push({ x, y, ttl: 12 });
-        const i = idx(x, y);
-        if (state.trees.has(i) || state.houses.some((h) => h.x === x && h.y === y)) state.fires.push({ x, y, ttl: 50 });
-        for (const c of state.cats) {
-          if (Math.abs(c.x - x) <= 2 && Math.abs(c.y - y) <= 2) {
-            c.tx = c.x + Math.sign(c.x - x || 1) * 3;
-            c.ty = c.y + Math.sign(c.y - y || 1) * 2;
-            c.wait = 0;
-          }
-        }
+        strikeBolt(x, y);
         stroke.kind = "bolt";
+        break;
+      }
+      case "plague": {
+        let n = 0;
+        for (const c of state.cats) if (!c.sick && Math.abs(c.x - x) <= 2 && Math.abs(c.y - y) <= 2) { c.sick = true; n += 1; }
+        if (n) chronicle("plague", state.cats.find((c) => c.sick)?.race ?? null);
+        break;
+      }
+      case "quake": {
+        startQuake(x, y);
+        break;
+      }
+      case "tsunami": {
+        startTsunami(x, y);
+        break;
+      }
+      case "bless": {
+        state.blessed[tool.race] = 3000;
+        state.cursed[tool.race] = 0;
+        chronicle("bless", tool.race);
+        persist();
+        break;
+      }
+      case "curse": {
+        state.cursed[tool.race] = 3000;
+        state.blessed[tool.race] = 0;
+        chronicle("curse", tool.race);
+        persist();
+        break;
+      }
+      case "volcano": {
+        if (state.volcanoes.some((v) => Math.abs(v.x - x) < 4 && Math.abs(v.y - y) < 4)) break;
+        // Вулкан стоит на горе: если её нет — бог поднимает.
+        brush(x, y, 1, (cx, cy, i) => {
+          if (state.tiles[i] < T.HILL) state.tiles[i] = T.HILL;
+          state.trees.delete(i);
+          state.flowers.delete(i);
+        });
+        state.tiles[idx(x, y)] = T.MOUNTAIN;
+        state.houses = state.houses.filter((h) => !(h.x === x && h.y === y));
+        state.volcanoes.push({ x, y, erupt: VOLCANO_ERUPT_TICKS });
+        chronicle("volcano");
+        bakeArea(x - 2, y - 2, x + 2, y + 2);
+        countPop();
+        persist();
         break;
       }
       case "meteor": {
         if (!state.meteors.some((m) => Math.abs(m.x - x) < 3 && Math.abs(m.y - y) < 3)) state.meteors.push({ x, y, t: 0 });
+        break;
+      }
+      case "nuke": {
+        // Одна бомба на штрих: вторая рядом — та же воронка, только шум.
+        if (!state.nukes.some((n) => Math.abs(n.x - x) < 8 && Math.abs(n.y - y) < 8)) state.nukes.push({ x, y, t: 0 });
         break;
       }
       case "war": {
@@ -1963,6 +3516,10 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
   const overlay = document.createElement("canvas");
   overlay.width = canvas.width;
   overlay.height = canvas.height;
+  const seasonLayer = document.createElement("canvas");
+  seasonLayer.width = canvas.width;
+  seasonLayer.height = canvas.height;
+  const sctx = seasonLayer.getContext("2d");
   const octx = overlay.getContext("2d");
 
   function bakeOverlay() {
@@ -2210,6 +3767,72 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
   }
 
   /** Верфь: настил на сваях, каркас лодки, флажок народа. */
+  function drawRoad(g, x, y) {
+    const bx = x * PX;
+    const by = y * PX;
+    if (tileAt(x, y) <= T.WATER) {
+      // Мост: настил с перилами.
+      rect(g, "#8a5a2b", bx, by + 2, PX, 4);
+      rect(g, "#5b3d22", bx, by + 1, PX, 1);
+      rect(g, "#5b3d22", bx, by + 6, PX, 1);
+      return;
+    }
+    rect(g, "#cdb98f", bx + 1, by + 2, 6, 4);
+    rect(g, "#b9a37a", bx + 2, by + 3, 1, 1);
+    rect(g, "#b9a37a", bx + 5, by + 4, 1, 1);
+  }
+  function drawWall(g, x, y, wl) {
+    const bx = x * PX;
+    const by = y * PX;
+    rect(g, "#8c8780", bx, by + 1, PX, 6);
+    rect(g, "#b7b3ad", bx, by, PX, 1);
+    rect(g, "#5f5d58", bx + 1, by + 3, 2, 1);
+    rect(g, "#5f5d58", bx + 5, by + 3, 2, 1);
+    rect(g, "#5f5d58", bx + 3, by + 5, 2, 1);
+    if (wl.hp < 3) rect(g, "#4a4844", bx + 3, by + 1, 2, 2);
+  }
+  function drawTower2(g, t) {
+    const race = RACES[t.race];
+    const bx = t.x * PX;
+    const by = t.y * PX;
+    rect(g, "#8c8780", bx + 1, by - 3, 6, 10);
+    rect(g, "#b7b3ad", bx, by - 4, 8, 1);
+    rect(g, "#b7b3ad", bx + 1, by - 5, 1, 1);
+    rect(g, "#b7b3ad", bx + 3, by - 5, 2, 1);
+    rect(g, "#b7b3ad", bx + 6, by - 5, 1, 1);
+    rect(g, "#141413", bx + 3, by, 2, 2);
+    rect(g, race.banner, bx + 7, by - 7, 1, 3);
+  }
+  function drawFarm(g, x, y) {
+    const bx = x * PX;
+    const by = y * PX;
+    rect(g, "#b89a4a", bx, by, PX, PX);
+    for (let r = 1; r < PX; r += 2) rect(g, "#e0c05a", bx, by + r, PX, 1);
+    rect(g, "#5b3d22", bx + 3, by + 2, 1, 1);
+    rect(g, "#5b3d22", bx + 6, by + 5, 1, 1);
+  }
+  function drawGrave(g, gr) {
+    const bx = gr.x * PX;
+    const by = gr.y * PX;
+    rect(g, "#8c8780", bx + 2, by + 1, 4, 6);
+    rect(g, "#b7b3ad", bx + 3, by + 1, 2, 1);
+    rect(g, "#4a4844", bx + 3, by + 3, 2, 1);
+    rect(g, "#4a4844", bx + 3, by + 5, 2, 1);
+    rect(g, "#5f8f42", bx + 1, by + 7, 6, 1);
+  }
+  function drawTemple(g, v) {
+    const race = RACES[v.race];
+    const bx = v.temple.x * PX;
+    const by = v.temple.y * PX;
+    rect(g, "#e9e4d8", bx, by + 2, 8, 6);
+    rect(g, "#c9c2b3", bx, by + 7, 8, 1);
+    rect(g, "#f5f7f9", bx + 2, by - 2, 4, 4);
+    rect(g, race.banner, bx + 3, by - 5, 2, 3);
+    rect(g, "#e0a93b", bx + 2, by - 6, 4, 1);
+    rect(g, "#141413", bx + 3, by + 5, 2, 3);
+    rect(g, "#a9d4ea", bx + 1, by + 3, 1, 1);
+    rect(g, "#a9d4ea", bx + 6, by + 3, 1, 1);
+  }
   function drawShipyard(g, v) {
     const race = RACES[v.race];
     const bx = v.shipyard.x * PX;
@@ -2251,12 +3874,49 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     } else if (t === T.SAND) {
       rect(tctx, "#d1bc7c", x * PX + 2 + s * 2, y * PX + 2 + s, 1, 1);
     } else if (t === T.HILL) {
-      rect(tctx, "#8e7648", x * PX + 1 + s, y * PX + 5, 3, 1);
-    } else if (t === T.MOUNTAIN) {
-      rect(tctx, "#5f5d58", x * PX + 1 + s, y * PX + 4, 3, 1);
-      rect(tctx, "#9a9893", x * PX + 3, y * PX + 1 + s, 2, 1);
+      // Бугор: светлый гребень сверху, тень у подножия — холм выпирает.
+      rect(tctx, "#c2a46e", x * PX + 1 + s, y * PX + 1, 4, 1);
+      rect(tctx, "#b3955f", x * PX + s, y * PX + 2, 6, 1);
+      rect(tctx, "#8e7648", x * PX + 1, y * PX + 6, 6, 1);
+      rect(tctx, "#7d6740", x * PX + 2 + s, y * PX + 7, 4, 1);
+    } else if (t === T.MOUNTAIN || t === T.SNOW) {
+      // Пик в 2.5D: тёмный левый склон, светлый правый, гребень и вершина.
+      // Снежные горы — те же грани, но в холодных тонах; у каменных снег
+      // только на макушке, и то не у каждой.
+      const snowy = t === T.SNOW;
+      const L = snowy ? "#b9c6cf" : "#5f5d58";
+      const Rr = snowy ? "#ffffff" : "#9a9893";
+      const ridge = snowy ? "#eef4f7" : "#b3b1ac";
+      const ox = x * PX;
+      const oy = y * PX;
+      const peak = 2 + (s === 2 ? 1 : 0);
+      for (let row = 0; row < 6; row += 1) {
+        const yy = oy + peak + row;
+        const half = row + 1;
+        rect(tctx, L, ox + 4 - half, yy, half, 1);
+        rect(tctx, Rr, ox + 4, yy, Math.min(half, 4), 1);
+      }
+      rect(tctx, ridge, ox + 3, oy + peak, 2, 1);
+      const cap = snowy || s === 2 || tileAt(x, y - 1) === T.SNOW;
+      if (cap) {
+        rect(tctx, "#f5f7f9", ox + 3, oy + peak, 2, 1);
+        rect(tctx, "#f5f7f9", ox + 2, oy + peak + 1, 4, 1);
+        rect(tctx, "#dfe6ea", ox + 4, oy + peak + 2, 2, 1);
+      }
+      rect(tctx, snowy ? "#9fb1bd" : "#4a4844", ox + 1, oy + 7, 6, 1);
     } else if (t === T.SNOW) {
       rect(tctx, "#cfd7dd", x * PX + 2 + s * 2, y * PX + 4, 1, 1);
+    }
+    // Тень от гор ложится на соседей справа и снизу — рельеф читается объёмным.
+    if (t < T.MOUNTAIN && t >= T.SAND) {
+      const leftHigh = tileAt(x - 1, y) >= T.MOUNTAIN;
+      const upHigh = tileAt(x, y - 1) >= T.MOUNTAIN;
+      if (leftHigh || upHigh) {
+        tctx.globalAlpha = 0.22;
+        if (leftHigh) rect(tctx, "#141413", x * PX, y * PX, 2, PX);
+        if (upHigh) rect(tctx, "#141413", x * PX, y * PX, PX, 2);
+        tctx.globalAlpha = 1;
+      }
     }
     if (state.flowers.has(i)) drawFlowers(tctx, x, y);
   }
@@ -2274,7 +3934,16 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
         if (!inside(x, y)) continue;
         const i = idx(x, y);
         if (state.trees.has(i)) drawTree(tctx, x, y);
+        if (state.farms.has(i)) drawFarm(tctx, x, y);
+        if (state.roads.has(i)) drawRoad(tctx, x, y);
+        if (state.walls.has(i)) drawWall(tctx, x, y, state.walls.get(i));
       }
+    }
+    for (const gr of state.graves) if (gr.x >= ax && gr.x <= bx && gr.y >= ay && gr.y <= by) drawGrave(tctx, gr);
+    for (const t of state.towers) if (t.x >= ax && t.x <= bx && t.y >= ay && t.y <= by + 1) drawTower2(tctx, t);
+    for (const v of state.villages) {
+      const t = v.temple;
+      if (t && t.x >= ax && t.x <= bx && t.y >= ay && t.y <= by + 2) drawTemple(tctx, v);
     }
     refreshWater();
     for (const v of state.villages) {
@@ -2285,6 +3954,43 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     inArea.sort((a, b) => a.y - b.y);
     for (const h of inArea) drawHouse(tctx, h);
     for (const v of state.villages) if (v.x >= ax && v.x <= bx && v.y >= ay && v.y <= by + 1) drawFlag(tctx, v);
+  }
+
+  /**
+   * Сезонный слой поверх ландшафта: зимой снег на суше и лёд на мелкой
+   * воде, осенью — рыжина. Перепекается только при смене сезона.
+   */
+  function bakeSeason() {
+    sctx.clearRect(0, 0, seasonLayer.width, seasonLayer.height);
+    const id = season().id;
+    if (id === "summer" || id === "spring") return;
+    for (let y = 0; y < H; y += 1) {
+      for (let x = 0; x < W; x += 1) {
+        const t = state.tiles[idx(x, y)];
+        const s = shadeMap[idx(x, y)];
+        if (id === "winter") {
+          if (t === T.WATER) {
+            sctx.globalAlpha = 0.75;
+            rect(sctx, "#d8e9f2", x * PX, y * PX, PX, PX);
+            sctx.globalAlpha = 1;
+            rect(sctx, "#b9d3e0", x * PX + 1 + s * 2, y * PX + 3 + s, 3, 1);
+          } else if (t >= T.SAND && t <= T.HILL) {
+            sctx.globalAlpha = 0.72;
+            rect(sctx, "#f1f5f7", x * PX, y * PX, PX, PX);
+            sctx.globalAlpha = 1;
+            rect(sctx, "#dfe8ee", x * PX + s * 2, y * PX + 5 + (s % 2), 3, 1);
+          } else if (t === T.MOUNTAIN) {
+            sctx.globalAlpha = 0.45;
+            rect(sctx, "#f1f5f7", x * PX, y * PX, PX, PX);
+            sctx.globalAlpha = 1;
+          }
+        } else if (id === "autumn" && (t === T.GRASS || t === T.FOREST)) {
+          sctx.globalAlpha = t === T.FOREST ? 0.42 : 0.22;
+          rect(sctx, "#d9822b", x * PX, y * PX, PX, PX);
+          sctx.globalAlpha = 1;
+        }
+      }
+    }
   }
 
   function bakeAll() {
@@ -2317,6 +4023,21 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
         by += (state.tick >> 1) % 2;
       }
       if (an.kind === "shoot") bx -= an.dx * (an.t > 4 ? 1 : 0);
+    }
+    if (c.sick && (state.tick >> 2) % 2) {
+      rect(ctx, "#7fe07a", bx + 1, by - 1, 1, 1);
+      rect(ctx, "#7fe07a", bx + 4, by - 2, 1, 1);
+    }
+    // Корона у короля, звезда над героем.
+    if (c.king) {
+      rect(ctx, "#e0a93b", bx + 1, by - 2, 4, 1);
+      rect(ctx, "#e0a93b", bx + 1, by - 3, 1, 1);
+      rect(ctx, "#e0a93b", bx + 3, by - 3, 1, 1);
+      rect(ctx, "#e0242f", bx + 2, by - 2, 1, 1);
+    } else if (c.hero) {
+      const tw = (state.tick >> 3) % 2;
+      rect(ctx, "#ffd23a", bx + 2, by - 3 - tw, 2, 1);
+      rect(ctx, "#ffd23a", bx + 1, by - 2 - tw, 4, 1);
     }
     // Тень, тело 6×4, уши, глаза, хвост. Лицо смотрит туда, куда шёл.
     ctx.globalAlpha = 0.25;
@@ -2474,6 +4195,65 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     }
   }
 
+  function drawTsunami(ts) {
+    const nx = -ts.dy / 0.35;
+    const ny = ts.dx / 0.35;
+    for (let k = -ts.len; k <= ts.len; k += 1) {
+      const x = Math.round(ts.x + nx * k);
+      const y = Math.round(ts.y + ny * k);
+      if (!inside(x, y)) continue;
+      ctx.globalAlpha = 0.85;
+      rect(ctx, "#a9d4ea", x * PX, y * PX, PX, PX);
+      rect(ctx, "#ffffff", x * PX + 1, y * PX + 1 + ((state.tick + k) % 3), 6, 1);
+      ctx.globalAlpha = 0.5;
+      rect(ctx, "#3b7fb0", Math.round(x - ts.dx * 3) * PX, Math.round(y - ts.dy * 3) * PX, PX, PX);
+      ctx.globalAlpha = 1;
+    }
+  }
+  function drawUfo(u) {
+    const bx = Math.round(u.x * PX);
+    const by = Math.round(u.y * PX) - 24 + ((state.tick >> 3) % 2);
+    if (u.phase === "beam") {
+      ctx.globalAlpha = 0.35 + 0.15 * ((state.tick >> 2) % 2);
+      ctx.fillStyle = "#7fd4ff";
+      ctx.beginPath();
+      ctx.moveTo(bx + 2, by + 4);
+      ctx.lineTo(bx + 6, by + 4);
+      ctx.lineTo(bx + 14, u.ty * PX + 8);
+      ctx.lineTo(bx - 6, u.ty * PX + 8);
+      ctx.closePath();
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    rect(ctx, "#8a97a8", bx - 4, by + 2, 16, 3);
+    rect(ctx, "#c9d3df", bx - 1, by, 10, 2);
+    rect(ctx, "#7fd4ff", bx + 2, by - 1, 4, 1);
+    for (let i = 0; i < 4; i += 1) rect(ctx, (state.tick >> 2) % 4 === i ? "#ffd23a" : "#e0242f", bx - 3 + i * 4, by + 5, 2, 1);
+  }
+  function drawPirate(p) {
+    const bx = Math.round(p.x * PX);
+    const by = Math.round(p.y * PX) + ((state.tick >> 4) % 2);
+    const f = p.face;
+    rect(ctx, "#2b2926", bx + 1, by + 5, 7, 2);
+    rect(ctx, "#3b2f2a", bx, by + 4, 9, 1);
+    rect(ctx, "#141413", bx + 4, by, 1, 5);
+    rect(ctx, "#141413", f > 0 ? bx + 5 : bx + 1, by, 3, 4);
+    rect(ctx, "#f4efe2", f > 0 ? bx + 6 : bx + 2, by + 1, 1, 1);
+    rect(ctx, "#f4efe2", f > 0 ? bx + 5 : bx + 1, by + 2, 3, 1);
+  }
+  function drawCaravan(cv) {
+    const i = cv.path[Math.min(cv.i, cv.path.length - 1)];
+    const x = i % W;
+    const y = (i / W) | 0;
+    const race = RACES[cv.race];
+    const bx = x * PX;
+    const by = y * PX;
+    rect(ctx, race.fur, bx, by + 2, 4, 3);
+    rect(ctx, "#8a5a2b", bx + 4, by + 2, 4, 3);
+    rect(ctx, "#5b3d22", bx + 4, by + 5, 1, 1);
+    rect(ctx, "#5b3d22", bx + 7, by + 5, 1, 1);
+    rect(ctx, "#e0c05a", bx + 5, by + 1, 2, 1);
+  }
   function drawFire(f) {
     const bx = f.x * PX;
     const by = f.y * PX;
@@ -2522,6 +4302,172 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     }
   }
 
+  function drawLava() {
+    if (!state.lava.size) return;
+    const blink = (state.tick >> 2) % 2;
+    for (const [i, cell] of state.lava) {
+      const x = i % W;
+      const y = (i / W) | 0;
+      const cooling = cell.ttl < 90;
+      rect(ctx, cooling ? "#7a2a12" : blink ? "#ff6a00" : "#ff8c1a", x * PX, y * PX, PX, PX);
+      rect(ctx, cooling ? "#4a1a0c" : "#ffd23a", x * PX + 2 + blink, y * PX + 3, 3, 1);
+    }
+  }
+
+  function drawVolcano(v) {
+    const bx = v.x * PX;
+    const by = v.y * PX;
+    // Конус: тёмный, шире у основания, с красным жерлом.
+    rect(ctx, "#3b3733", bx - 3, by + 6, 14, 2);
+    rect(ctx, "#4a4541", bx - 1, by + 3, 10, 3);
+    rect(ctx, "#5a5450", bx + 1, by, 6, 3);
+    rect(ctx, "#6b6560", bx + 3, by - 2, 2, 2);
+    rect(ctx, v.erupt > 0 ? "#ff6a00" : "#8a2a12", bx + 3, by - 1, 2, 1);
+    if (v.erupt > 0) {
+      ctx.globalAlpha = 0.5;
+      rect(ctx, "#4a4643", bx + 2 - ((state.tick >> 3) % 3), by - 8, 5, 5);
+      rect(ctx, "#6b6560", bx + 1 + ((state.tick >> 4) % 3), by - 13, 5, 5);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  function drawAnimal(a) {
+    const bx = Math.round(a.px * PX);
+    const by = Math.round(a.py * PX);
+    const f = a.face >= 0 ? 1 : -1;
+    switch (a.kind) {
+      case "mouse":
+        rect(ctx, "#8c8780", bx + 2, by + 5, 3, 2);
+        rect(ctx, "#141413", f > 0 ? bx + 4 : bx + 2, by + 5, 1, 1);
+        rect(ctx, "#c9a2a2", f > 0 ? bx + 1 : bx + 5, by + 6, 1, 1);
+        break;
+      case "bird": {
+        const flap = (state.tick >> 2) % 2;
+        rect(ctx, "#2b2926", bx + 2, by + 2 + flap, 1, 1);
+        rect(ctx, "#2b2926", bx + 3, by + 3, 2, 1);
+        rect(ctx, "#2b2926", bx + 5, by + 2 + flap, 1, 1);
+        break;
+      }
+      case "deer":
+        ctx.globalAlpha = 0.25;
+        rect(ctx, "#141413", bx + 1, by + 7, 6, 1);
+        ctx.globalAlpha = 1;
+        rect(ctx, "#8a5a2b", bx + 1, by + 3, 6, 3);
+        rect(ctx, "#8a5a2b", f > 0 ? bx + 6 : bx + 1, by + 1, 1, 2);
+        rect(ctx, "#5b3d22", f > 0 ? bx + 5 : bx + 2, by, 1, 1);
+        rect(ctx, "#5b3d22", f > 0 ? bx + 7 : bx, by, 1, 1);
+        rect(ctx, "#5b3d22", bx + 2, by + 6, 1, 1);
+        rect(ctx, "#5b3d22", bx + 5, by + 6, 1, 1);
+        break;
+      case "wolf":
+        ctx.globalAlpha = 0.25;
+        rect(ctx, "#141413", bx + 1, by + 7, 6, 1);
+        ctx.globalAlpha = 1;
+        rect(ctx, "#6b6f78", bx + 1, by + 3, 6, 3);
+        rect(ctx, "#6b6f78", f > 0 ? bx + 6 : bx + 1, by + 2, 2, 2);
+        rect(ctx, "#e0242f", f > 0 ? bx + 7 : bx + 1, by + 3, 1, 1);
+        rect(ctx, "#4a4d55", f > 0 ? bx : bx + 7, by + 2, 1, 2);
+        break;
+      case "dragon": {
+        const flap = (state.tick >> 3) % 2;
+        ctx.globalAlpha = 0.2;
+        rect(ctx, "#141413", bx - 1, by + 9, 10, 1);
+        ctx.globalAlpha = 1;
+        rect(ctx, "#b8322a", bx, by + 2, 8, 3);
+        rect(ctx, "#b8322a", f > 0 ? bx + 8 : bx - 2, by + 1, 2, 2);
+        rect(ctx, "#ffd23a", f > 0 ? bx + 9 : bx - 2, by + 1, 1, 1);
+        rect(ctx, "#7a1f1a", bx + 1, by - 1 + flap, 3, 2);
+        rect(ctx, "#7a1f1a", bx + 4, by - 1 + flap, 3, 2);
+        rect(ctx, "#b8322a", f > 0 ? bx - 2 : bx + 8, by + 3, 2, 1);
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  function drawWeather() {
+    const k = state.weather.kind;
+    if (k === "rain" || k === "storm") {
+      ctx.strokeStyle = k === "storm" ? "rgba(200,215,235,0.55)" : "rgba(180,205,235,0.45)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      const n = k === "storm" ? 110 : 70;
+      for (let i = 0; i < n; i += 1) {
+        const x = (i * 97 + state.tick * 3) % canvas.width;
+        const y = (i * 61 + state.tick * 7) % canvas.height;
+        ctx.moveTo(x, y);
+        ctx.lineTo(x - 1, y + 4);
+      }
+      ctx.stroke();
+      if (k === "storm") {
+        ctx.fillStyle = "rgba(20,24,40,0.18)";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      }
+    } else if (k === "snow") {
+      ctx.fillStyle = "rgba(255,255,255,0.85)";
+      for (let i = 0; i < 80; i += 1) {
+        const x = (i * 89 + Math.round(Math.sin((state.tick + i) / 20) * 6) + state.tick) % canvas.width;
+        const y = (i * 53 + state.tick * 2) % canvas.height;
+        ctx.fillRect(x, y, 1, 1);
+      }
+    } else if (k === "drought") {
+      ctx.fillStyle = "rgba(255, 190, 90, 0.10)";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+  }
+
+  function drawNuke(n) {
+    const cx = n.x * PX + 4;
+    const cy = n.y * PX + 4;
+    if (n.t < 40) {
+      // Бомба падает отвесно, с высоты — чёрная капля с оранжевым поясом.
+      const t = n.t / 40;
+      const by = cy - (1 - t) * 220;
+      rect(ctx, "#2b2926", cx - 2, by - 6, 4, 6);
+      rect(ctx, "#e8792f", cx - 2, by - 3, 4, 1);
+      rect(ctx, "#8c8780", cx - 1, by, 2, 2);
+      return;
+    }
+    const k = n.t - 40;
+    if (k < 10) {
+      // Вспышка на весь остров.
+      ctx.globalAlpha = 0.95 - k * 0.09;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.globalAlpha = 1;
+    }
+    // Огненный шар и гриб: растут, тускнеют, уходят вверх.
+    // Гриб растёт медленно и стоит долго: на телефоне карта мелкая, и
+    // скромный взрыв просто не читался.
+    const p = Math.min(1, k / 100);
+    const fade = k < 100 ? 1 : Math.max(0, 1 - (k - 100) / 30);
+    const ball = 10 + p * 70;
+    ctx.globalAlpha = 0.85 * fade;
+    ctx.fillStyle = "#ffb347";
+    ctx.beginPath();
+    ctx.arc(cx, cy, ball, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#fff3a3";
+    ctx.beginPath();
+    ctx.arc(cx, cy, ball * 0.55, 0, Math.PI * 2);
+    ctx.fill();
+    const stem = p * 120;
+    ctx.globalAlpha = 0.8 * fade;
+    ctx.fillStyle = "#4a4643";
+    ctx.fillRect(cx - 8 - p * 6, cy - stem, 16 + p * 12, stem);
+    const cap = 16 + p * 56;
+    ctx.fillStyle = "#6b6560";
+    ctx.beginPath();
+    ctx.arc(cx, cy - stem, cap, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#c9673a";
+    ctx.beginPath();
+    ctx.arc(cx, cy - stem + cap * 0.35, cap * 0.55, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
   function nightAlpha() {
     const phase = (state.tick % DAY_TICKS) / DAY_TICKS;
     return Math.max(0, -Math.cos(phase * Math.PI * 2)) * 0.5;
@@ -2529,8 +4475,17 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
 
   let cursor = null; // { x, y, size } — подсветка кисти под пальцем
   function frame() {
+    if (state.needBake) {
+      state.needBake = false;
+      bakeAll();
+    }
+    ctx.save();
+    if (state.quake.ttl > 0) ctx.translate(Math.round((Math.random() - 0.5) * 6), Math.round((Math.random() - 0.5) * 6));
     ctx.drawImage(terrain, 0, 0);
     drawWater();
+    ctx.drawImage(seasonLayer, 0, 0);
+    drawLava();
+    for (const v of state.volcanoes) drawVolcano(v);
     if (options.territories) ctx.drawImage(overlay, 0, 0);
     // Флаги столиц машут поверх запечённых: два кадра полотнища.
     for (const v of state.villages) {
@@ -2541,11 +4496,16 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     for (const s of state.smokes) drawSmoke(s);
     // Коты по y: нижние поверх верхних, как в любой изометрии.
     for (const sh of state.ships) drawShip(sh);
+    for (const p of state.pirates) drawPirate(p);
+    for (const cv of state.caravans) drawCaravan(cv);
     const cats = state.cats.slice().sort((a, b) => a.py - b.py);
+    for (const a of state.animals) if (a.kind !== "bird" && a.kind !== "dragon") drawAnimal(a);
     for (const c of cats) drawCat(c);
+    for (const a of state.animals) if (a.kind === "bird" || a.kind === "dragon") drawAnimal(a);
     for (const f of state.fires) drawFire(f);
     for (const b of state.bolts) drawBolt(b);
     for (const m of state.meteors) drawMeteor(m);
+    for (const n of state.nukes) drawNuke(n);
     for (const pr of state.projectiles) {
       const k = pr.t / pr.steps;
       const x = Math.round(pr.x + (pr.tx - pr.x) * k);
@@ -2558,6 +4518,7 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       }
     }
     drawParticles();
+    drawWeather();
     const night = nightAlpha();
     if (night > 0.01) {
       ctx.fillStyle = `rgba(16, 20, 48, ${night})`;
@@ -2571,6 +4532,9 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       for (const sh of state.ships) ctx.fillRect(Math.round(sh.x * PX) + 4, Math.round(sh.y * PX) + 2, 1, 1);
       for (const f of state.fires) ctx.fillRect(f.x * PX + 2, f.y * PX + 2, 4, 4);
     }
+    if (state.tsunami) drawTsunami(state.tsunami);
+    if (state.ufo) drawUfo(state.ufo);
+    ctx.restore();
     if (cursor) {
       ctx.strokeStyle = "rgba(255,255,255,0.85)";
       ctx.lineWidth = 1;
@@ -2605,6 +4569,26 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
         sailShips();
         burn();
         fallMeteors();
+        fallNukes();
+        healCraters();
+        weatherTick();
+        seasonTick();
+        animalsTick();
+        volcanoTick();
+        kingsTick();
+        jobsTick();
+        roadsTick();
+        wallsTick();
+        towersTick();
+        seaTick();
+        plagueTick();
+        quakeTick();
+        tsunamiTick();
+        blessTick();
+        ufoTick();
+        robotsTick();
+        achTick();
+        discoverTick();
         build();
         regrow();
         breed();
@@ -2623,10 +4607,13 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     raf = requestAnimationFrame(loop);
   }
 
+  loadDiscovered();
   bakeAll();
   refreshWater();
   countPop();
   if (state.catchMs > 5000) catchUp(state.catchMs);
+  faithDecay(Date.now() - (state.lastVisit || Date.now()));
+  state.lastVisit = Date.now();
   onEvent?.(state.chronicle);
   frame();
 

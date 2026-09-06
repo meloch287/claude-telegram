@@ -1,6 +1,6 @@
 import { catSvg } from "./cat-art.js";
 import { achievementSvg } from "./achievement-art.js";
-import { createWorld, RACES, TERRAIN_TOOLS, ERAS, MAPS, renderPreview } from "./world.js";
+import { createWorld, RACES, TERRAIN_TOOLS, ERAS, MAPS, renderPreview, W, H } from "./world.js";
 import { icon } from "./icons.js";
 
 const tg = window.Telegram?.WebApp;
@@ -50,10 +50,8 @@ function render(profile) {
       `Потрачено ${nf.format(totals.tokens)} из ${nf.format(cat.nextThreshold)} токенов. Осталось ${nf.format(left)}.`;
   }
 
-  renderLimits(profile.limits ?? []);
   renderChart(profile.usageByDay ?? []);
   renderCoop(profile.coop ?? []);
-  renderQuota(profile.quota ?? null);
 
   // Статистика бота. Денег и отказов здесь нет: сумма «по API» пугала и ничего
   // не решала, а число отклонённых инструментов — служебное.
@@ -234,7 +232,8 @@ function setupTabs() {
    кисти для природы и ландшафта. Рисуют протяжкой: палец ведёт — по следу
    растёт лес или разливается море. Рука двигает карту. */
 
-const ZOOMS = [1, 1.5, 2, 3];
+const ZOOMS = [0.5, 0.75, 1, 1.5, 2, 3];
+const ZOOM_DEFAULT = ZOOMS.indexOf(1);
 const BRUSHES = [
   { size: 0, label: "1", px: 8 },
   { size: 1, label: "3", px: 13 },
@@ -250,6 +249,8 @@ const CATEGORIES = [
     tools: [
       { id: "cat", icon: "cat", name: "Кот", kind: "cat", hint: "Веди пальцем по суше — коты выбранного народа появятся по следу." },
       { id: "house", icon: "house", name: "Дом", kind: "house", hint: "Дом даром, от бога. Сами коты строят за брёвна: 10 на хижину, лес рубят по минуте на дерево." },
+      { id: "bless", icon: "bless", name: "Благословить", kind: "bless", hint: "Выбранный народ получает удачу на время: котята, сила в бою, покой." },
+      { id: "curse", icon: "curse", name: "Проклясть", kind: "curse", hint: "Выбранный народ на время в беде: пожары, бесплодие, ропот." },
       { id: "war", icon: "war", name: "Война", kind: "war", hint: "Ткни в чужую территорию — выбранный народ объявит ей войну. Лучники, мечи, поджоги." },
     ],
   },
@@ -291,6 +292,11 @@ const CATEGORIES = [
       { id: "fire", icon: "fire", name: "Огонь", kind: "fire", hint: "Ткни в дерево или дом. Огонь перекидывается на соседей." },
       { id: "bolt", icon: "bolt", name: "Молния", kind: "bolt", hint: "Бьёт в точку. Коты разбегаются, дерево загорается." },
       { id: "meteor", icon: "meteor", name: "Метеорит", kind: "meteor", hint: "Падает с неба. Остаётся кратер." },
+      { id: "plague", icon: "plague", name: "Чума", kind: "plague", hint: "Ткни в котов — болезнь пойдёт от кота к коту. Лекари лечат, но не всех успевают." },
+      { id: "quake", icon: "quake", name: "Землетрясение", kind: "quake", hint: "Тряхнёт остров: дома рушатся, стены трещат, холмы встают горами." },
+      { id: "tsunami", icon: "tsunami", name: "Цунами", kind: "tsunami", hint: "Ткни в море — волна пойдёт на ближайший берег и смоет всё у воды." },
+      { id: "volcano", icon: "volcano", name: "Вулкан", kind: "volcano", hint: "Ткни в гору (или бог поднимет её сам) — вулкан. Извергается сам, лава течёт вниз и застывает камнем." },
+      { id: "nuke", icon: "nuke", name: "Атомная", kind: "nuke", hint: "Одно касание — гриб на полкарты. Всё живое в округе гибнет, земля выгорает на три минуты." },
     ],
   },
   {
@@ -327,12 +333,15 @@ function setupCity(profile) {
   const subRow = el("wb-sub");
   const hint = el("city-hint");
 
+  // Стартовый инструмент — рука: первое движение пальцем должно двигать
+  // карту, а не рисовать землю. Кисть выбирают осознанно.
+  const HAND_TOOL = CATEGORIES.flatMap((c) => c.tools).find((t) => t.kind === "hand");
   const ui = {
     category: CATEGORIES[0],
-    tool: CATEGORIES[0].tools[0],
+    tool: HAND_TOOL,
     race: 0,
     brush: 0,
-    zoom: 0,
+    zoom: ZOOM_DEFAULT,
     pops: [0, 0, 0, 0],
   };
 
@@ -380,8 +389,8 @@ function setupCity(profile) {
       if (!m) continue;
       const tag = document.createElement("div");
       tag.className = "wb-mark wb-mark--war";
-      tag.style.left = `${(m.x / 56) * 100}%`;
-      tag.style.top = `${(m.y / 44) * 100}%`;
+      tag.style.left = `${(m.x / W) * 100}%`;
+      tag.style.top = `${(m.y / H) * 100}%`;
       tag.innerHTML = icon("war", 18);
       tag.title = `Война: ${RACES[w.a].name} и ${RACES[w.b].name}`;
       labels.append(tag);
@@ -391,8 +400,8 @@ function setupCity(profile) {
       if (!m) continue;
       const tag = document.createElement("div");
       tag.className = "wb-mark wb-mark--ally";
-      tag.style.left = `${(m.x / 56) * 100}%`;
-      tag.style.top = `${(m.y / 44) * 100}%`;
+      tag.style.left = `${(m.x / W) * 100}%`;
+      tag.style.top = `${(m.y / H) * 100}%`;
       tag.innerHTML = icon("ally", 18);
       tag.title = `Союз: ${RACES[al.a].name} и ${RACES[al.b].name}`;
       labels.append(tag);
@@ -400,8 +409,8 @@ function setupCity(profile) {
     for (const v of villages) {
       const tag = document.createElement("div");
       tag.className = `wb-label${atWar[v.race] ? " wb-label--war" : ""}`;
-      tag.style.left = `${((v.x + 0.5) / 56) * 100}%`;
-      tag.style.top = `${((v.y - 1.2) / 44) * 100}%`;
+      tag.style.left = `${((v.x + 0.5) / W) * 100}%`;
+      tag.style.top = `${((v.y - 1.2) / H) * 100}%`;
       tag.style.setProperty("--race-color", v.zone);
       tag.insertAdjacentHTML("afterbegin", icon(`race-${RACES[v.race].id}`, 14, "wb-label-icon"));
       const name = document.createElement("span");
@@ -412,14 +421,117 @@ function setupCity(profile) {
       if (atWar[v.race]) tag.insertAdjacentHTML("beforeend", icon("war", 12, "wb-label-war"));
       // Склад в подпись не выносим: экономика работает в фоне, а место на
       // карте дорого. Цифры остаются в подсказке по нажатию.
-      tag.title = `Основал ${v.founder}. Домов: ${v.houses}. Брёвен ${v.wood}, камня ${v.stone}${v.shipyard ? ", есть верфь" : ""}`;
+      tag.title = `Основал ${v.founder}${v.king ? `. Король ${v.king}` : ""}. Домов: ${v.houses}. Брёвен ${v.wood}, камня ${v.stone}, еды ${v.food}${v.ore ? `, руды ${v.ore}` : ""}${v.gold ? `, золота ${v.gold}` : ""}${v.weapons ? `, оружия ${v.weapons}` : ""}${v.temple ? ", храм" : ""}${v.walls ? ", стены" : ""}${v.shipyard ? ", верфь" : ""}. Недовольство ${v.unrest}%, вера ${v.faith}%`;
       labels.append(tag);
     }
   };
 
-  const renderHud = ({ pop, day, night, era, eraName, alive, paused }) => {
+  let lastHud = null;
+  let lastScoreSent = 0;
+  const renderHud = (h) => {
+    lastHud = h;
+    renderIslandAch(h);
+    updateMapCards(h.discovered || []);
+    if (Date.now() - lastScoreSent > 60_000 && h.score) {
+      lastScoreSent = Date.now();
+      void sendScore(h);
+    }
+    renderHudLine(h);
+  };
+  const renderIslandAch = ({ ach = [], achTotal = 0 }) => {
+    const box = el("wb-ach");
+    if (!box) return;
+    box.replaceChildren();
+    const head = document.createElement("div");
+    head.className = "wb-settings-sub";
+    head.append(text(`Достижения острова · ${ach.length} из ${achTotal}`));
+    box.append(head);
+    if (!ach.length) {
+      const p = document.createElement("p");
+      p.className = "wb-settings-alive";
+      p.append(text("Пока ни одного. Остров запомнит всё: первый храм, пережитую бомбу, гостей из будущего."));
+      box.append(p);
+      return;
+    }
+    const ul = document.createElement("ul");
+    ul.className = "wb-ach-list";
+    for (const t of ach) {
+      const li = document.createElement("li");
+      li.insertAdjacentHTML("afterbegin", icon("era", 12, "wb-inline-icon"));
+      li.append(text(" " + t));
+      ul.append(li);
+    }
+    box.append(ul);
+  };
+  const updateMapCards = (discovered) => {
+    const known = new Set([...discovered, mapId, "island"]);
+    document.querySelectorAll(".wb-map-card").forEach((card) => {
+      const id = card.dataset.map;
+      const locked = !known.has(id);
+      card.classList.toggle("wb-map-card--locked", locked);
+      card.setAttribute("aria-disabled", String(locked));
+      const desc = card.querySelector(".wb-map-desc");
+      if (desc) desc.textContent = locked ? "Откроют корабли в Средневековье" : (MAPS.find((m) => m.id === id)?.desc ?? "");
+    });
+  };
+  const sendScore = async (h) => {
+    const initData = tg?.initData;
+    if (!initData) return;
+    try {
+      await fetch("/api/world-score", {
+        method: "POST",
+        headers: { "content-type": "application/json", "X-Telegram-Init-Data": initData },
+        body: JSON.stringify({ score: h.score, pop: h.pop, day: h.day, era: h.era, seed: seed % 10000 }),
+      });
+    } catch {
+      /* офлайн — не страшно */
+    }
+  };
+  const loadTop = async () => {
+    const box = el("wb-top");
+    if (!box) return;
+    const initData = tg?.initData;
+    if (!initData) {
+      box.textContent = "Рейтинг виден только из Telegram.";
+      return;
+    }
+    try {
+      const r = await fetch("/api/world-top", { headers: { "X-Telegram-Init-Data": initData } });
+      const data = await r.json();
+      box.replaceChildren();
+      const head = document.createElement("div");
+      head.className = "wb-settings-sub";
+      head.append(text(`Рейтинг островов${data.me ? ` · ты ${data.me.rank}-й` : ""}`));
+      box.append(head);
+      const ol = document.createElement("ol");
+      ol.className = "wb-top-list";
+      for (const row of data.top || []) {
+        const li = document.createElement("li");
+        li.append(text(`${row.name} — ${nf.format(row.score)} · ${row.pop} котов, день ${row.day}`));
+        if (row.me) li.className = "wb-top-me";
+        ol.append(li);
+      }
+      if (!(data.top || []).length) box.append(text("Пока пусто — будь первым."));
+      box.append(ol);
+    } catch {
+      box.textContent = "Рейтинг не загрузился.";
+    }
+  };
+  const buildStory = () => {
+    const h = lastHud || {};
+    const lines = [`Мой остров №${seed % 10000} в Claude-боте: день ${h.day ?? 1}, эра «${h.eraName ?? "Начало"}», ${h.season ?? ""}.`];
+    lines.push(`Котов: ${h.pop ?? 0}. Достижений: ${(h.ach || []).length}.`);
+    if (h.kings?.length) lines.push("Правят: " + h.kings.map((k) => `${k.name} (${k.race})`).join(", ") + ".");
+    const vs = world?.villages ?? [];
+    if (vs.length) lines.push("Поселения: " + vs.map((v) => `${v.name}`).join(", ") + ".");
+    const ch = (world?.chronicle ?? []).slice(0, 6).map((c) => (typeof c === "string" ? c : c.text ?? c.message ?? "")).filter(Boolean);
+    if (ch.length) lines.push("Летопись: " + ch.join(" "));
+    return lines.join("\n");
+  };
+  const renderHudLine = ({ pop, day, night, era, eraName, alive, paused, season, weather }) => {
     el("hud-pop").innerHTML = `${icon("cat", 16, "wb-hud-icon")} ${nf.format(pop)}`;
-    el("hud-day").textContent = `${paused ? "Пауза · " : ""}${night ? "Ночь" : "День"} ${day}`;
+    const sw = [season, weather && weather !== "Ясно" ? weather : null].filter(Boolean).join(", ");
+    el("hud-day").textContent = `${paused ? "Пауза · " : ""}${night ? "Ночь" : "День"} ${day}${sw ? ` · ${sw}` : ""}`;
     el("hud-alive").textContent = `жив ${aliveText(alive)}`;
     el("set-alive").textContent = `Остров живёт ${aliveText(alive)} — с ${new Date(Date.now() - alive).toLocaleDateString("ru-RU")}.`;
     // Плашка эры слева на карте: римская цифра и название.
@@ -616,12 +728,12 @@ function setupCity(profile) {
     const ratioX = (viewport.scrollLeft + viewport.clientWidth / 2) / Math.max(1, viewport.scrollWidth);
     const ratioY = (viewport.scrollTop + viewport.clientHeight / 2) / Math.max(1, viewport.scrollHeight);
     stage.style.width = `${ZOOMS[ui.zoom] * 100}%`;
-    viewport.classList.toggle("wb-viewport--zoom", ui.zoom > 0);
+    viewport.classList.toggle("wb-viewport--zoom", ZOOMS[ui.zoom] > 1);
     el("zoom-label").textContent = `${ZOOMS[ui.zoom]}×`;
     viewport.scrollLeft = ratioX * viewport.scrollWidth - viewport.clientWidth / 2;
     viewport.scrollTop = ratioY * viewport.scrollHeight - viewport.clientHeight / 2;
     // На приближенной карте рука нужнее: подсказываем, где она.
-    if (ui.zoom > 0 && ui.tool.kind !== "hand") hint.textContent = `${ui.tool.hint} Двигать карту — «Рука» в «Прочее».`;
+    if (ZOOMS[ui.zoom] > 1 && ui.tool.kind !== "hand") hint.textContent = `${ui.tool.hint} Двигать карту — «Рука» в «Прочее».`;
   }
   el("zoom-in").addEventListener("click", () => setZoom(ui.zoom + 1));
   el("zoom-out").addEventListener("click", () => setZoom(ui.zoom - 1));
@@ -663,6 +775,7 @@ function setupCity(profile) {
     const card = document.createElement("button");
     card.type = "button";
     card.className = `wb-map-card${m.id === mapId ? " wb-map-card--on" : ""}`;
+    card.dataset.map = m.id;
     card.setAttribute("aria-pressed", String(m.id === mapId));
     const thumb = document.createElement("canvas");
     thumb.className = "wb-map-thumb";
@@ -676,6 +789,10 @@ function setupCity(profile) {
     card.append(thumb, name, desc);
     card.addEventListener("click", () => {
       if (m.id === mapId) return;
+      if (card.classList.contains("wb-map-card--locked")) {
+        сообщить("Этот остров ещё не открыт: нужны корабли (эра Средневековья и верфь).");
+        return;
+      }
       const go = () => {
         try {
           localStorage.setItem(`world:map:${seed}`, m.id);
@@ -690,6 +807,15 @@ function setupCity(profile) {
   }
   el("hud-name").textContent = `${MAPS.find((m) => m.id === mapId)?.name ?? "Остров"} №${seed % 10000}`;
 
+  el("city-story")?.addEventListener("click", () => {
+    const line = buildStory();
+    const кудаВедёт = profile.botUsername ? `https://t.me/${profile.botUsername}` : "https://t.me";
+    const адрес = `https://t.me/share/url?url=${encodeURIComponent(кудаВедёт)}&text=${encodeURIComponent(line)}`;
+    if (tg?.openTelegramLink) tg.openTelegramLink(адрес);
+    else if (navigator.share) void navigator.share({ text: line }).catch(() => undefined);
+    else void navigator.clipboard?.writeText(line).then(() => сообщить("История скопирована")).catch(() => сообщить("Не вышло поделиться"));
+  });
+  el("wb-gear")?.addEventListener("click", () => void loadTop());
   el("city-reset").insertAdjacentHTML("afterbegin", icon("reset", 18, "wb-inline-icon"));
   el("city-reset").addEventListener("click", () => {
     const go = () => {
@@ -700,6 +826,8 @@ function setupCity(profile) {
   });
 
   setCategory(CATEGORIES[0]);
+
+  setTool(HAND_TOOL);
   renderChronicle(world.chronicle);
   // Вкладки поднимаются раньше мира: если мини-апп открылся сразу на городе,
   // start() тогда некому было позвать — и коты стояли как вкопанные.
@@ -744,154 +872,8 @@ function plural(n) {
   return "ов";
 }
 
-const LIMIT_STATUSES = {
-  allowed: { icon: "✓", word: "Норма" },
-  allowed_warning: { icon: "⚠️", word: "На исходе" },
-  rejected: { icon: "🚫", word: "Исчерпан" },
-};
-
-const timeFormat = new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit" });
-
-/** «через 2 ч 14 мин» — относительное время понятнее абсолютного для короткого окна. */
-function untilReset(resetsAt) {
-  const left = resetsAt - Date.now();
-  if (left <= 0) return "уже обнулился";
-  const minutes = Math.round(left / 60000);
-  if (minutes < 60) return `через ${minutes} мин`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `через ${hours} ч ${minutes % 60} мин`;
-  return `через ${Math.round(hours / 24)} дн`;
-}
-
-/**
- * Лимиты подписки.
- *
- * Данные приходят агенту событием по ходу работы, а мини-апп читает снимок из
- * базы при открытии. Значит они всегда чуть устаревшие — и отметка возраста
- * стоит у каждой строки отдельно: окна обновляются в разное время, и одна
- * метка на всю секцию соврала бы про то, что обновилось раньше.
- */
-function renderLimits(limits) {
-  const list = el("limits");
-  const note = el("limits-note");
-
-  list.hidden = false;
-  list.replaceChildren();
-
-  // Объяснений тут не место: человек открыл посмотреть числа. Подсказка
-  // остаётся одна и короткая — и только когда потолок не задан, то есть когда
-  // шкале и правда не от чего считаться.
-  const безПотолка = limits.some((l) => l.utilization === null && !l.ceiling);
-  note.hidden = !безПотолка;
-  if (безПотолка) note.textContent = "Потолок окна не задан — процент показать не от чего.";
-
-  for (const limit of limits) {
-    // Ключ берём из типа окна, а не из индекса: число строк меняется, и на
-    // индексах id разъехались бы между отрисовками.
-    const key = limit.type;
-    const name = limit.title ?? limit.type;
-    const status = limit.status ? (LIMIT_STATUSES[limit.status] ?? null) : null;
-    // Сперва число от Anthropic. Его этим токеном не получить, поэтому
-    // запасной путь — доля от потолка, заданного владельцем.
-    const fromAnthropic = limit.utilization === null ? null : Math.round(limit.utilization);
-    const percent = fromAnthropic ?? limit.ownPercent ?? null;
-    const ownScale = fromAnthropic === null && percent !== null;
-    const own = limit.own;
-
-    const li = document.createElement("li");
-    li.className = "limit";
-
-    const head = document.createElement("div");
-    head.className = "limit-head";
-    const nameEl = document.createElement("span");
-    nameEl.className = "limit-name";
-    nameEl.id = `limit-name-${key}`;
-    nameEl.append(text(name));
-
-    const valueEl = document.createElement("span");
-    valueEl.className = ownScale ? "limit-percent limit-percent--own" : "limit-percent";
-    valueEl.append(text(percent === null ? formatOwn(own?.subscription?.tokens) : `${percent}%`));
-    head.append(nameEl, valueEl);
-
-    const track = document.createElement("div");
-    track.className =
-      percent === null ? "progress-track progress-track--unknown" : "progress-track";
-    track.id = `limit-bar-${key}`;
-    track.setAttribute("aria-labelledby", nameEl.id);
-    track.setAttribute("aria-describedby", `limit-foot-${key}`);
-
-    if (percent === null) {
-      // Полосу без числа не изображаем: нарисованный «примерно столько» врал бы
-      // ровно там, где человек ищет точность. Пустая дорожка честнее.
-      track.setAttribute("role", "img");
-      track.setAttribute(
-        "aria-label",
-        `Процент недоступен. Замер за окно: ${nf.format(own?.subscription?.tokens ?? 0)} токенов`,
-      );
-    } else {
-      track.setAttribute("role", "progressbar");
-      track.setAttribute("aria-valuemin", "0");
-      track.setAttribute("aria-valuemax", "100");
-      track.setAttribute("aria-valuenow", String(percent));
-      const reset = limit.resetsAt === null ? "" : `, сброс ${untilReset(limit.resetsAt)}`;
-      // Статус дублируется словом: попав сразу на полосу мимо подписи,
-      // пользователь всё равно узнает состояние, не полагаясь на цвет.
-      track.setAttribute(
-        "aria-valuetext",
-        `${percent} процентов${ownScale ? " от своего потолка" : ""}${status ? `, ${status.word.toLowerCase()}` : ""}${reset}`,
-      );
-      const fill = document.createElement("div");
-      fill.className = `progress-fill progress-fill--${limit.status ?? "allowed"}`;
-      fill.style.width = `${percent}%`;
-      track.append(fill);
-    }
-
-    const foot = document.createElement("p");
-    foot.className = "limit-foot";
-    foot.id = `limit-foot-${key}`;
-
-    if (status) {
-      const badge = document.createElement("span");
-      badge.className = `badge badge--${limit.status}`;
-      const badgeIcon = document.createElement("span");
-      badgeIcon.setAttribute("aria-hidden", "true");
-      badgeIcon.append(text(status.icon));
-      badge.append(badgeIcon, text(` ${status.word}`));
-      foot.append(badge);
-    }
-
-    if (limit.resetsAt !== null) {
-      const when = document.createElement("span");
-      const time = document.createElement("time");
-      time.dateTime = new Date(limit.resetsAt).toISOString();
-      time.append(text(untilReset(limit.resetsAt)));
-      when.append(text("Сброс "), time);
-      foot.append(when);
-    }
-
-    if (own) {
-      // Полное число — то, что списывается с подписки, вместе с кэшем.
-      // Рядом доля бота: остальное — работа Claude Code мимо чата.
-      const ownEl = document.createElement("span");
-      const из = limit.ceiling ? ` из ${formatOwn(limit.ceiling)}` : "";
-      ownEl.append(
-        text(
-          `${nf.format(own.subscription.tokens)}${из} токенов, через бота ${nf.format(own.bot.tokens)}`,
-        ),
-      );
-      foot.append(ownEl);
-    }
-
-    if (limit.seenAt) {
-      const seenEl = document.createElement("span");
-      seenEl.append(text(`данные на ${timeFormat.format(new Date(limit.seenAt))}`));
-      foot.append(seenEl);
-    }
-
-    li.append(head, track, foot);
-    list.append(li);
-  }
-}
+// Лимиты подписки и квоты в мини-аппе не показываем (04.09.2026): цифры
+// пугали «лимит кончился», хотя запаса хватало.
 
 /** Короткая запись расхода за окно: 14 402 → «14,4 тыс.». */
 function formatOwn(value = 0) {
@@ -1270,9 +1252,7 @@ function renderCoop(members) {
     const under = document.createElement("span");
     under.className = "coop-sub";
     // Квота идёт сразу под именем: она важнее уровня кота, когда упираешься.
-    const квота = member.quota
-      ? ` · сегодня ${nf.format(member.quota.used)} из ${nf.format(member.quota.limit)}`
-      : "";
+    const квота = "";
     under.append(text(`${member.cat.name} · уровень ${member.cat.level}${квота}`));
 
     body.append(name, under);
@@ -1292,40 +1272,3 @@ function renderCoop(members) {
   }
 }
 
-/**
- * Своя суточная квота. Показывается только тем, кому её поставили: у
- * большинства ограничения нет, и пустая шкала «0 из ∞» была бы шумом.
- */
-function renderQuota(quota) {
-  const box = el("quota");
-  if (!quota) {
-    box.hidden = true;
-    return;
-  }
-  box.hidden = false;
-
-  const percent = Math.min(100, Math.round((quota.used / quota.limit) * 100));
-  el("quota-value").textContent = `${nf.format(quota.used)} из ${nf.format(quota.limit)}`;
-
-  const track = el("quota-track");
-  track.setAttribute("role", "progressbar");
-  track.setAttribute("aria-valuemin", "0");
-  track.setAttribute("aria-valuemax", "100");
-  track.setAttribute("aria-valuenow", String(percent));
-  track.setAttribute(
-    "aria-valuetext",
-    quota.left > 0
-      ? `${percent} процентов суточной квоты, осталось ${nf.format(quota.left)} токенов`
-      : "суточная квота исчерпана",
-  );
-
-  const fill = el("quota-fill");
-  fill.style.width = `${percent}%`;
-  // Состояние передаётся словом ниже, а цвет только поддерживает его.
-  fill.className = `progress-fill progress-fill--${quota.left > 0 ? "allowed" : "rejected"}`;
-
-  el("quota-left").textContent =
-    quota.left > 0
-      ? `Осталось ${nf.format(quota.left)} токенов до конца суток.`
-      : "Квота на сегодня исчерпана — обнулится завтра.";
-}

@@ -105,6 +105,15 @@ CREATE TABLE IF NOT EXISTS projects_seen (
 -- ждал ответа, которого уже некому было прислать. Строка появляется, когда
 -- индикатор поставлен, и исчезает, когда он убран, — значит всё, что уцелело
 -- после перезапуска, и есть оборванные задачи.
+CREATE TABLE IF NOT EXISTS world_scores (
+  user_id    INTEGER PRIMARY KEY,
+  score      INTEGER NOT NULL,
+  pop        INTEGER NOT NULL DEFAULT 0,
+  day        INTEGER NOT NULL DEFAULT 1,
+  era        INTEGER NOT NULL DEFAULT 0,
+  seed       INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS running_tasks (
   chat_id    INTEGER PRIMARY KEY,
   message_id INTEGER NOT NULL,
@@ -212,6 +221,14 @@ export interface ChatRow {
 }
 
 const stmts = {
+  upsertWorldScore: db.prepare(
+    "INSERT INTO world_scores (user_id, score, pop, day, era, seed, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)" +
+      " ON CONFLICT(user_id) DO UPDATE SET score = excluded.score, pop = excluded.pop, day = excluded.day, era = excluded.era, seed = excluded.seed, updated_at = excluded.updated_at",
+  ),
+  topWorlds: db.prepare(
+    "SELECT w.user_id, w.score, w.pop, w.day, w.era, w.seed, u.display_name FROM world_scores w LEFT JOIN users u ON u.user_id = w.user_id ORDER BY w.score DESC LIMIT ?",
+  ),
+  worldRank: db.prepare("SELECT COUNT(*) + 1 AS rank FROM world_scores WHERE score > (SELECT score FROM world_scores WHERE user_id = ?)"),
   markRunning: db.prepare(
     "INSERT INTO running_tasks (chat_id, message_id, started_at) VALUES (?, ?, ?)" +
       " ON CONFLICT(chat_id) DO UPDATE SET message_id = excluded.message_id, started_at = excluded.started_at",
@@ -722,4 +739,18 @@ export function clearRunning(chatId: number): void {
 /** Что осталось висеть с прошлого запуска. */
 export function runningTasks(): { chat_id: number; message_id: number; started_at: number }[] {
   return stmts.allRunning.all() as { chat_id: number; message_id: number; started_at: number }[];
+}
+
+/** Рейтинг живости островов из мини-аппа «Мой город». */
+export function recordWorldScore(userId: number, s: { score: number; pop: number; day: number; era: number; seed: number }): void {
+  stmts.upsertWorldScore.run(userId, Math.max(0, Math.floor(s.score)), s.pop | 0, s.day | 0, s.era | 0, s.seed | 0, Date.now());
+}
+export function topWorlds(limit = 10): Array<{ user_id: number; score: number; pop: number; day: number; era: number; seed: number; display_name: string | null }> {
+  return stmts.topWorlds.all(limit) as never;
+}
+export function worldRank(userId: number): number | null {
+  const row = stmts.worldRank.get(userId) as { rank: number } | undefined;
+  if (!row) return null;
+  const has = (stmts.topWorlds.all(1000) as Array<{ user_id: number }>).some((r) => r.user_id === userId);
+  return has ? row.rank : null;
 }

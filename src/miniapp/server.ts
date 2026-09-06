@@ -15,6 +15,9 @@ import {
   quotaLeft,
   usageByDay,
   usageSince,
+  recordWorldScore,
+  topWorlds,
+  worldRank,
 } from "../db.js";
 import { ACHIEVEMENTS, CAT_LEVELS, catForTokens, catProgress, nextCat } from "../cats.js";
 import { MODELS } from "../bot/keyboards.js";
@@ -266,6 +269,54 @@ export function startMiniAppServer(): void {
     if (url.pathname === "/healthz") {
       res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
       res.end(JSON.stringify({ ok: true, uptimeSec: Math.round(process.uptime()) }));
+      return;
+    }
+
+    if (url.pathname === "/api/world-score" && req.method === "POST") {
+      const initData = req.headers["x-telegram-init-data"];
+      const userId = authenticate(typeof initData === "string" ? initData : null);
+      if (userId === null) {
+        res.writeHead(401, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "invalid init data" }));
+        return;
+      }
+      let raw = "";
+      for await (const chunk of req) {
+        raw += chunk;
+        if (raw.length > 4096) break;
+      }
+      try {
+        const body = JSON.parse(raw || "{}") as { score?: number; pop?: number; day?: number; era?: number; seed?: number };
+        recordWorldScore(userId, { score: Number(body.score) || 0, pop: Number(body.pop) || 0, day: Number(body.day) || 1, era: Number(body.era) || 0, seed: Number(body.seed) || 0 });
+        res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+        res.end(JSON.stringify({ ok: true }));
+      } catch {
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "bad json" }));
+      }
+      return;
+    }
+
+    if (url.pathname === "/api/world-top") {
+      const initData = req.headers["x-telegram-init-data"];
+      const userId = authenticate(typeof initData === "string" ? initData : null);
+      if (userId === null) {
+        res.writeHead(401, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "invalid init data" }));
+        return;
+      }
+      const top = topWorlds(10).map((r, i) => ({
+        rank: i + 1,
+        name: r.display_name || `Остров №${r.seed}`,
+        score: r.score,
+        pop: r.pop,
+        day: r.day,
+        era: r.era,
+        me: r.user_id === userId,
+      }));
+      const rank = worldRank(userId);
+      res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+      res.end(JSON.stringify({ top, me: rank ? { rank } : null }));
       return;
     }
 
