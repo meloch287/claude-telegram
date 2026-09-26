@@ -74,6 +74,7 @@ export function planMerge(local, remote, stamps) {
 const NOOP = {
   enabled: false,
   pull: async () => false,
+  forget: async () => {},
   start() {},
   flush: async () => {},
 };
@@ -139,6 +140,20 @@ export function createCloud(initData, storage = window.localStorage) {
     }
   }
 
+  async function forgetNow(key) {
+    const response = await fetch(`/api/world-save?key=${encodeURIComponent(key)}`, {
+      method: "DELETE",
+      headers,
+    });
+    if (!response.ok) return;
+    sent.delete(key);
+    delete stamps[key];
+    saveStamps();
+  }
+
+  // Стирать с сервера можно только явно («вырастить заново»). Пропавший из
+  // localStorage ключ — не повод: хранилище могли очистить при открытом
+  // мини-аппе, и тогда молча пропали бы задания и выбор карты.
   async function push(keepalive) {
     // Не сверились — не знаем, что на сервере, и своё поверх не кладём:
     // так остров с другого устройства не затрётся старым снимком.
@@ -158,21 +173,6 @@ export function createCloud(initData, storage = window.localStorage) {
       sent.set(key, data);
       stamps[key] = updatedAt;
     }
-    // Пропали сразу все ключи — это очищенное хранилище, а не стёртый остров:
-    // «вырастить заново» убирает только сам снимок. Копию на сервере не трогаем,
-    // при следующем открытии она вернётся.
-    const wiped = Object.keys(local).length === 0;
-    for (const key of wiped ? [] : [...sent.keys()]) {
-      if (key in local) continue;
-      const response = await fetch(`/api/world-save?key=${encodeURIComponent(key)}`, {
-        method: "DELETE",
-        headers,
-        keepalive,
-      });
-      if (!response.ok) continue;
-      sent.delete(key);
-      delete stamps[key];
-    }
     saveStamps();
   }
 
@@ -186,6 +186,11 @@ export function createCloud(initData, storage = window.localStorage) {
   return {
     enabled: true,
     pull,
+    /** Стереть ключ и на сервере — вместе с очередной отправкой, по порядку. */
+    forget(key) {
+      queue = queue.then(() => forgetNow(key)).catch(() => undefined);
+      return queue;
+    },
     start() {
       window.setInterval(() => void sync(), SYNC_EVERY_MS);
       document.addEventListener("visibilitychange", () => {

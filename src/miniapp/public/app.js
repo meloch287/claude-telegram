@@ -449,7 +449,8 @@ function setupTabs() {
   } catch {
     /* ничего */
   }
-  select(remembered === 1 ? 1 : 0, false);
+  // В гостях сразу на карту: ради неё и пришли.
+  select(visiting || remembered === 1 ? 1 : 0, false);
 }
 
 /* ── Мой мир ────────────────────────────────────────────────────────────
@@ -837,10 +838,10 @@ function setupCity(profile) {
   const viewport = el("city-viewport");
   const stage = el("city-stage");
   const wb = document.querySelector(".wb");
-  const seed = profile.world?.seed ?? 1;
+  const seed = visiting ? visiting.seed : (profile.world?.seed ?? 1);
   let mapId = "island";
   try {
-    mapId = localStorage.getItem(`world:map:${seed}`) || "island";
+    mapId = visiting ? visiting.map : localStorage.getItem(`world:map:${seed}`) || "island";
   } catch {
     /* ничего */
   }
@@ -1013,7 +1014,8 @@ function setupCity(profile) {
   };
   const sendScore = async (h) => {
     const initData = tg?.initData;
-    if (!initData) return;
+    // Чужой остров в рейтинг под своим именем не пишем.
+    if (!initData || visiting) return;
     try {
       await fetch("/api/world-score", {
         method: "POST",
@@ -1030,6 +1032,81 @@ function setupCity(profile) {
       /* офлайн — не страшно */
     }
   };
+  /* ── Соседи: гости, подарки, набеги ───────────────────────────────────── */
+
+  const sendTo = async (row, kind, amount) => {
+    try {
+      const r = await fetch("/api/world-send", {
+        method: "POST",
+        headers: { "content-type": "application/json", "X-Telegram-Init-Data": tg.initData },
+        body: JSON.stringify({ id: row.id, kind, amount }),
+      });
+      if (r.ok) return "ok";
+      const { error } = await r.json().catch(() => ({}));
+      return error ?? "error";
+    } catch {
+      return "offline";
+    }
+  };
+  const SEND_ERRORS = {
+    again: "Сегодня ты уже отправлял это на тот остров. Завтра — снова можно.",
+    limit: "На сегодня набегов хватит: пираты отдыхают до завтра.",
+    offline: "Нет связи — корабль остался в гавани.",
+  };
+  const gift = (row) => {
+    if ((world?.population ?? 0) < 6) {
+      сообщить("Чтобы дарить котов, на острове должно жить хотя бы 6 котов.");
+      return;
+    }
+    ask(`Отправить 3 котов на остров «${row.name}»? Они уплывут с твоего острова.`, async () => {
+      const result = await sendTo(row, "gift", 3);
+      if (result !== "ok") {
+        сообщить(SEND_ERRORS[result] ?? "Подарок не отправился, попробуй позже.");
+        return;
+      }
+      world.giveCats(3);
+      haptic("success");
+      сообщить(`Корабль с котами отплыл к «${row.name}». Хозяин встретит их, когда откроет мир.`);
+    });
+  };
+  const raidOn = (row) => {
+    const era = world?.era ?? 0;
+    if (era < 1) {
+      сообщить("Пираты слушаются только со Средневековья: нужны корабли.");
+      return;
+    }
+    const amount = Math.min(3, era + 1);
+    ask(`Отправить пиратов (${amount}) на остров «${row.name}»?`, async () => {
+      const result = await sendTo(row, "raid", amount);
+      if (result !== "ok") {
+        сообщить(SEND_ERRORS[result] ?? "Пираты не отплыли, попробуй позже.");
+        return;
+      }
+      haptic("heavy");
+      сообщить(`🏴‍☠️ Пираты подняли паруса и плывут к «${row.name}».`);
+    });
+  };
+  function islandActions(row) {
+    const box = document.createElement("span");
+    box.className = "wb-top-actions";
+    const button = (label, title, onClick) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "wb-top-btn";
+      b.textContent = label;
+      b.setAttribute("aria-label", `${title}: ${row.name}`);
+      b.addEventListener("click", onClick);
+      box.append(b);
+    };
+    if (row.visitable)
+      button("👀", "В гости", () => {
+        location.href = `${location.pathname}?visit=${encodeURIComponent(row.id)}`;
+      });
+    button("🎁", "Подарить котов", () => gift(row));
+    button("🏴‍☠️", "Послать пиратов", () => raidOn(row));
+    return box;
+  }
+
   const loadTop = async () => {
     const box = el("wb-top");
     if (!box) return;
@@ -1050,10 +1127,14 @@ function setupCity(profile) {
       ol.className = "wb-top-list";
       for (const row of data.top || []) {
         const li = document.createElement("li");
-        li.append(
+        const label = document.createElement("span");
+        label.className = "wb-top-label";
+        label.append(
           text(`${row.name} — ${nf.format(row.score)} · ${row.pop} котов, день ${row.day}`),
         );
+        li.append(label);
         if (row.me) li.className = "wb-top-me";
+        else if (row.id && !visiting) li.append(islandActions(row));
         ol.append(li);
       }
       if (!(data.top || []).length) box.append(text("Пока пусто — будь первым."));
@@ -1094,7 +1175,10 @@ function setupCity(profile) {
   };
   el("hud-name").textContent = `№${seed % 10000}`;
 
-  const quests = createQuests(`world:quests:${seed}:${mapId}`, (quest, rank) => {
+  // В гостях задания не засчитываются: чужой остров — не твоя заслуга.
+  const questKey = visiting ? `visit:quests:${seed}` : `world:quests:${seed}:${mapId}`;
+  const quests = createQuests(questKey, (quest, rank) => {
+    if (visiting) return;
     haptic("success");
     const card = el("quest");
     card.classList.remove("is-done");
@@ -1116,7 +1200,12 @@ function setupCity(profile) {
     onVillages: renderVillages,
     onHud: renderHud,
     map: mapId,
+    snapshot: visiting?.data ?? null,
+    readonly: Boolean(visiting),
   });
+
+  if (visiting) setupVisit(wb, visiting);
+  else void welcomeBack(world);
 
   /* ── Панель ───────────────────────────────────────────────────────────── */
 
@@ -1754,8 +1843,9 @@ function setupCity(profile) {
     });
     mapsRow.append(card);
   }
-  el("hud-name").textContent =
-    `${MAPS.find((m) => m.id === mapId)?.name ?? "Остров"} №${seed % 10000}`;
+  el("hud-name").textContent = visiting
+    ? visiting.name
+    : `${MAPS.find((m) => m.id === mapId)?.name ?? "Остров"} №${seed % 10000}`;
 
   el("city-story")?.addEventListener("click", () => {
     const line = buildStory();
@@ -1772,9 +1862,9 @@ function setupCity(profile) {
   el("city-reset").insertAdjacentHTML("afterbegin", icon("reset", 18, "wb-inline-icon"));
   el("city-reset").addEventListener("click", () => {
     const go = () => {
-      world.reset();
+      const key = world.reset();
       // Сначала стираем и копию на сервере, иначе старый остров вернётся из неё.
-      void cloud.flush().then(() => location.reload());
+      void cloud.forget(key).then(() => location.reload());
     };
     ask("Стереть всё и вырастить мир заново?", go);
   });
@@ -1910,6 +2000,93 @@ function fail(message) {
  * Демо-режим (?demo=1) рисует страницу на выдуманных данных — чтобы смотреть
  * вёрстку в обычном браузере без подписанных initData.
  */
+/** Чужой остров, если мини-апп открыт с ?visit=: { name, seed, map, data }. */
+let visiting = null;
+
+async function loadVisit(initData) {
+  const id = new URLSearchParams(location.search).get("visit");
+  if (!id) return null;
+  try {
+    const r = await fetch(`/api/world-visit?id=${encodeURIComponent(id)}`, {
+      headers: { "X-Telegram-Init-Data": initData },
+    });
+    if (!r.ok) return null;
+    const island = await r.json();
+    return island.mine ? null : island;
+  } catch {
+    return null;
+  }
+}
+
+/** Гостевой режим: смотреть и трогать рукой можно, менять нельзя. */
+function setupVisit(wb, island) {
+  wb.classList.add("wb--visit");
+  const bar = document.createElement("div");
+  bar.className = "wb-visit";
+  const label = document.createElement("span");
+  label.append(text(`👀 В гостях: ${island.name}`));
+  const home = document.createElement("button");
+  home.type = "button";
+  home.textContent = "Домой";
+  home.addEventListener("click", () => {
+    location.href = location.pathname;
+  });
+  bar.append(label, home);
+  wb.querySelector(".wb-body").append(bar);
+}
+
+/**
+ * «Пока тебя не было»: что остров прожил без тебя и что пришло с сервера —
+ * награды за работу в боте, подарки и пираты с других островов.
+ */
+async function welcomeBack(world) {
+  const away = world.awaySummary;
+  const lines = [];
+  if (away) {
+    if (away.born) lines.push(`🐱 Котов: ${away.born > 0 ? "+" : ""}${away.born}`);
+    if (away.built > 0) lines.push(`🏠 Новых домов: ${away.built}`);
+    if (away.days > 0) lines.push(`📅 Прошло игровых дней: ${away.days}`);
+    if (away.eraUp?.length) lines.push(`⏫ Новая эра: ${away.eraUp.join(", ")}`);
+    if (away.faithLow?.length)
+      lines.push(`🙏 Вера падает у ${away.faithLow.join(", ")} — благослови их`);
+  }
+  if (tg?.initData) {
+    try {
+      const r = await fetch("/api/world-claim", {
+        method: "POST",
+        headers: { "X-Telegram-Init-Data": tg.initData },
+      });
+      if (r.ok) lines.push(...world.receive(await r.json()));
+    } catch {
+      /* офлайн — заберём в следующий раз, сервер ничего не выдал */
+    }
+  }
+  if (!lines.length) return;
+  const card = el("wb-away");
+  el("wb-away-sub").textContent = away
+    ? `Тебя не было ${aliveText(away.ms)}. Вот что случилось:`
+    : "Пока тебя не было:";
+  const list = el("wb-away-list");
+  list.replaceChildren(
+    ...lines.map((line) => {
+      const li = document.createElement("li");
+      li.append(text(line));
+      return li;
+    }),
+  );
+  card.hidden = false;
+  void card.offsetHeight;
+  card.classList.add("is-open");
+  el("wb-away-ok").addEventListener(
+    "click",
+    () => {
+      card.classList.remove("is-open");
+      setTimeout(() => (card.hidden = true), 260);
+    },
+    { once: true },
+  );
+}
+
 /** Облачная копия мира; до входа через Telegram — заглушка без сети. */
 let cloud = createCloud(null);
 
@@ -1949,6 +2126,7 @@ async function main() {
   // уже лежать в localStorage, а лишнего ожидания на открытии не хочется.
   cloud = createCloud(initData);
   const pulling = cloud.pull();
+  const visitLoading = loadVisit(initData);
 
   try {
     const response = await fetch("/api/profile", {
@@ -1965,6 +2143,9 @@ async function main() {
     const profile = await response.json();
     await pulling;
     cloud.start();
+    visiting = await visitLoading;
+    if (!visiting && new URLSearchParams(location.search).has("visit"))
+      window.history.replaceState(null, "", location.pathname);
     // Показываем до отрисовки: размеры контейнеров (график, лента котов)
     // нужны уже в render, а у скрытых они нулевые.
     show();

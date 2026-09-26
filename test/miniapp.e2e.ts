@@ -31,6 +31,12 @@ const saves = new Map<string, { data: string; updatedAt: number }>();
 let clock = 1000;
 /** Что сервер отдал на последний GET — с этим мир и должен был создаться. */
 let lastServed: Record<string, string> = {};
+/** Что ждёт остров при следующем открытии: работа в боте, подарки, набеги. */
+let pendingClaim: unknown = null;
+/** Подарки и набеги, отправленные из рейтинга. */
+const sent: { id: string; kind: string; amount: number }[] = [];
+const NEIGHBOR = { id: "neighbor", name: "Остров Соседа" };
+const worldSaveKey = () => [...saves.keys()].find((k) => k.startsWith("world:v"));
 
 async function api(
   method: string,
@@ -43,7 +49,32 @@ async function api(
     return [200, JSON.parse(await readFile(resolve(PUBLIC_DIR, "demo-profile.json"), "utf8"))];
   }
   if (url.pathname === "/api/world-score") return [200, { ok: true }];
-  if (url.pathname === "/api/world-top") return [200, { top: [], me: null }];
+  if (url.pathname === "/api/world-top")
+    return [
+      200,
+      {
+        top: [
+          { rank: 1, ...NEIGHBOR, visitable: true, score: 900, pop: 30, day: 9, era: 1, me: false },
+          { rank: 2, id: "me", name: "Мой остров", score: 10, pop: 1, day: 1, era: 0, me: true },
+        ],
+        me: { rank: 2 },
+      },
+    ];
+  if (url.pathname === "/api/world-claim") {
+    const claim = pendingClaim ?? { work: {}, inbox: [] };
+    pendingClaim = null;
+    return [200, claim];
+  }
+  if (url.pathname === "/api/world-visit") {
+    const key = worldSaveKey();
+    if (url.searchParams.get("id") !== NEIGHBOR.id || !key) return [404, {}];
+    const [, , seed, map] = key.split(":");
+    return [200, { name: NEIGHBOR.name, seed: Number(seed), map, data: saves.get(key)!.data }];
+  }
+  if (url.pathname === "/api/world-send") {
+    sent.push(JSON.parse(body) as (typeof sent)[number]);
+    return [200, { ok: true }];
+  }
   if (url.pathname !== "/api/world-save") return [404, {}];
   if (!authed) return [401, { error: "invalid init data" }];
   if (method === "GET") {
@@ -512,6 +543,8 @@ test("облачная копия: остров переезжает на нов
     [...saves.keys()].some((k) => k.startsWith("world:quests:")),
     "задания тоже в копии",
   );
+  const uploaded = JSON.parse(saves.get(worldKey)!.data) as { cats: unknown[] };
+  assert.ok(uploaded.cats.length >= 5, `коты доехали до сервера: ${uploaded.cats.length}`);
   await old.ctx.close();
 
   const fresh = await phone();
@@ -520,6 +553,10 @@ test("облачная копия: остров переезжает на нов
   );
   assert.ok(lastServed[worldKey], "сервер отдал остров новому телефону");
   assert.equal(read[worldKey], lastServed[worldKey], "мир создан из серверной копии");
+  const restored = await fresh.tab.evaluate(
+    () => (window as unknown as { __world: { population: number } }).__world.population,
+  );
+  assert.ok(restored >= 5, `остров восстановился целиком, котов ${restored}`);
   const count = (await fresh.tab.textContent("#quest-count")) ?? "";
   assert.ok(parseInt(count, 10) >= 1, `задания вернулись: ${count}`);
 
@@ -528,6 +565,189 @@ test("облачная копия: остров переезжает на нов
   await fresh.tab.evaluate(() => window.dispatchEvent(new Event("pagehide")));
   await fresh.tab.waitForTimeout(700);
   assert.ok(saves.has(worldKey), "копия на сервере цела");
+  assert.ok(
+    [...saves.keys()].some((k) => k.startsWith("world:quests:")),
+    "задания на сервере тоже целы",
+  );
   await fresh.ctx.close();
+  assert.deepEqual(errors, []);
+});
+
+/** Скриншот ключевого момента, если задана E2E_SHOTS=<папка>: смотреть глазами. */
+const shot = async (tab: Page, name: string) => {
+  if (process.env.E2E_SHOTS) await tab.screenshot({ path: `${process.env.E2E_SHOTS}/${name}.png` });
+};
+
+/** Телефон в режиме Telegram: подтверждения соглашаются сами, всплывашки пишутся в __popups. */
+async function telegramPhone(path = "/") {
+  const ctx = await browser.newContext({ ...devices["iPhone 12 Pro"], colorScheme: "dark" });
+  await ctx.addInitScript(KEEP_NAMES_SHIM);
+  const tab = await ctx.newPage();
+  tab.on("pageerror", (e) => errors.push(String(e)));
+  await tab.goto(`${origin}${path}${TELEGRAM_HASH}`);
+  await tab.waitForTimeout(300);
+  await tab.evaluate(() => {
+    const w = window as unknown as {
+      Telegram: { WebApp: Record<string, unknown> };
+      __popups: string[];
+    };
+    w.__popups = [];
+    w.Telegram.WebApp.showConfirm = (_q: string, cb: (ok: boolean) => void) => cb(true);
+    w.Telegram.WebApp.showPopup = (p: { message: string }) => w.__popups.push(p.message);
+  });
+  await tab.waitForTimeout(1000);
+  await tab.click("#tab-city");
+  await tab.waitForTimeout(600);
+  return { ctx, tab };
+}
+
+type WorldApi = {
+  population: number;
+  readonly: boolean;
+  wonders: { id: string }[];
+  apply(tool: { kind: string; race?: number }, x: number, y: number, size: number): void;
+  endStroke(): void;
+};
+const worldOf = (tab: Page) =>
+  tab.evaluate(() => {
+    const w = (window as unknown as { __world: WorldApi }).__world;
+    return { population: w.population, readonly: w.readonly, wonders: w.wonders.map((o) => o.id) };
+  });
+
+test("пока тебя не было: догон, награды за работу, чудо, подарок и пираты", async () => {
+  const key = worldSaveKey();
+  assert.ok(key, "остров из прошлого теста лежит на сервере");
+  // Остров сохранён два часа назад — мир должен догнать это время.
+  const snap = JSON.parse(saves.get(key)!.data) as { savedAt: number; lastVisit: number };
+  snap.savedAt -= 2 * 3600_000;
+  snap.lastVisit -= 2 * 3600_000;
+  clock += 1;
+  saves.set(key, { data: JSON.stringify(snap), updatedAt: clock });
+  pendingClaim = {
+    work: { tasks: 3, commits: 1, pushes: 1, totalCommits: 1 },
+    inbox: [
+      { kind: "gift", amount: 3, fromName: "Остров Друга", at: Date.now() },
+      { kind: "raid", amount: 1, fromName: "Пиратская бухта", at: Date.now() },
+    ],
+  };
+  const { ctx, tab } = await telegramPhone();
+  await tab.waitForTimeout(500);
+  assert.equal(await tab.isHidden("#wb-away"), false, "карточка «Пока тебя не было» открыта");
+  const card = (await tab.textContent("#wb-away")) ?? "";
+  assert.match(card, /Тебя не было 2 ч/);
+  assert.match(card, /Дел в боте: 3/);
+  assert.match(card, /Маяк/);
+  assert.match(card, /Остров Друга/);
+  assert.match(card, /Пиратская бухта/);
+  await tab.locator("#wb-away").scrollIntoViewIfNeeded();
+  await shot(tab, "away");
+  assert.deepEqual((await worldOf(tab)).wonders, ["lighthouse"], "за первый коммит — маяк");
+  assert.equal(pendingClaim, null, "награды забраны с сервера");
+  await tab.click("#wb-away-ok");
+  await tab.waitForTimeout(400);
+  assert.ok(await tab.isHidden("#wb-away"), "карточка закрывается");
+  // Свернули — остров с маяком уехал в копию, повторно награды не придут.
+  await tab.evaluate(() => window.dispatchEvent(new Event("pagehide")));
+  await tab.waitForTimeout(700);
+  assert.match(saves.get(worldSaveKey()!)!.data, /lighthouse/);
+  await ctx.close();
+  assert.deepEqual(errors, []);
+});
+
+test("в гостях: чужой остров виден, но менять его нельзя", async () => {
+  const { ctx, tab } = await telegramPhone(`/?visit=${NEIGHBOR.id}`);
+  const own = await tab.evaluate(() =>
+    Object.fromEntries(Object.entries(localStorage).filter(([k]) => k.startsWith("world:v"))),
+  );
+  assert.equal((await tab.textContent("#hud-name"))?.trim(), NEIGHBOR.name);
+  assert.equal(await tab.isVisible(".wb-visit"), true, "плашка «В гостях» видна");
+  await shot(tab, "visit");
+  assert.equal(await tab.isHidden(".wb-dock"), true, "инструментов нет");
+  const before = await worldOf(tab);
+  assert.equal(before.readonly, true);
+  assert.ok(before.wonders.includes("lighthouse"), "видно чудо хозяина");
+  await tab.evaluate(() => {
+    const w = (window as unknown as { __world: WorldApi }).__world;
+    for (let x = 20; x < 40; x++) w.apply({ kind: "cat", race: 0 }, x, 30, 0);
+    w.apply({ kind: "nuke" }, 30, 30, 0);
+    w.endStroke();
+  });
+  assert.equal((await worldOf(tab)).population, before.population, "инструменты молчат");
+  await tab.evaluate(() => window.dispatchEvent(new Event("pagehide")));
+  await tab.waitForTimeout(500);
+  const after = await tab.evaluate(() =>
+    Object.fromEntries(Object.entries(localStorage).filter(([k]) => k.startsWith("world:v"))),
+  );
+  assert.deepEqual(after, own, "чужой остров не записался поверх своего");
+  await tab.click(".wb-visit button");
+  await tab.waitForTimeout(1500);
+  assert.equal(new URL(tab.url()).search, "", "«Домой» возвращает на свой остров");
+  await ctx.close();
+  assert.deepEqual(errors, []);
+});
+
+test("рейтинг: в гости, подарок котов и пираты соседу", async () => {
+  const { ctx, tab } = await telegramPhone();
+  await tab.click("#wb-gear");
+  await tab.waitForTimeout(800);
+  const buttons = await tab.locator(".wb-top-actions button").count();
+  assert.equal(buttons, 3, "у соседа три кнопки, у себя — ни одной");
+  await tab.locator("#wb-top").scrollIntoViewIfNeeded();
+  await shot(tab, "top");
+  // Дарить можно, когда котов хотя бы шесть: заселяем остров.
+  await tab.evaluate(() => {
+    const w = (window as unknown as { __world: WorldApi }).__world;
+    for (let y = 26; y < 40; y += 2)
+      for (let x = 30; x < 50; x += 2) w.apply({ kind: "cat", race: 0 }, x, y, 0);
+    w.endStroke();
+  });
+  const pop = (await worldOf(tab)).population;
+  assert.ok(pop >= 6, `котов ${pop}`);
+  await tab.click(".wb-top-actions button:has-text('🎁')");
+  await tab.waitForTimeout(500);
+  assert.deepEqual(sent.at(-1), { id: NEIGHBOR.id, kind: "gift", amount: 3 });
+  assert.equal((await worldOf(tab)).population, pop - 3, "подаренные коты уплыли с острова");
+  await tab.click(".wb-top-actions button:has-text('🏴‍☠️')");
+  await tab.waitForTimeout(500);
+  const popups = await tab.evaluate(() => (window as unknown as { __popups: string[] }).__popups);
+  assert.ok(
+    sent.at(-1)?.kind === "raid" || popups.some((m) => m.includes("Средневековья")),
+    `пираты ушли или честно отказано до Средневековья: ${popups.join(" | ")}`,
+  );
+  await ctx.close();
+  assert.deepEqual(errors, []);
+});
+
+test("цунами бьёт туда, куда нажали, и смывает берег", async () => {
+  const hit = await page.evaluate(() => {
+    const w = (
+      window as unknown as {
+        __world: WorldApi & { inspect(x: number, y: number): { name?: string } | null };
+      }
+    ).__world;
+    const sea = (x: number, y: number) => /море|вода|Мелк/i.test(w.inspect(x, y)?.name ?? "");
+    for (let x = 6; x < 60; x++)
+      for (let y = 20; y < 46; y++)
+        if (!sea(x, y) && [1, 2, 3, 4, 5, 6].every((d) => sea(x - d, y))) {
+          for (let dy = -3; dy <= 3; dy++)
+            for (let dx = 0; dx < 5; dx++)
+              if (!sea(x + dx, y + dy)) w.apply({ kind: "cat", race: 0 }, x + dx, y + dy, 0);
+          w.endStroke();
+          return { x, y, pop: w.population };
+        }
+    return null;
+  });
+  assert.ok(hit, "нашёлся западный берег");
+  await page.evaluate(({ x, y }) => {
+    const w = (window as unknown as { __world: WorldApi }).__world;
+    w.apply({ kind: "tsunami" }, x + 1, y, 0);
+    w.apply({ kind: "tsunami" }, x + 3, y + 3, 0); // протяжка не перезапускает волну
+    w.endStroke();
+  }, hit);
+  await page.waitForTimeout(3500);
+  const after = await page.evaluate(
+    () => (window as unknown as { __world: WorldApi }).__world.population,
+  );
+  assert.ok(after < hit.pop, `волна смыла котов у берега: ${hit.pop} → ${after}`);
   assert.deepEqual(errors, []);
 });

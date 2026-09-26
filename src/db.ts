@@ -125,6 +125,35 @@ CREATE TABLE IF NOT EXISTS world_saves (
   updated_at INTEGER NOT NULL,
   PRIMARY KEY (user_id, key)
 );
+-- Работа в боте, которая ещё не дошла до острова: задачи, коммиты, пуши.
+-- claimed_* — сколько уже выдано; разница уходит в мир при открытии мини-аппа.
+CREATE TABLE IF NOT EXISTS world_work (
+  user_id         INTEGER PRIMARY KEY,
+  tasks           INTEGER NOT NULL DEFAULT 0,
+  commits         INTEGER NOT NULL DEFAULT 0,
+  pushes          INTEGER NOT NULL DEFAULT 0,
+  claimed_tasks   INTEGER NOT NULL DEFAULT 0,
+  claimed_commits INTEGER NOT NULL DEFAULT 0,
+  claimed_pushes  INTEGER NOT NULL DEFAULT 0
+);
+-- Подарки и набеги с чужих островов, ждущие, пока хозяин откроет мир.
+CREATE TABLE IF NOT EXISTS world_inbox (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL,
+  kind       TEXT NOT NULL,
+  from_user  INTEGER NOT NULL,
+  amount     INTEGER NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS world_inbox_user ON world_inbox (user_id);
+-- Журнал отправок для лимитов: иначе один игрок завалил бы другого пиратами.
+CREATE TABLE IF NOT EXISTS world_sends (
+  from_user INTEGER NOT NULL,
+  to_user   INTEGER NOT NULL,
+  kind      TEXT NOT NULL,
+  at        INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS world_sends_from ON world_sends (from_user, at);
 CREATE TABLE IF NOT EXISTS running_tasks (
   chat_id    INTEGER PRIMARY KEY,
   message_id INTEGER NOT NULL,
@@ -257,6 +286,27 @@ const stmts = {
   deleteWorldSave: db.prepare("DELETE FROM world_saves WHERE user_id = ? AND key = ?"),
   hasWorldSave: db.prepare("SELECT 1 FROM world_saves WHERE user_id = ? AND key = ?"),
   countWorldSaves: db.prepare("SELECT COUNT(*) AS n FROM world_saves WHERE user_id = ?"),
+  addWorldWork: db.prepare(
+    "INSERT INTO world_work (user_id, tasks, commits, pushes) VALUES (?, ?, ?, ?)" +
+      " ON CONFLICT(user_id) DO UPDATE SET tasks = tasks + excluded.tasks," +
+      " commits = commits + excluded.commits, pushes = pushes + excluded.pushes",
+  ),
+  getWorldWork: db.prepare("SELECT * FROM world_work WHERE user_id = ?"),
+  claimWorldWork: db.prepare(
+    "UPDATE world_work SET claimed_tasks = tasks, claimed_commits = commits," +
+      " claimed_pushes = pushes WHERE user_id = ?",
+  ),
+  listInbox: db.prepare(
+    "SELECT i.id, i.kind, i.from_user, i.amount, i.created_at, u.display_name FROM world_inbox i" +
+      " LEFT JOIN users u ON u.user_id = i.from_user WHERE i.user_id = ? ORDER BY i.id",
+  ),
+  clearInbox: db.prepare("DELETE FROM world_inbox WHERE user_id = ?"),
+  addInbox: db.prepare(
+    "INSERT INTO world_inbox (user_id, kind, from_user, amount, created_at) VALUES (?, ?, ?, ?, ?)",
+  ),
+  addSend: db.prepare("INSERT INTO world_sends (from_user, to_user, kind, at) VALUES (?, ?, ?, ?)"),
+  sendsSince: db.prepare("SELECT to_user, kind FROM world_sends WHERE from_user = ? AND at > ?"),
+  pruneSends: db.prepare("DELETE FROM world_sends WHERE at < ?"),
   allRunning: db.prepare("SELECT chat_id, message_id, started_at FROM running_tasks"),
   getUser: db.prepare("SELECT * FROM users WHERE user_id = ?"),
   insertUser: db.prepare("INSERT OR IGNORE INTO users (user_id, created_at) VALUES (?, ?)"),
@@ -841,4 +891,98 @@ export function putWorldSave(
 
 export function deleteWorldSave(userId: number, key: string): void {
   stmts.deleteWorldSave.run(userId, key);
+}
+
+/** Работа в боте, которая дойдёт до острова: законченная задача, коммит, пуш. */
+export function recordWorldWork(
+  userId: number,
+  work: { tasks?: number; commits?: number; pushes?: number },
+): void {
+  const tasks = Math.max(0, work.tasks ?? 0);
+  const commits = Math.max(0, work.commits ?? 0);
+  const pushes = Math.max(0, work.pushes ?? 0);
+  if (!tasks && !commits && !pushes) return;
+  stmts.addWorldWork.run(userId, tasks, commits, pushes);
+}
+
+export type WorldClaim = {
+  work: { tasks: number; commits: number; pushes: number; totalCommits: number };
+  inbox: { kind: string; fromUser: number; fromName: string | null; amount: number; at: number }[];
+};
+
+/**
+ * Забрать всё, что ждёт остров, и сразу пометить выданным — одной транзакцией.
+ * Лучше потерять награду, если телефон упадёт посреди применения, чем
+ * выдать её дважды при повторном открытии.
+ */
+export function claimWorld(userId: number): WorldClaim {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const row = stmts.getWorldWork.get(userId) as
+      | {
+          tasks: number;
+          commits: number;
+          pushes: number;
+          claimed_tasks: number;
+          claimed_commits: number;
+          claimed_pushes: number;
+        }
+      | undefined;
+    const rows = stmts.listInbox.all(userId) as {
+      kind: string;
+      from_user: number;
+      amount: number;
+      created_at: number;
+      display_name: string | null;
+    }[];
+    stmts.claimWorldWork.run(userId);
+    stmts.clearInbox.run(userId);
+    db.exec("COMMIT");
+    return {
+      work: {
+        tasks: row ? row.tasks - row.claimed_tasks : 0,
+        commits: row ? row.commits - row.claimed_commits : 0,
+        pushes: row ? row.pushes - row.claimed_pushes : 0,
+        totalCommits: row?.commits ?? 0,
+      },
+      inbox: rows.map((r) => ({
+        kind: r.kind,
+        fromUser: r.from_user,
+        fromName: r.display_name,
+        amount: r.amount,
+        at: r.created_at,
+      })),
+    };
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+export const WORLD_SEND_KINDS = ["gift", "raid"] as const;
+export type WorldSendKind = (typeof WORLD_SEND_KINDS)[number];
+/** Сутки: один подарок и один набег одному острову, всего набегов — пять. */
+const SEND_WINDOW_MS = 24 * 3600 * 1000;
+const RAIDS_PER_DAY = 5;
+
+/** Подарок или набег на чужой остров. Доходит, когда хозяин откроет мир. */
+export function sendToWorld(
+  fromUser: number,
+  toUser: number,
+  kind: WorldSendKind,
+  amount: number,
+): { ok: true } | { error: "self" | "again" | "limit" } {
+  if (fromUser === toUser) return { error: "self" };
+  const now = Date.now();
+  stmts.pruneSends.run(now - SEND_WINDOW_MS);
+  const recent = stmts.sendsSince.all(fromUser, now - SEND_WINDOW_MS) as {
+    to_user: number;
+    kind: string;
+  }[];
+  if (recent.some((r) => r.to_user === toUser && r.kind === kind)) return { error: "again" };
+  if (kind === "raid" && recent.filter((r) => r.kind === "raid").length >= RAIDS_PER_DAY)
+    return { error: "limit" };
+  stmts.addSend.run(fromUser, toUser, kind, now);
+  stmts.addInbox.run(toUser, kind, fromUser, Math.max(1, Math.min(5, Math.floor(amount))), now);
+  return { ok: true };
 }

@@ -2639,3 +2639,139 @@ main:focus,
   opacity: 0;
   pointer-events: none;
 }
+
+/* ── Пока тебя не было ─────────────────────────────────────────────────── */
+
+.wb-away {
+  display: grid;
+  gap: 8px;
+  margin: 8px 8px 0;
+  padding: 14px;
+  border-radius: 18px;
+  background: var(--wb-panel);
+  box-shadow:
+    inset 0 0 0 1px var(--wb-line),
+    inset 0 3px 0 var(--wb-hot);
+  color: var(--wb-ink);
+  opacity: 0;
+  transform: translateY(-8px);
+  transition:
+    opacity 220ms var(--ease),
+    transform 320ms var(--spring);
+}
+
+.wb-away.is-open {
+  opacity: 1;
+  transform: none;
+}
+
+.wb-away-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.wb-away-sub {
+  margin: 0;
+  opacity: 0.7;
+  font-size: 0.8125rem;
+}
+
+.wb-away-list {
+  display: grid;
+  gap: 6px;
+  margin: 4px 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.875rem;
+  line-height: 1.35;
+}
+
+.wb-away-ok {
+  min-height: 40px;
+  border: none;
+  border-radius: 12px;
+  background: var(--wb-hot);
+  color: #fff;
+  font-size: 0.875rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 140ms var(--ease);
+}
+
+.wb-away-ok:active {
+  transform: scale(0.97);
+}
+
+/* ── Соседи в рейтинге и гостевой режим ─────────────────────────────────── */
+
+.wb-top-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.wb-top-actions {
+  display: inline-flex;
+  flex: none;
+  gap: 4px;
+}
+
+.wb-top-btn {
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 10px;
+  background: var(--fill);
+  font-size: 1rem;
+  cursor: pointer;
+  transition: transform 140ms var(--ease);
+}
+
+.wb-top-btn:active {
+  transform: scale(0.92);
+}
+
+.wb-visit {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100% - 84px);
+  height: 36px;
+  padding: 0 4px 0 14px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--clay) 85%, #000);
+  color: #fff;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  white-space: nowrap;
+  animation: pop-in 320ms var(--spring) both;
+}
+
+.wb-visit span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wb-visit button {
+  height: 28px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 999px;
+  background: #fff;
+  color: #111;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* В гостях менять нельзя: ни инструментов, ни настроек, ни заданий. */
+.wb--visit .wb-dock,
+.wb--visit #wb-gear,
+.wb--visit .wb-era,
+.wb--visit ~ .quest,
+.wb--visit ~ .city-hint {
+  display: none;
+}

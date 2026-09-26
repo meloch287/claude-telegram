@@ -13,6 +13,7 @@ import {
   recordRateLimit,
   recordToolDecision,
   recordUsage,
+  recordWorldWork,
   saveChat,
 } from "../db.js";
 import { checkAchievements, renderUnlocked } from "../achievements.js";
@@ -93,7 +94,8 @@ export function ensureSession(options: EnsureOptions): ChatSession {
     permissionTimeoutMs: config.permissionTimeoutMs,
     resumeSessionId: chatRow?.session_id ?? null,
     output,
-    onUsage: ({ tokens, costUsd }) => {
+    onUsage: ({ tokens, costUsd, task, commits, pushes }) => {
+      recordWorldWork(userId, { tasks: task ? 1 : 0, commits, pushes });
       if (tokens <= 0 && costUsd <= 0) return;
       recordUsage(userId, tokens, costUsd);
       const unlocked = checkAchievements(userId, { type: "usage" });
@@ -265,7 +267,8 @@ export async function startBackgroundTask(
     permissionTimeoutMs: config.permissionTimeoutMs,
     resumeSessionId: null,
     output,
-    onUsage: ({ tokens, costUsd }) => {
+    onUsage: ({ tokens, costUsd, task, commits, pushes }) => {
+      recordWorldWork(userId, { tasks: task ? 1 : 0, commits, pushes });
       if (tokens > 0 || costUsd > 0) recordUsage(userId, tokens, costUsd);
       // Один результат — одна законченная задача: дальше ей нечего делать.
       void finish(`✅ Фоновая задача №${id} готова: <i>${prompt.slice(0, 80)}</i>`);

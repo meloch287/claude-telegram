@@ -1378,3 +1378,58 @@ test("копия мира в базе: только ключи world:*, лими
   );
   for (const s of db.listWorldSaves(user)) db.deleteWorldSave(user, s.key);
 });
+
+test("работа в боте доходит до острова один раз", async () => {
+  const db = await import("../src/db.js");
+  // База тестов переживает прогоны: свежий id, чтобы не упереться в прошлые данные.
+  const user = 1_000_000_000 + Math.floor(Math.random() * 1e8);
+  db.recordWorldWork(user, { tasks: 1, commits: 2, pushes: 1 });
+  db.recordWorldWork(user, { tasks: 1 });
+  db.recordWorldWork(user, {});
+  const first = db.claimWorld(user);
+  assert.deepEqual(first.work, { tasks: 2, commits: 2, pushes: 1, totalCommits: 2 });
+  const again = db.claimWorld(user);
+  assert.deepEqual(
+    again.work,
+    { tasks: 0, commits: 0, pushes: 0, totalCommits: 2 },
+    "повторно не выдаётся, но всего коммитов помнится — по нему строятся чудеса",
+  );
+});
+
+test("подарки и набеги: доходят один раз, себе нельзя, лимиты на сутки", async () => {
+  const db = await import("../src/db.js");
+  const a = 1_100_000_000 + Math.floor(Math.random() * 1e8);
+  const [b, c] = [a + 1, a + 2];
+  assert.deepEqual(db.sendToWorld(a, a, "gift", 3), { error: "self" });
+  assert.deepEqual(db.sendToWorld(a, b, "gift", 99), { ok: true });
+  assert.deepEqual(db.sendToWorld(a, b, "gift", 1), { error: "again" }, "один подарок в сутки");
+  assert.deepEqual(db.sendToWorld(a, b, "raid", 2), { ok: true }, "набег — отдельно от подарка");
+  const inbox = db.claimWorld(b).inbox;
+  assert.deepEqual(
+    inbox.map((i) => [i.kind, i.fromUser, i.amount]),
+    [
+      ["gift", a, 5],
+      ["raid", a, 2],
+    ],
+    "количество обрезается до пяти",
+  );
+  assert.deepEqual(db.claimWorld(b).inbox, [], "забранное не приходит второй раз");
+  for (let i = 0; i < 4; i += 1)
+    assert.deepEqual(db.sendToWorld(a, c + i, "raid", 1), { ok: true });
+  assert.deepEqual(
+    db.sendToWorld(a, c + 10, "raid", 1),
+    { error: "limit" },
+    "пять набегов в сутки",
+  );
+});
+
+test("коммиты и пуши агента узнаются по команде", async () => {
+  const { gitActions } = await import("../src/agent/conversation.js");
+  assert.deepEqual(gitActions('git add -A && git commit -m "x"'), { commit: true, push: false });
+  assert.deepEqual(gitActions("git -C repo push origin main"), { commit: false, push: true });
+  assert.deepEqual(gitActions("git commit -m a && git push"), { commit: true, push: true });
+  assert.deepEqual(gitActions("git push --dry-run"), { commit: false, push: false });
+  assert.deepEqual(gitActions("git log | grep commit"), { commit: false, push: false });
+  assert.deepEqual(gitActions("git config commit.gpgsign false"), { commit: false, push: false });
+  assert.deepEqual(gitActions("npm test"), { commit: false, push: false });
+});

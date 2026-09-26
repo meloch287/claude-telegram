@@ -94,7 +94,7 @@ import {
   suggestCommitMessage,
   type RepoStatus,
 } from "./bot/git.js";
-import { setBotUsername, startMiniAppServer } from "./miniapp/server.js";
+import { setBotUsername, setWorldNotifier, startMiniAppServer } from "./miniapp/server.js";
 import { scheduleDailyBackups } from "./backup.js";
 import {
   activeChannel,
@@ -1960,6 +1960,10 @@ await bot.api.setMyCommands([
 // исправен, просто ждал VPN. Здоровье должно означать «процесс жив и
 // обслуживает», а не «канал до Anthropic поднялся».
 startMiniAppServer();
+// Подарок или пираты с чужого острова — повод открыть мир: пишем хозяину.
+setWorldNotifier(async (userId, text) => {
+  await bot.api.sendMessage(userId, text);
+});
 scheduleDailyBackups();
 
 // Канал выхода выбирается до приёма сообщений: если Anthropic недоступен,

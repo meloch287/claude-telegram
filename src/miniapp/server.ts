@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { extname, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,6 +22,10 @@ import {
   putWorldSave,
   deleteWorldSave,
   WORLD_SAVE_MAX_BYTES,
+  claimWorld,
+  sendToWorld,
+  WORLD_SEND_KINDS,
+  type WorldSendKind,
 } from "../db.js";
 import { ACHIEVEMENTS, CAT_LEVELS, catForTokens, catProgress, nextCat } from "../cats.js";
 import { MODELS } from "../bot/keyboards.js";
@@ -315,6 +319,84 @@ async function handleWorldSave(
   sendJson(res, 200, { ok: true, updatedAt: result.updatedAt });
 }
 
+/**
+ * Остров в рейтинге узнаётся по непрозрачному id, а не по user_id: иначе из
+ * мини-аппа утекали бы Telegram-id всех игроков.
+ */
+function islandId(userId: number): string {
+  return createHmac("sha256", config.botToken)
+    .update(`island:${userId}`)
+    .digest("base64url")
+    .slice(0, 12);
+}
+
+function islandOwner(id: string): { user_id: number; display_name: string | null } | null {
+  return topWorlds(1000).find((r) => islandId(r.user_id) === id) ?? null;
+}
+
+function islandName(userId: number, displayName: string | null): string {
+  return displayName || `Остров №${worldSeed(userId) % 10000}`;
+}
+
+/** Снимок острова целиком из облачной копии: карта, на которой человек сейчас. */
+function islandSnapshot(userId: number): { seed: number; map: string; data: string } | null {
+  const seed = worldSeed(userId);
+  const saves = listWorldSaves(userId);
+  const map = saves.find((s) => s.key === `world:map:${seed}`)?.data || "island";
+  // Версия формата — клиентская; берём самую свежую из тех, что есть.
+  const pattern = new RegExp(`^world:v(\\d+):${seed}:${map}$`);
+  const snapshot = saves
+    .map((s) => ({ s, v: Number(pattern.exec(s.key)?.[1] ?? -1) }))
+    .filter((x) => x.v >= 0)
+    .sort((a, b) => b.v - a.v)[0];
+  return snapshot ? { seed, map, data: snapshot.s.data } : null;
+}
+
+/**
+ * Бот пишет хозяину, когда на его остров приплыли подарок или пираты:
+ * повод открыть мир. Подключается из index.ts — здесь нет доступа к боту.
+ */
+let worldNotifier: ((userId: number, text: string) => Promise<void>) | null = null;
+
+export function setWorldNotifier(fn: (userId: number, text: string) => Promise<void>): void {
+  worldNotifier = fn;
+}
+
+async function handleWorldSend(
+  req: IncomingMessage,
+  res: ServerResponse,
+  userId: number,
+): Promise<void> {
+  const raw = await readBody(req, 4096);
+  let body: { id?: unknown; kind?: unknown; amount?: unknown };
+  try {
+    body = JSON.parse(raw ?? "") as typeof body;
+  } catch {
+    sendJson(res, 400, { error: "bad json" });
+    return;
+  }
+  const kind = body.kind as WorldSendKind;
+  const owner = typeof body.id === "string" ? islandOwner(body.id) : null;
+  if (!WORLD_SEND_KINDS.includes(kind) || !owner) {
+    sendJson(res, 400, { error: "unknown island or kind" });
+    return;
+  }
+  const amount = Math.max(1, Math.min(kind === "gift" ? 5 : 3, Number(body.amount) || 1));
+  const result = sendToWorld(userId, owner.user_id, kind, amount);
+  if ("error" in result) {
+    sendJson(res, result.error === "self" ? 400 : 429, result);
+    return;
+  }
+  const me = getOrCreateUser(userId);
+  const from = islandName(userId, me.display_name);
+  const text =
+    kind === "gift"
+      ? `🎁 С острова «${from}» к тебе плывут коты: ${amount}. Открой «Мой мир», чтобы встретить их.`
+      : `🏴‍☠️ Остров «${from}» отправил к тебе пиратов! Открой «Мой мир» — они уже у берегов.`;
+  void worldNotifier?.(owner.user_id, text).catch(() => undefined);
+  sendJson(res, 200, { ok: true, amount });
+}
+
 async function serveStatic(
   pathname: string,
 ): Promise<{ body: Buffer; type: string; etag: string } | null> {
@@ -395,6 +477,8 @@ export function startMiniAppServer(): void {
       }
       const top = topWorlds(10).map((r, i) => ({
         rank: i + 1,
+        id: islandId(r.user_id),
+        visitable: islandSnapshot(r.user_id) !== null,
         name: r.display_name || `Остров №${r.seed}`,
         score: r.score,
         pop: r.pop,
@@ -409,6 +493,57 @@ export function startMiniAppServer(): void {
       });
       res.end(JSON.stringify({ top, me: rank ? { rank } : null }));
       return;
+    }
+
+    if (url.pathname.startsWith("/api/world-") && url.pathname !== "/api/world-save") {
+      const initData = req.headers["x-telegram-init-data"];
+      const userId = authenticate(typeof initData === "string" ? initData : null);
+      if (url.pathname === "/api/world-claim" && req.method === "POST" && userId !== null) {
+        const claim = claimWorld(userId);
+        sendJson(res, 200, {
+          work: claim.work,
+          inbox: claim.inbox.map((i) => ({
+            kind: i.kind,
+            amount: i.amount,
+            at: i.at,
+            fromName: islandName(i.fromUser, i.fromName),
+          })),
+        });
+        return;
+      }
+      if (url.pathname === "/api/world-visit" && userId !== null) {
+        const owner = islandOwner(url.searchParams.get("id") ?? "");
+        const snapshot = owner ? islandSnapshot(owner.user_id) : null;
+        if (!owner || !snapshot) {
+          sendJson(res, 404, { error: "island not synced" });
+          return;
+        }
+        sendJson(res, 200, {
+          name: islandName(owner.user_id, owner.display_name),
+          seed: snapshot.seed,
+          map: snapshot.map,
+          data: snapshot.data,
+          mine: owner.user_id === userId,
+        });
+        return;
+      }
+      if (url.pathname === "/api/world-send" && req.method === "POST" && userId !== null) {
+        try {
+          await handleWorldSend(req, res, userId);
+        } catch (error) {
+          console.error("world-send:", error);
+          if (!res.headersSent) sendJson(res, 500, { error: "internal" });
+        }
+        return;
+      }
+      if (
+        userId === null &&
+        url.pathname !== "/api/world-score" &&
+        url.pathname !== "/api/world-top"
+      ) {
+        sendJson(res, 401, { error: "invalid init data" });
+        return;
+      }
     }
 
     if (url.pathname === "/api/world-save") {

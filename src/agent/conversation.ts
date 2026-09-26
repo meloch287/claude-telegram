@@ -59,6 +59,21 @@ export interface ConversationOutput {
 export interface ConversationUsage {
   tokens: number;
   costUsd: number;
+  /** Задача закончилась успехом: на острове это брёвна и камень. */
+  task?: boolean;
+  /** Удавшиеся git commit и git push за задачу: чудеса и золото на острове. */
+  commits?: number;
+  pushes?: number;
+}
+
+/** git commit / git push в команде Bash; пробный прогон не считается. */
+export function gitActions(command: string): { commit: boolean; push: boolean } {
+  const parts = command.split(/&&|\|\||;|\n/);
+  const has = (verb: string) =>
+    parts.some(
+      (p) => new RegExp(`\\bgit\\b[^|]*\\s${verb}(\\s|$)`).test(p) && !/--dry-run/.test(p),
+    );
+  return { commit: has("commit"), push: has("push") };
 }
 
 export interface ConversationDeps {
@@ -280,6 +295,10 @@ export class Conversation {
   #toolNames = new Map<string, string>();
   /** tool_use_id → шаг в Markdown: им подписывается вывод в журнале. */
   #toolLabels = new Map<string, string>();
+  // Git-действия текущей задачи: засчитываются, только если команда удалась.
+  #gitPending = new Map<string, { commit: boolean; push: boolean }>();
+  #turnCommits = 0;
+  #turnPushes = 0;
   /** Что делал агент за задачу — чек-лист в журнале. */
   #steps: string[] = [];
   /** Вывод команд и ошибки инструментов копятся и уходят одним свёрнутым блоком. */
@@ -745,6 +764,10 @@ export class Conversation {
               (block.input ?? {}) as Record<string, unknown>,
             );
             this.#toolLabels.set(block.id, step);
+            if (block.name === "Bash") {
+              const git = gitActions(String((block.input as { command?: unknown })?.command ?? ""));
+              if (git.commit || git.push) this.#gitPending.set(block.id, git);
+            }
             this.#steps.push(step);
             this.#activity.push(
               describeToolShort(block.name, (block.input ?? {}) as Record<string, unknown>),
@@ -770,6 +793,15 @@ export class Conversation {
             content?: unknown;
           };
           if (result.type !== "tool_result") continue;
+
+          const git = this.#gitPending.get(result.tool_use_id ?? "");
+          if (git) {
+            this.#gitPending.delete(result.tool_use_id ?? "");
+            if (!result.is_error) {
+              if (git.commit) this.#turnCommits += 1;
+              if (git.push) this.#turnPushes += 1;
+            }
+          }
 
           const toolName = this.#toolNames.get(result.tool_use_id ?? "") ?? "";
           const text = flattenToolResult(result.content);
@@ -820,7 +852,16 @@ export class Conversation {
         // Не ждём: пользователю важен ответ, а не свежесть счётчика.
         void this.refreshRateLimits();
 
-        this.#deps.onUsage({ tokens: deltaTokens, costUsd: deltaCost });
+        this.#deps.onUsage({
+          tokens: deltaTokens,
+          costUsd: deltaCost,
+          task: message.subtype === "success",
+          commits: this.#turnCommits,
+          pushes: this.#turnPushes,
+        });
+        this.#turnCommits = 0;
+        this.#turnPushes = 0;
+        this.#gitPending.clear();
 
         for (const denial of message.permission_denials ?? []) {
           this.#deps.onToolDecision(denial.tool_name, false);

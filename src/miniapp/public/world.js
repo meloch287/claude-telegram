@@ -474,6 +474,23 @@ export const ERAS = [
   { id: "future", name: "Будущее", days: 6, houses: 12 },
 ];
 
+/**
+ * Чудеса за коммиты через бота. Порог — сколько всего коммитов сделал агент
+ * по просьбе человека: работа в боте вырастает на острове постройкой.
+ */
+export const WONDERS = [
+  { id: "lighthouse", at: 1, name: "Маяк", desc: "первый коммит через бота" },
+  { id: "statue", at: 5, name: "Статуя кота", desc: "5 коммитов через бота" },
+  { id: "library", at: 15, name: "Библиотека", desc: "15 коммитов через бота" },
+  { id: "observatory", at: 40, name: "Обсерватория", desc: "40 коммитов через бота" },
+  { id: "tower", at: 100, name: "Башня Claude", desc: "100 коммитов через бота" },
+];
+
+/**
+ * snapshot — чужой остров строкой сохранения (гости): мир берётся из неё, а
+ * не из localStorage. readonly — смотреть можно, менять нельзя: инструменты
+ * молчат, сохранения нет, и чужой остров не затрёт свой.
+ */
 export function createWorld({
   seed,
   stats,
@@ -483,10 +500,15 @@ export function createWorld({
   onHud,
   onVillages,
   map = "island",
+  snapshot = null,
+  readonly = false,
 }) {
   const rand = rng(seed * 7 + 13);
   // У каждой карты своё сохранение: пять миров живут параллельно.
   const storeKey = `world:v${SAVE_VERSION}:${seed}:${map}`;
+  // Что случилось, пока мини-апп был закрыт: заполняет догон при открытии.
+  let away = null;
+  let erased = false;
 
   const state = {
     tiles: null,
@@ -539,6 +561,8 @@ export function createWorld({
     ufo: null, // { x, y, tx, ty, t, phase }
     islandAch: [], // id достижений острова
     flags: {}, // разовые события: nuked, plagueSurvived, eruption, piratesBeaten…
+    wonders: [], // { id, x, y, day } — чудеса за коммиты через бота
+    bank: { wood: 0, stone: 0, gold: 0 }, // награды, которым пока некуда лечь: деревень нет
     discovered: [], // id открытых карт
     lastVisit: Date.now(),
     centers: RACES.map(() => null), // центр территории народа, для подписи
@@ -752,6 +776,7 @@ export function createWorld({
     saveTimer = setTimeout(writeSave, 400);
   }
   function writeSave() {
+    if (readonly || erased) return;
     {
       try {
         localStorage.setItem(
@@ -800,6 +825,8 @@ export function createWorld({
             cursed: state.cursed,
             islandAch: state.islandAch,
             flags: state.flags,
+            wonders: state.wonders,
+            bank: state.bank,
           }),
         );
       } catch {
@@ -810,7 +837,7 @@ export function createWorld({
 
   function restore() {
     try {
-      const saved = JSON.parse(localStorage.getItem(storeKey) || "null");
+      const saved = JSON.parse(snapshot ?? localStorage.getItem(storeKey) ?? "null");
       if (
         !saved ||
         saved.v !== SAVE_VERSION ||
@@ -854,6 +881,8 @@ export function createWorld({
       state.lastVisit = saved.lastVisit || Date.now();
       state.islandAch = Array.isArray(saved.islandAch) ? saved.islandAch : [];
       state.flags = saved.flags && typeof saved.flags === "object" ? saved.flags : {};
+      state.wonders = Array.isArray(saved.wonders) ? saved.wonders : [];
+      state.bank = { wood: 0, stone: 0, gold: 0, ...(saved.bank || {}) };
       state.blessed =
         Array.isArray(saved.blessed) && saved.blessed.length === RACES.length
           ? saved.blessed
@@ -950,7 +979,12 @@ export function createWorld({
    */
   function catchUp(elapsedMs) {
     if (!(elapsedMs > 5000) || state.villages.length === 0) return;
-    const before = { cats: state.cats.length, houses: state.houses.length };
+    const before = {
+      cats: state.cats.length,
+      houses: state.houses.length,
+      day: state.day,
+      era: [...state.era],
+    };
     const fast = Math.min(Math.floor(elapsedMs / 33), 5400);
     for (let i = 0; i < fast; i += 1) {
       state.tick += 1;
@@ -1000,6 +1034,15 @@ export function createWorld({
     const born = state.cats.length - before.cats;
     const built = state.houses.length - before.houses;
     if (born > 0 || built > 0) chronicle("away", born, built);
+    away = {
+      ms: elapsedMs,
+      born,
+      built,
+      days: state.day - before.day,
+      eraUp: RACES.flatMap((race, r) =>
+        state.era[r] > before.era[r] ? [`${race.name} — ${ERAS[state.era[r]].name}`] : [],
+      ),
+    };
     bakeAll();
   }
 
@@ -1135,6 +1178,16 @@ export function createWorld({
     era: (r, e) => `${RACES[r].name} вступили в эру «${ERAS[e].name}».`,
     ship: (r) => `${RACES[r].name} спустили на воду корабль.`,
     eraAll: (e) => `Бог ускорил время: на острове эра «${ERAS[e].name}».`,
+    work: (n) => `Бог закончил в боте дел: ${n}. Деревням привезли брёвна, камень и золото.`,
+    deploy: () => "Код уехал на сервер: в казну привезли золото.",
+    wonder: (name) => `Возведено чудо — ${name}.`,
+    gift: (from, n) =>
+      `С острова «${from}» приплыл корабль: ${n} кот${plural(n)} поселились у нас.`,
+    giftSent: (n) => `${n} кот${plural(n)} уплыли в подарок на другой остров.`,
+    islandRaid: (from, v) =>
+      v
+        ? `Пираты с острова «${from}» разграбили ${v}.`
+        : `Пираты с острова «${from}» рыщут у берегов.`,
   };
   function plural(n) {
     const m10 = n % 10;
@@ -2842,6 +2895,170 @@ export function createWorld({
     }
   }
 
+  /* ── Награды за работу, подарки и набеги с других островов ────────────── */
+
+  /** Раздать добро поровну по деревням; деревень нет — копится в казне. */
+  function deposit(loot) {
+    if (!state.villages.length) {
+      for (const k of ["wood", "stone", "gold"]) state.bank[k] += loot[k] || 0;
+      return;
+    }
+    const n = state.villages.length;
+    for (const k of ["wood", "stone", "gold"]) {
+      const total = loot[k] || 0;
+      state.villages.forEach((v, i) => {
+        v[k] = (v[k] || 0) + Math.floor(total / n) + (i < total % n ? 1 : 0);
+      });
+    }
+  }
+  function bankTick() {
+    if (state.tick % 600 !== 300 || !state.villages.length) return;
+    const { wood, stone, gold } = state.bank;
+    if (!wood && !stone && !gold) return;
+    state.bank = { wood: 0, stone: 0, gold: 0 };
+    deposit({ wood, stone, gold });
+  }
+
+  /** Место под чудо: суша рядом с самой большой деревней, не занятая домом. */
+  function wonderSite() {
+    const busy = (x, y) =>
+      state.houses.some((h) => h.x === x && h.y === y) ||
+      state.villages.some((v) => v.x === x && v.y === y) ||
+      state.wonders.some((w) => Math.abs(w.x - x) < 3 && Math.abs(w.y - y) < 3);
+    const counts = state.villages.map((_, i) => state.cats.filter((c) => c.v === i).length);
+    const big = state.villages[counts.indexOf(Math.max(...counts))];
+    const center = big ?? nearestTile(W / 2, H / 2, (t) => t >= T.GRASS && t <= T.HILL);
+    if (!center) return null;
+    for (let r = 3; r < 16; r += 1)
+      for (let attempt = 0; attempt < 24; attempt += 1) {
+        const x = center.x + Math.round((Math.random() * 2 - 1) * r);
+        const y = center.y + Math.round((Math.random() * 2 - 1) * r * 0.7);
+        if (!inside(x, y) || !inside(x, y - 2)) continue;
+        const t = tileAt(x, y);
+        if (t < T.SAND || t > T.HILL || busy(x, y)) continue;
+        return { x, y };
+      }
+    return null;
+  }
+
+  /** Подарок: коты приплывают и селятся у самого большого народа. */
+  function landGift(amount) {
+    const allowed = RACES.map((_, r) => r).filter(
+      (r) => !RACES[r].minEra || Math.max(...state.era) >= RACES[r].minEra,
+    );
+    const r = allowed.reduce((a, b) => (state.pop[b] > state.pop[a] ? b : a), allowed[0]);
+    let vi = villagesOf(r)[0];
+    let landed = 0;
+    if (vi === undefined) {
+      // Народа ещё нет — гости высаживаются на берег и основывают деревню.
+      const shore = nearestTile(W / 2, H / 2, (t) => t === T.SAND || t === T.GRASS);
+      if (!shore) return 0;
+      const c = newCat(shore.x, shore.y, r, 0);
+      vi = foundVillage(r, shore.x, shore.y, c.name);
+      c.v = vi;
+      state.cats.push(c);
+      landed = 1;
+    }
+    while (landed < amount && spawnCat(r, vi, 5)) landed += 1;
+    return landed;
+  }
+
+  /** Набег: грабят прибрежную деревню и оставляют пиратов в море. */
+  function raid(amount) {
+    const target =
+      state.villages.find((v) => v.shipyard) ??
+      state.villages[Math.floor(Math.random() * state.villages.length)];
+    let loot = 0;
+    if (target) {
+      const wood = Math.min(target.wood || 0, 6 * amount);
+      const gold = Math.min(target.gold || 0, 2 * amount);
+      target.wood -= wood;
+      target.gold = (target.gold || 0) - gold;
+      loot = wood + gold;
+    }
+    const from = target ?? { x: W / 2, y: H / 2 };
+    const sea = nearestTile(from.x, from.y, (t) => t === T.DEEP);
+    for (let i = 0; sea && i < amount; i += 1) {
+      const a = Math.random() * Math.PI * 2;
+      state.pirates.push({
+        x: sea.x + i,
+        y: sea.y,
+        vx: Math.cos(a) * 0.06,
+        vy: Math.sin(a) * 0.06,
+        wait: 0,
+        face: 1,
+        hp: 4,
+      });
+    }
+    return { village: target && loot ? target.name : null, loot };
+  }
+
+  /**
+   * Всё, что пришло с сервера при открытии: работа в боте, подарки и набеги.
+   * Возвращает строки для карточки «Пока тебя не было».
+   */
+  function receive({ work = {}, inbox = [] } = {}) {
+    if (readonly) return [];
+    const out = [];
+    const tasks = Math.max(0, work.tasks | 0);
+    const pushes = Math.max(0, work.pushes | 0);
+    if (tasks) {
+      deposit({ wood: tasks * 4, stone: tasks * 2, gold: tasks });
+      out.push(`🛠 Дел в боте: ${tasks} → +${tasks * 4} 🪵 +${tasks * 2} 🪨 +${tasks} 🪙`);
+      chronicle("work", tasks);
+    }
+    if (pushes) {
+      deposit({ gold: pushes * 3 });
+      out.push(`🚀 Пушей: ${pushes} → +${pushes * 3} 🪙`);
+      chronicle("deploy");
+    }
+    const commits = Math.max(0, work.totalCommits | 0);
+    for (const w of WONDERS) {
+      if (commits < w.at || state.wonders.some((o) => o.id === w.id)) continue;
+      const site = wonderSite();
+      if (!site) break;
+      state.wonders.push({ id: w.id, x: site.x, y: site.y, day: state.day });
+      puff(site.x, site.y, "#ffd23a", 14, "spark");
+      out.push(`🏛 Построено чудо: ${w.name} — ${w.desc}`);
+      chronicle("wonder", w.name);
+    }
+    for (const item of inbox) {
+      const from = String(item.fromName || "соседний остров").slice(0, 40);
+      const amount = Math.max(1, Math.min(5, item.amount | 0));
+      if (item.kind === "gift") {
+        const n = landGift(amount);
+        out.push(`🎁 «${from}» прислал котов: ${n}`);
+        chronicle("gift", from, n);
+      } else if (item.kind === "raid") {
+        const r = raid(amount);
+        out.push(
+          r.village
+            ? `🏴‍☠️ Пираты «${from}» разграбили ${r.village}: −${r.loot} добра`
+            : `🏴‍☠️ Пираты «${from}» у берегов — грабить пока нечего`,
+        );
+        chronicle("islandRaid", from, r.village);
+      }
+    }
+    if (out.length) {
+      countPop();
+      persist(true);
+    }
+    return out;
+  }
+
+  /** Отправить котов в подарок: уплывают с острова, но не короли и не герои. */
+  function giveCats(n) {
+    if (readonly || state.cats.length < n + 3) return 0;
+    const r = state.pop.indexOf(Math.max(...state.pop));
+    const leaving = state.cats.filter((c) => c.race === r && !c.king && !c.hero).slice(0, n);
+    if (leaving.length < n) return 0;
+    state.cats = state.cats.filter((c) => !leaving.includes(c));
+    countPop();
+    chronicle("giftSent", n);
+    persist(true);
+    return n;
+  }
+
   function blessTick() {
     for (let r = 0; r < RACES.length; r += 1) {
       if (state.blessed[r] > 0) {
@@ -2925,6 +3142,7 @@ export function createWorld({
     { id: "plague", title: "Пережили чуму", test: () => state.flags.plagueEnded },
     { id: "eruption", title: "Видели извержение", test: () => state.flags.eruption },
     { id: "pirates", title: "Пираты отбиты", test: () => state.flags.piratesBeaten },
+    { id: "wonder", title: "Чудо света", test: () => state.wonders.length > 0 },
     { id: "temple", title: "Первый храм", test: () => state.villages.some((v) => v.temple) },
     { id: "king", title: "Король пал в бою", test: () => state.flags.kingFell },
     {
@@ -2972,11 +3190,12 @@ export function createWorld({
     if (!left.length || Math.random() < 0.4) return;
     const found = left[Math.floor(Math.random() * left.length)];
     state.discovered.push(found.id);
-    try {
-      localStorage.setItem(discoverKey, JSON.stringify(state.discovered));
-    } catch {
-      /* пусть */
-    }
+    if (!readonly)
+      try {
+        localStorage.setItem(discoverKey, JSON.stringify(state.discovered));
+      } catch {
+        /* пусть */
+      }
     chronicle("discover", found.name);
   }
 
@@ -3903,7 +4122,7 @@ export function createWorld({
    * до конца штриха — endStroke().
    */
   function apply(tool, x, y, size) {
-    if (!inside(x, y)) return;
+    if (readonly || !inside(x, y)) return;
     switch (tool.kind) {
       case "terrain": {
         let touched = false;
@@ -4956,6 +5175,72 @@ export function createWorld({
     for (let i = 0; i < 4; i += 1)
       rect(ctx, (state.tick >> 2) % 4 === i ? "#ffd23a" : "#e0242f", bx - 3 + i * 4, by + 5, 2, 1);
   }
+  /** Чудеса — пиксельные постройки выше домов, рисуются вверх от клетки. */
+  function drawWonder(w) {
+    const bx = w.x * PX;
+    const by = w.y * PX;
+    const blink = (state.tick >> 4) % 2 === 0;
+    switch (w.id) {
+      case "lighthouse": {
+        rect(ctx, "#6b6b6b", bx, by + 6, 8, 2);
+        for (let i = 0; i < 5; i += 1)
+          rect(ctx, i % 2 ? "#d23b3b" : "#f4efe2", bx + 2, by + 3 - i * 3, 4, 3);
+        rect(ctx, "#3a3a3a", bx + 1, by - 13, 6, 2);
+        rect(ctx, blink ? "#ffe066" : "#c9a43a", bx + 3, by - 12, 2, 2);
+        if (blink) {
+          ctx.globalAlpha = 0.25;
+          rect(ctx, "#ffe066", bx - 3, by - 14, 14, 4);
+          ctx.globalAlpha = 1;
+        }
+        break;
+      }
+      case "statue": {
+        rect(ctx, "#8a8f96", bx, by + 5, 8, 3);
+        rect(ctx, "#a9aeb5", bx + 1, by + 4, 6, 1);
+        rect(ctx, "#e0b43a", bx + 2, by, 4, 4);
+        rect(ctx, "#e0b43a", bx + 2, by - 3, 4, 3);
+        rect(ctx, "#e0b43a", bx + 2, by - 4, 1, 1);
+        rect(ctx, "#e0b43a", bx + 5, by - 4, 1, 1);
+        rect(ctx, "#e0b43a", bx + 6, by - 1, 1, 3);
+        rect(ctx, "#5a3d00", bx + 3, by - 2, 1, 1);
+        rect(ctx, "#5a3d00", bx + 4, by - 2, 1, 1);
+        break;
+      }
+      case "library": {
+        rect(ctx, "#b8ad92", bx - 2, by + 7, 12, 1);
+        rect(ctx, "#e9dfc6", bx - 2, by + 1, 12, 6);
+        for (let i = 0; i < 4; i += 1) rect(ctx, "#c9bea3", bx - 1 + i * 3, by + 2, 1, 5);
+        rect(ctx, "#8b3a2e", bx - 3, by, 14, 1);
+        rect(ctx, "#8b3a2e", bx - 1, by - 1, 10, 1);
+        rect(ctx, "#8b3a2e", bx + 1, by - 2, 6, 1);
+        break;
+      }
+      case "observatory": {
+        rect(ctx, "#7d8791", bx - 1, by + 2, 10, 6);
+        rect(ctx, "#c9d3df", bx, by - 1, 8, 3);
+        rect(ctx, "#c9d3df", bx + 1, by - 2, 6, 1);
+        rect(ctx, "#c9d3df", bx + 2, by - 3, 4, 1);
+        rect(ctx, "#2b3440", bx + 4, by - 3, 1, 4);
+        rect(ctx, "#4a5563", bx + 5, by - 5, 3, 1);
+        if (blink) rect(ctx, "#fff7c2", bx + 8, by - 6, 1, 1);
+        break;
+      }
+      case "tower": {
+        rect(ctx, "#8e4a33", bx + 1, by - 10, 6, 18);
+        rect(ctx, "#b85c3c", bx + 2, by - 10, 4, 18);
+        for (let i = 0; i < 4; i += 1) rect(ctx, "#ffd9a8", bx + 3, by - 7 + i * 4, 2, 2);
+        rect(ctx, "#d97757", bx + 3, by - 16, 2, 6);
+        rect(ctx, "#d97757", bx + 1, by - 14, 6, 2);
+        if (blink) {
+          ctx.globalAlpha = 0.3;
+          rect(ctx, "#ffb38a", bx - 1, by - 18, 10, 10);
+          ctx.globalAlpha = 1;
+        }
+        break;
+      }
+    }
+  }
+
   function drawPirate(p) {
     const bx = Math.round(p.x * PX);
     const by = Math.round(p.y * PX) + ((state.tick >> 4) % 2);
@@ -5224,6 +5509,8 @@ export function createWorld({
     for (const s of state.smokes) drawSmoke(s);
     // Коты по y: нижние поверх верхних, как в любой изометрии.
     for (const sh of state.ships) drawShip(sh);
+    // Сверху вниз: ближнее к зрителю перекрывает дальнее, а не наоборот.
+    for (const w of state.wonders.slice().sort((a, b) => a.y - b.y)) drawWonder(w);
     for (const p of state.pirates) drawPirate(p);
     for (const cv of state.caravans) drawCaravan(cv);
     const cats = state.cats.slice().sort((a, b) => a.py - b.py);
@@ -5319,6 +5606,7 @@ export function createWorld({
         plagueTick();
         quakeTick();
         tsunamiTick();
+        bankTick();
         blessTick();
         ufoTick();
         robotsTick();
@@ -5349,6 +5637,10 @@ export function createWorld({
   if (state.catchMs > 5000) catchUp(state.catchMs);
   faithDecay(Date.now() - (state.lastVisit || Date.now()));
   state.lastVisit = Date.now();
+  if (away)
+    away.faithLow = RACES.flatMap((race, r) =>
+      state.pop[r] > 0 && state.faith[r] < 20 ? [race.plural] : [],
+    );
   onEvent?.(state.chronicle);
   frame();
 
@@ -5393,6 +5685,19 @@ export function createWorld({
           sick: Boolean(c.sick),
           hp: c.hp,
           track: () => ({ x: c.px, y: c.py, alive: state.cats.includes(c) }),
+        };
+      }
+      const wonder = state.wonders.find(
+        (w) => Math.abs(w.x - x) <= 1 && y <= w.y + 1 && y >= w.y - 2,
+      );
+      if (wonder) {
+        const def = WONDERS.find((w) => w.id === wonder.id);
+        return {
+          kind: "wonder",
+          id: wonder.id,
+          name: def?.name ?? "Чудо",
+          desc: def?.desc ?? "",
+          day: wonder.day,
         };
       }
       let vi = -1;
@@ -5465,6 +5770,16 @@ export function createWorld({
     },
     apply,
     endStroke,
+    receive,
+    giveCats,
+    readonly,
+    /** Что случилось за время отсутствия; null — отлучка короткая или острова нет. */
+    get awaySummary() {
+      return away && away.ms >= 10 * 60_000 ? { ...away } : null;
+    },
+    get wonders() {
+      return state.wonders.map((w) => ({ ...w }));
+    },
     setOption(name, value) {
       options[name] = value;
       if (!running) frame();
@@ -5477,9 +5792,14 @@ export function createWorld({
       cursor = c;
       if (!running) frame();
     },
+    /** Стереть остров; возвращает ключ сохранения, чтобы стереть и копию. */
     reset() {
+      if (readonly) return null;
       clearTimeout(saveTimer);
+      // До перезагрузки мир ещё тикает и сохранил бы себя обратно.
+      erased = true;
       localStorage.removeItem(storeKey);
+      return storeKey;
     },
     get chronicle() {
       return state.chronicle;
