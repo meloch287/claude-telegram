@@ -910,7 +910,11 @@ export function createWorld({
       state.born = saved.born || Date.now();
       state.ships = (saved.ships || []).map(([x, y, r]) => newShip(x, y, r));
       state.chronicle = saved.chronicle || [];
-      if (state.homes.length !== 4) return false;
+      // Народов стало пять (коты-роботы), а проверка помнила четыре: каждое
+      // открытие выбрасывало сохранённый остров и растило пустой. Старые
+      // сохранения на четыре народа дополняем пустой столицей.
+      while (state.homes.length < RACES.length) state.homes.push(null);
+      if (state.homes.length !== RACES.length) return false;
       // Столица — ссылка на первую деревню народа, чтобы двигалась вместе с ней.
       state.homes = state.homes.map((h, r) => {
         if (!h) return null;
