@@ -533,7 +533,7 @@ export function createWorld({
     towers: [], // { x, y, race, cd }
     pirates: [], // { x, y, vx, vy, wait, face, hp }
     quake: { ttl: 0 }, // тряска экрана
-    tsunami: null, // { x, y, dx, dy, t, len }
+    tsunami: null, // { x, y, ux, uy, dist, t, segs }
     blessed: RACES.map(() => 0), // ttl благословения народа
     cursed: RACES.map(() => 0), // ttl проклятия
     ufo: null, // { x, y, tx, ty, t, phase }
@@ -2658,40 +2658,127 @@ export function createWorld({
     }
   }
 
-  function startTsunami(x, y) {
-    // Точка старта — в море; волна идёт к ближайшему берегу.
-    if (tileAt(x, y) > T.WATER) {
-      let best = null;
-      let bestD = Infinity;
-      for (let i = 0; i < W * H; i += 1) {
-        if (state.tiles[i] !== T.DEEP) continue;
-        const d = Math.abs((i % W) - x) + Math.abs(((i / W) | 0) - y);
-        if (d < bestD) {
-          bestD = d;
-          best = i;
-        }
-      }
-      if (best === null) return;
-      x = best % W;
-      y = (best / W) | 0;
-    }
-    let target = null;
+  /**
+   * Цунами бьёт туда, куда нажали. По суше — волна рождается в ближайшем
+   * открытом море и идёт прямо на эту точку; по воде — катится к ближайшему
+   * берегу. Фронт — дуга из отдельных кусков: каждый сам заходит на сушу, пока
+   * хватает силы, и не гасит соседей. Раньше вся волна пропадала, стоило краю
+   * задеть берег, а смывала она от силы одну клетку.
+   */
+  const TSUNAMI_HALF = 10; // кусков по обе стороны от центра
+  const TSUNAMI_STEP = 0.8; // шаг между кусками, в клетках: без щелей на диагонали
+  const TSUNAMI_SPEED = 0.3; // клеток за тик
+
+  function nearestTile(x, y, test) {
+    let best = null;
     let bestD = Infinity;
     for (let i = 0; i < W * H; i += 1) {
-      if (state.tiles[i] < T.SAND) continue;
-      const d = Math.abs((i % W) - x) + Math.abs(((i / W) | 0) - y);
+      if (!test(state.tiles[i])) continue;
+      const d = Math.hypot((i % W) - x, ((i / W) | 0) - y);
       if (d < bestD) {
         bestD = d;
-        target = i;
+        best = i;
       }
     }
-    if (target === null) return;
-    const tx = target % W;
-    const ty = (target / W) | 0;
-    const a = Math.atan2(ty - y, tx - x);
-    state.tsunami = { x, y, dx: Math.cos(a) * 0.35, dy: Math.sin(a) * 0.35, t: 0, len: 9 };
+    return best === null ? null : { x: best % W, y: (best / W) | 0 };
+  }
+
+  /**
+   * Откуда на эту точку смотрит море: средний вектор на воду вокруг. Волна
+   * идёт по нему — перпендикулярно берегу, а не наискосок к случайной яме.
+   */
+  function seaFacing(x, y) {
+    for (const r of [6, 12, 24]) {
+      let vx = 0;
+      let vy = 0;
+      for (let dy = -r; dy <= r; dy += 1)
+        for (let dx = -r; dx <= r; dx += 1) {
+          if (!inside(x + dx, y + dy) || tileAt(x + dx, y + dy) > T.WATER) continue;
+          const d = Math.hypot(dx, dy) || 1;
+          vx += dx / d;
+          vy += dy / d;
+        }
+      const len = Math.hypot(vx, vy);
+      if (len < 0.5) continue;
+      // Идём от точки по этому направлению, пока не выйдем в открытое море.
+      for (let step = 1; step < 60; step += 1) {
+        const px = Math.round(x + (vx / len) * step);
+        const py = Math.round(y + (vy / len) * step);
+        if (!inside(px, py)) break;
+        if (tileAt(px, py) === T.DEEP) return { x: px, y: py };
+      }
+    }
+    return nearestTile(x, y, (t) => t === T.DEEP) ?? nearestTile(x, y, (t) => t <= T.WATER);
+  }
+
+  function startTsunami(x, y) {
+    let from;
+    let to;
+    if (tileAt(x, y) >= T.SAND) {
+      to = { x, y };
+      from = seaFacing(x, y);
+    } else {
+      from = { x, y };
+      to = nearestTile(x, y, (t) => t >= T.SAND);
+    }
+    if (!from || !to || (from.x === to.x && from.y === to.y)) return;
+    const a = Math.atan2(to.y - from.y, to.x - from.x);
+    const ux = Math.cos(a);
+    const uy = Math.sin(a);
+    // Отступаем в море, чтобы волну было видно на подходе, а не сразу у берега.
+    let sx = from.x;
+    let sy = from.y;
+    for (let b = 0; b < 8; b += 1) {
+      const px = Math.round(sx - ux);
+      const py = Math.round(sy - uy);
+      if (!inside(px, py) || tileAt(px, py) > T.WATER) break;
+      sx -= ux;
+      sy -= uy;
+    }
+    const segs = [];
+    for (let k = -TSUNAMI_HALF; k <= TSUNAMI_HALF; k += 1) {
+      const edge = Math.abs(k) / TSUNAMI_HALF;
+      // Центр сильнее краёв: заходит глубже, края гаснут у самой кромки.
+      segs.push({ k, energy: 4.5 - edge * 2.5, cell: -1, done: 0, hit: false });
+    }
+    state.tsunami = { x: sx, y: sy, ux, uy, dist: 0, t: 0, segs };
     chronicle("tsunami");
   }
+
+  /** Где сейчас кусок фронта: дуга — края отстают от центра. */
+  function tsunamiSeg(ts, seg) {
+    const along = ts.dist - seg.k * seg.k * 0.035;
+    const side = seg.k * TSUNAMI_STEP;
+    return {
+      x: ts.x + ts.ux * along - ts.uy * side,
+      y: ts.y + ts.uy * along + ts.ux * side,
+    };
+  }
+
+  // Во что сколько силы уходит: песок и трава смываются легко, холмы гасят
+  // волну, горы и стены останавливают совсем.
+  const TSUNAMI_COST = {
+    [T.SAND]: 0.8,
+    [T.GRASS]: 1,
+    [T.FOREST]: 1.4,
+    [T.HILL]: 2.5,
+    [T.MOUNTAIN]: Infinity,
+    [T.SNOW]: Infinity,
+  };
+
+  function tsunamiWash(x, y) {
+    const i = idx(x, y);
+    state.trees.delete(i);
+    state.flowers.delete(i);
+    state.farms.delete(i);
+    state.roads.delete(i);
+    const before = state.houses.length;
+    state.houses = state.houses.filter((h) => !(h.x === x && h.y === y));
+    for (const c of [...state.cats]) if (c.x === x && c.y === y) killCat(c, null);
+    if (state.houses.length !== before) puff(x, y, "#c9b48a", 6, "dust");
+    bakeArea(x, y, x, y);
+  }
+
   function tsunamiTick() {
     if (!state.tsunami) {
       if (
@@ -2700,50 +2787,58 @@ export function createWorld({
         state.villages.some((v) => v.shipyard)
       ) {
         const v = state.villages.find((o) => o.shipyard);
-        startTsunami(v.shipyard.x + 6, v.shipyard.y);
+        startTsunami(v.shipyard.x, v.shipyard.y);
       }
       return;
     }
     const ts = state.tsunami;
     ts.t += 1;
-    ts.x += ts.dx;
-    ts.y += ts.dy;
-    const cx = Math.round(ts.x);
-    const cy = Math.round(ts.y);
-    if (!inside(cx, cy) || ts.t > 260) {
-      state.tsunami = null;
-      return;
-    }
-    // Фронт волны: перпендикуляр длиной len; на суше смывает первые две клетки.
-    const nx = -ts.dy / 0.35;
-    const ny = ts.dx / 0.35;
-    let onLand = false;
-    for (let k = -ts.len; k <= ts.len; k += 1) {
-      const x = Math.round(cx + nx * k);
-      const y = Math.round(cy + ny * k);
-      if (!inside(x, y)) continue;
+    ts.dist += TSUNAMI_SPEED;
+    let alive = 0;
+    for (const seg of ts.segs) {
+      if (seg.done) continue;
+      const p = tsunamiSeg(ts, seg);
+      const x = Math.round(p.x);
+      const y = Math.round(p.y);
+      if (!inside(x, y)) {
+        seg.done = ts.t;
+        continue;
+      }
+      alive += 1;
       const i = idx(x, y);
-      if (state.tiles[i] >= T.SAND) {
-        onLand = true;
-        ts.depth = ts.depth || 0;
-        state.trees.delete(i);
-        state.flowers.delete(i);
-        state.farms.delete(i);
-        state.houses = state.houses.filter((h) => !(h.x === x && h.y === y));
-        for (const c of [...state.cats]) if (c.x === x && c.y === y) killCat(c, null);
-        bakeArea(x, y, x, y);
+      if (i === seg.cell) continue;
+      seg.cell = i;
+      const t = state.tiles[i];
+      if (t <= T.WATER) {
+        for (const sh of [...state.ships])
+          if (Math.abs(sh.x - x) <= 1 && Math.abs(sh.y - y) <= 1) {
+            state.ships = state.ships.filter((o) => o !== sh);
+            puff(x, y, "#e8f6ff", 5, "dust");
+          }
+        continue;
       }
-      for (const sh of [...state.ships])
-        if (Math.abs(sh.x - x) <= 1 && Math.abs(sh.y - y) <= 1)
-          state.ships = state.ships.filter((o) => o !== sh);
+      if (!seg.hit) {
+        seg.hit = true;
+        puff(x, y, "#e8f6ff", 4, "dust");
+      }
+      if (state.walls.has(i)) {
+        seg.done = ts.t;
+        continue;
+      }
+      seg.energy -= TSUNAMI_COST[t] ?? 1;
+      if (seg.energy < 0) {
+        seg.done = ts.t;
+        continue;
+      }
+      tsunamiWash(x, y);
     }
-    if (onLand) {
-      ts.land = (ts.land || 0) + 1;
-      if (ts.land > 2) {
-        state.tsunami = null;
-        countPop();
-        persist();
-      }
+    // Все куски выдохлись или ушли за край — волна кончилась; даём им
+    // растечься пеной и убираем.
+    const fading = ts.segs.some((seg) => !seg.done || ts.t - seg.done < 24);
+    if ((!alive && !fading) || ts.t > 400) {
+      state.tsunami = null;
+      countPop();
+      persist();
     }
   }
 
@@ -3933,6 +4028,10 @@ export function createWorld({
         break;
       }
       case "tsunami": {
+        // Одна волна на касание: протяжка пальцем не должна перезапускать её
+        // на каждой клетке пути.
+        if (stroke.tsunami) break;
+        stroke.tsunami = true;
         startTsunami(x, y);
         break;
       }
@@ -4006,6 +4105,7 @@ export function createWorld({
   }
 
   function endStroke() {
+    stroke.tsunami = false;
     if (stroke.changed) {
       bakeArea(stroke.minX - 1, stroke.minY - 1, stroke.maxX + 1, stroke.maxY + 1);
       rescueCats();
@@ -4808,19 +4908,32 @@ export function createWorld({
   }
 
   function drawTsunami(ts) {
-    const nx = -ts.dy / 0.35;
-    const ny = ts.dx / 0.35;
-    for (let k = -ts.len; k <= ts.len; k += 1) {
-      const x = Math.round(ts.x + nx * k);
-      const y = Math.round(ts.y + ny * k);
-      if (!inside(x, y)) continue;
-      ctx.globalAlpha = 0.85;
-      rect(ctx, "#a9d4ea", x * PX, y * PX, PX, PX);
-      rect(ctx, "#ffffff", x * PX + 1, y * PX + 1 + ((state.tick + k) % 3), 6, 1);
-      ctx.globalAlpha = 0.5;
-      rect(ctx, "#3b7fb0", Math.round(x - ts.dx * 3) * PX, Math.round(y - ts.dy * 3) * PX, PX, PX);
-      ctx.globalAlpha = 1;
+    const half = PX / 2;
+    // Два прохода: сначала тело и хвост всех кусков, потом пена поверх, иначе
+    // соседний кусок закрашивал бы гребень и фронт шёл бы пятнами.
+    for (const seg of ts.segs) {
+      const fade = seg.done ? 1 - (ts.t - seg.done) / 24 : 1;
+      if (fade <= 0) continue;
+      const p = tsunamiSeg(ts, seg);
+      const x = p.x * PX;
+      const y = p.y * PX;
+      for (let back = 3; back >= 1; back -= 1) {
+        ctx.globalAlpha = fade * (0.75 - back * 0.18);
+        rect(ctx, "#4f95c6", x - ts.ux * back * PX - half, y - ts.uy * back * PX - half, PX, PX);
+      }
+      ctx.globalAlpha = fade * 0.95;
+      rect(ctx, "#9fd2ee", x - half, y - half, PX, PX);
     }
+    for (const seg of ts.segs) {
+      const fade = seg.done ? 1 - (ts.t - seg.done) / 24 : 1;
+      if (fade <= 0) continue;
+      const p = tsunamiSeg(ts, seg);
+      // Пена на гребне колышется, чтобы фронт не был ровной линейкой.
+      const wob = Math.sin(state.tick * 0.35 + seg.k) * 1.5;
+      ctx.globalAlpha = fade;
+      rect(ctx, "#ffffff", p.x * PX + ts.ux * 2 - 4 + wob, p.y * PX + ts.uy * 2 - 2, 8, 3);
+    }
+    ctx.globalAlpha = 1;
   }
   function drawUfo(u) {
     const bx = Math.round(u.x * PX);
