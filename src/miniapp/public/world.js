@@ -4628,6 +4628,86 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     stop() {
       visible = false;
     },
+    /**
+     * Осмотр клетки касанием, как в WorldBox: кот, поселение или местность.
+     * У кота есть track() — живые координаты для камеры «следить».
+     */
+    inspect(x, y) {
+      let cat = null;
+      let best = 1.6;
+      for (const c of state.cats) {
+        const d = Math.hypot(c.px - x, c.py - y);
+        if (d < best) {
+          best = d;
+          cat = c;
+        }
+      }
+      if (cat) {
+        const c = cat;
+        const village = state.villages[c.v];
+        return {
+          kind: "cat",
+          name: c.name,
+          race: c.race,
+          raceName: RACES[c.race].name,
+          village: village?.name ?? null,
+          job: c.job || null,
+          warrior: Boolean(c.warrior),
+          hero: Boolean(c.hero),
+          king: Boolean(c.king),
+          sick: Boolean(c.sick),
+          hp: c.hp,
+          track: () => ({ x: c.px, y: c.py, alive: state.cats.includes(c) }),
+        };
+      }
+      let vi = -1;
+      best = 3;
+      state.villages.forEach((v, i) => {
+        const d = Math.hypot(v.x - x, v.y - y);
+        if (d < best) {
+          best = d;
+          vi = i;
+        }
+      });
+      if (vi < 0) {
+        const house = state.houses.find((h) => h.x === x && h.y === y);
+        if (house && house.v !== undefined) vi = house.v;
+      }
+      if (vi >= 0 && state.villages[vi]) {
+        const v = state.villages[vi];
+        return {
+          kind: "village",
+          name: v.name,
+          founder: v.founder || null,
+          race: v.race,
+          raceName: RACES[v.race].name,
+          capital: state.homes[v.race] === v,
+          king: state.homes[v.race] === v ? state.kings[v.race]?.name ?? null : null,
+          pop: state.cats.filter((c) => c.v === vi).length,
+          houses: state.houses.filter((h) => h.v === vi).length,
+          wood: v.wood || 0,
+          stone: v.stone || 0,
+          food: v.food || 0,
+          gold: v.gold || 0,
+          unrest: v.unrest || 0,
+          faith: state.faith[v.race],
+          era: ERAS[state.era[v.race]].name,
+          temple: Boolean(v.temple),
+          shipyard: Boolean(v.shipyard),
+          atWar: RACES.some((_, o) => atWar(v.race, o)),
+          x: v.x,
+          y: v.y,
+        };
+      }
+      if (!inside(x, y)) return null;
+      const t = tileAt(x, y);
+      const names = ["Глубокое море", "Мелководье", "Песок", "Луга", "Лес", "Холмы", "Горы", "Снега"];
+      return {
+        kind: "tile",
+        name: state.trees.has(idx(x, y)) && t !== T.FOREST ? "Роща" : names[t] ?? "Земля",
+        owner: state.terr && state.terr[idx(x, y)] !== 255 ? RACES[state.terr[idx(x, y)]]?.name ?? null : null,
+      };
+    },
     /** Экранные координаты → клетка. */
     cellAt(clientX, clientY) {
       const r = canvas.getBoundingClientRect();

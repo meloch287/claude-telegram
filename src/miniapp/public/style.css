@@ -1,63 +1,104 @@
 /*
-  Mini App живёт внутри Telegram, но цвета Telegram задаёт клиент и они бывают
-  какими угодно. Поэтому фон страницы берём из темы, а внутри карточек держим
-  собственные пары «фон + текст» с проверенным контрастом — иначе на чужой теме
-  текст может оказаться нечитаемым, и мы об этом не узнаем.
+  Мини-апп живёт внутри Telegram, поэтому цвета берём из темы клиента: фон,
+  карточки, текст, подсказки и разделители. Так страница выглядит продолжением
+  Telegram, а не чужим сайтом внутри него. Пары «фон + текст» Telegram задаёт
+  сам и проверяет на контраст; у нас — только фирменная глина Claude как акцент.
+
+  Вне Telegram (демо в браузере) работают запасные значения: светлая и тёмная
+  схема ниже. Схему ставит app.js в data-scheme — из Telegram, а вне его из
+  prefers-color-scheme.
 */
 
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
 
-  /* Фирменные цвета Claude: крем, слейт, глина. */
-  --surface: #faf9f5;
-  --surface-sunken: #f0eee6;
-  --ink: #141413;
-  --ink-muted: #5c574e;
-  --line: #e5ded0;
+  --fb-bg: #f1eee7;
+  --fb-card: #fffdf8;
+  --fb-text: #191816;
+  --fb-hint: #8a8378;
+  --fb-sep: rgb(25 24 22 / 8%);
 
-  /*
-    Фирменная глина #D97757 даёт на креме всего 3.0:1 — для текста мало.
-    Поэтому иллюстрации кота рисуются чистой глиной, а текст и полосы берут
-    затемнённый вариант того же тона, проходящий 4.5:1.
-  */
-  --accent: #b0512e;
-  --accent-ink: #faf9f5;
-  --accent-soft: #f5e3d9;
+  /* Глина на креме даёт 3.0:1 — для текста темнее, для графики как есть. */
+  --clay: #d97757;
+  --clay-ink: #b0512e;
+  --clay-soft: #f6e4da;
+  --on-clay: #fffaf5;
 
-  --locked-bg: #eae4da;
-  --locked-ink: #5d564e;
-
-  --ok: #1f6b45;
-  --focus: #1a4fd6;
-
-  --radius: 14px;
-  --radius-lg: 20px;
-  --gap: 16px;
-
-  --page-bg: var(--tg-theme-bg-color, #f6f1e8);
-  --page-ink: var(--tg-theme-text-color, var(--ink));
+  --good: #2f8f5b;
+  --danger: #d6453d;
+  --shadow: 0 1px 2px rgb(25 20 10 / 5%), 0 8px 24px rgb(25 20 10 / 6%);
 }
 
-@media (prefers-color-scheme: dark) {
+:root[data-scheme="dark"] {
+  color-scheme: dark;
+  --thumb: color-mix(in srgb, var(--text) 20%, var(--card));
+
+  --fb-bg: #121110;
+  --fb-card: #1e1d1b;
+  --fb-text: #f2efe8;
+  --fb-hint: #9b958a;
+  --fb-sep: rgb(242 239 232 / 9%);
+
+  --clay-ink: #ec9a78;
+  --clay-soft: #3a2a22;
+  --on-clay: #1a120c;
+  --good: #5fd08f;
+  --danger: #ff7a6e;
+  --shadow: 0 1px 2px rgb(0 0 0 / 30%);
+}
+
+:root {
+  --bg: var(--tg-theme-secondary-bg-color, var(--fb-bg));
+  --card: var(--tg-theme-section-bg-color, var(--tg-theme-bg-color, var(--fb-card)));
+  --text: var(--tg-theme-text-color, var(--fb-text));
+  --hint: var(--tg-theme-hint-color, var(--fb-hint));
+  --sub: var(--tg-theme-subtitle-text-color, var(--hint));
+  --sep: var(--tg-theme-section-separator-color, var(--fb-sep));
+  --fill: color-mix(in srgb, var(--text) 6%, transparent);
+  --fill-strong: color-mix(in srgb, var(--text) 10%, transparent);
+
+  /* Ползунок переключателя: в светлой теме — карточка, в тёмной светлее
+     дорожки, как в iOS. Иначе выбранный пункт выглядит «вдавленным». */
+  --thumb: var(--card);
+
+  --radius: 22px;
+  --radius-md: 16px;
+  --radius-sm: 12px;
+  --pad: 16px;
+  --gap: 12px;
+
+  --safe-top: calc(var(--tg-safe-area-inset-top, 0px) + var(--tg-content-safe-area-inset-top, 0px));
+  --safe-bottom: max(env(safe-area-inset-bottom), var(--tg-safe-area-inset-bottom, 0px));
+
+  /* Быстро стартует и мягко садится — так ощущается отклик под пальцем. */
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  /* Пружина с лёгким перелётом; старые движки возьмут кривую выше. */
+  --spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+  --spring: linear(
+    0,
+    0.009,
+    0.035 2.1%,
+    0.141 4.4%,
+    0.723 12.9%,
+    0.938 16.7%,
+    1.017 19.4%,
+    1.067,
+    1.099 24.3%,
+    1.108 26%,
+    1.1 28.2%,
+    1.074 31.4%,
+    0.994 42.4%,
+    0.974 49.6%,
+    0.998 71.2%,
+    1
+  );
+}
+
+/* Где color-mix не умеют — плоские подложки. */
+@supports not (color: color-mix(in srgb, red 50%, blue)) {
   :root {
-    --surface: #262521;
-    --surface-sunken: #1a1917;
-    --ink: #f0eee6;
-    --ink-muted: #b5afa2;
-    --line: #3b3933;
-
-    /* На тёмном глина читается как есть, осветлять её не нужно. */
-    --accent: #e89572;
-    --accent-ink: #141413;
-    --accent-soft: #3a2b23;
-
-    --locked-bg: #302e29;
-    --locked-ink: #b5afa2;
-
-    --ok: #6cd39c;
-    --focus: #8fb2ff;
-
-    --page-bg: var(--tg-theme-bg-color, #17130f);
+    --fill: rgb(128 128 128 / 10%);
+    --fill-strong: rgb(128 128 128 / 16%);
   }
 }
 
@@ -65,15 +106,39 @@
   box-sizing: border-box;
 }
 
+/* hidden сильнее любого display ниже: иначе скрытая кнопка или подсказка
+   вылезает пустой плашкой. */
+[hidden] {
+  display: none !important;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+  background: var(--bg);
+}
+
 body {
   margin: 0;
-  padding: 0 var(--gap) calc(40px + env(safe-area-inset-bottom));
-  background: var(--page-bg);
-  color: var(--page-ink);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  min-height: 100vh;
+  padding: var(--safe-top) var(--pad) calc(32px + var(--safe-bottom));
+  background: var(--bg);
+  color: var(--text);
+  font-family:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue",
+    sans-serif;
   font-size: 16px;
-  line-height: 1.5;
+  line-height: 1.45;
   -webkit-font-smoothing: antialiased;
+  overscroll-behavior-y: none;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: manipulation;
 }
 
 .visually-hidden {
@@ -93,11 +158,11 @@ body {
   position: absolute;
   left: -9999px;
   top: 0;
-  z-index: 10;
+  z-index: 50;
   padding: 12px 16px;
-  background: var(--accent);
-  color: var(--accent-ink);
-  border-radius: 0 0 var(--radius) 0;
+  background: var(--clay);
+  color: var(--on-clay);
+  border-radius: 0 0 var(--radius-sm) 0;
   text-decoration: none;
 }
 
@@ -105,26 +170,135 @@ body {
   left: 0;
 }
 
-/*
-  Двойное кольцо, а не одноцветное: фон страницы задаёт тема Telegram и может
-  оказаться любым. Из пары «тёмное + светлое» хотя бы одно всегда даёт нужные
-  3:1 — одноцветное кольцо на неудачной теме может стать невидимым.
-*/
+/* Двойное кольцо: хотя бы одна его половина видна на любом фоне темы. */
 :focus-visible {
-  outline: 2px solid #16161a;
+  outline: 2px solid var(--clay-ink);
   outline-offset: 2px;
-  box-shadow: 0 0 0 4px #ffffff;
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
-/* Фокус на <main> появляется только программно, после skip-ссылки. */
-main:focus {
+main:focus,
+.view:focus {
   outline: none;
 }
 
-main:focus-visible {
-  outline: 2px solid #16161a;
-  box-shadow: 0 0 0 4px #ffffff;
+/* ── Общие детали ──────────────────────────────────────────────────────── */
+
+.card {
+  background: var(--card);
+  border-radius: var(--radius);
+  padding: 18px;
+  box-shadow: var(--shadow);
+}
+
+.card--flush {
+  padding: 0;
+  overflow: hidden;
+}
+
+.view > * + * {
+  margin-top: 28px;
+}
+
+.section-head,
+.card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 4px 10px;
+}
+
+.card-head {
+  margin: 0 0 4px;
+}
+
+.section-title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.section-count,
+.card-head-note {
+  color: var(--hint);
+  font-size: 0.875rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.section-note {
+  margin: -4px 4px 12px;
+  color: var(--hint);
+  font-size: 0.875rem;
+}
+
+.card .section-note {
+  margin: 0 0 12px;
+}
+
+.section-note:empty {
+  display: none;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--fill);
+  color: var(--sub);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.chip--accent {
+  background: var(--clay-soft);
+  color: var(--clay-ink);
+}
+
+.chip:empty {
+  display: none;
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 50px;
+  padding: 12px 22px;
+  background: var(--clay);
+  color: var(--on-clay);
+  border: none;
+  border-radius: var(--radius-md);
+  font-weight: 650;
+  cursor: pointer;
+  transition:
+    transform 160ms var(--ease),
+    opacity 160ms var(--ease);
+}
+
+.button:active {
+  transform: scale(0.97);
+  opacity: 0.9;
+}
+
+.button--tonal {
+  background: var(--fill);
+  color: var(--text);
+}
+
+.button--danger {
+  background: transparent;
+  color: var(--danger);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--danger) 45%, transparent);
 }
 
 .share-row {
@@ -132,115 +306,215 @@ main:focus-visible {
   text-align: center;
 }
 
-.button {
-  min-height: 48px;
-  padding: 12px 24px;
-  background: var(--accent);
-  color: var(--accent-ink);
+/* ── Появление ──────────────────────────────────────────────────────────────
+   Только transform и opacity: их двигает видеокарта, без пересчёта раскладки.
+   Класс вешает JS, поэтому без JS ничего не прячется. */
+
+.js-reveal .reveal {
+  opacity: 0;
+  transform: translateY(14px);
+  transition:
+    opacity 480ms var(--ease),
+    transform 620ms var(--ease);
+}
+
+.js-reveal .reveal.is-in {
+  opacity: 1;
+  transform: none;
+}
+
+/* ── Верхняя панель и переключатель разделов ────────────────────────────── */
+
+/* На вкладке города под панелью едет живая карта — размытие над ней стоило
+   бы кадра каждый раз, поэтому там панель плотная. */
+.on-city .topbar {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background: var(--bg);
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  margin: 0 calc(-1 * var(--pad));
+  padding: 10px var(--pad) 12px;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  -webkit-backdrop-filter: saturate(1.6) blur(18px);
+  backdrop-filter: saturate(1.6) blur(18px);
+}
+
+.segmented {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 3px;
+  background: var(--fill-strong);
+  border-radius: 13px;
+}
+
+/* Подложка выбранного пункта ездит, а не прыгает: видно, откуда и куда. */
+.segmented-thumb {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc(50% - 3px);
+  border-radius: 10px;
+  background: var(--thumb);
+  box-shadow:
+    0 1px 3px rgb(0 0 0 / 12%),
+    0 3px 8px rgb(0 0 0 / 6%);
+  transition: transform 380ms var(--spring);
+}
+
+.segmented[data-active="1"] .segmented-thumb {
+  transform: translateX(100%);
+}
+
+.segmented-item {
+  position: relative;
+  z-index: 1;
+  min-height: 36px;
+  padding: 6px 12px;
+  background: none;
   border: none;
-  border-radius: var(--radius);
-  font: inherit;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-/* ── Шапка ─────────────────────────────────────────────────────────────── */
-
-.page-header {
-  padding: 24px 0 8px;
-}
-
-h1 {
-  margin: 0;
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 1.75rem;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-
-h2 {
-  margin: 32px 0 12px;
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 1.25rem;
-  font-weight: 600;
-}
-
-.plan {
-  margin: 4px 0 0;
-  color: var(--tg-theme-hint-color, var(--ink-muted));
+  border-radius: 10px;
+  color: var(--hint);
   font-size: 0.9375rem;
+  font-weight: 650;
+  cursor: pointer;
+  transition: color 200ms var(--ease);
 }
 
-.section-note {
-  margin: 0 0 12px;
-  color: var(--tg-theme-hint-color, var(--ink-muted));
-  font-size: 0.875rem;
+.segmented-item[aria-selected="true"] {
+  color: var(--text);
+}
+
+/* Смена раздела: новый въезжает с той стороны, куда нажали. */
+.view.is-entering {
+  animation: view-in 320ms var(--ease) both;
+}
+
+.view.is-entering[data-from="left"] {
+  animation-name: view-in-left;
+}
+
+@keyframes view-in {
+  from {
+    opacity: 0;
+    transform: translateX(18px);
+  }
+}
+
+@keyframes view-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-18px);
+  }
 }
 
 /* ── Герой ─────────────────────────────────────────────────────────────── */
 
 .hero {
-  margin-top: 12px;
-  padding: 24px 20px 20px;
-  background: var(--surface);
-  color: var(--ink);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
+  position: relative;
+  padding: 22px 20px 20px;
   text-align: center;
+  overflow: hidden;
 }
 
-.hero-art {
-  display: flex;
-  justify-content: center;
+.hero-stage {
+  position: relative;
+  width: 176px;
+  height: 176px;
+  margin: 0 auto;
+  display: grid;
+  place-items: center;
 }
 
-.cat-art svg {
-  display: block;
+/* Мягкое сияние глины за котом. Нарисовано градиентом, без фильтров. */
+.hero-glow {
+  position: absolute;
+  inset: -40px;
+  background: radial-gradient(
+    closest-side,
+    color-mix(in srgb, var(--clay) 26%, transparent),
+    transparent 72%
+  );
+  pointer-events: none;
+}
+
+.hero-ring {
+  position: absolute;
+  inset: 0;
   width: 100%;
-  height: auto;
+  height: 100%;
+  transform: rotate(-90deg);
 }
 
-.cat-art--large {
-  width: 148px;
+.hero-ring circle {
+  fill: none;
+  stroke-width: 5;
+  stroke-linecap: round;
 }
 
-.hero-level {
-  margin: 12px 0 0;
-  font-size: 0.8125rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--accent);
+.hero-ring-track {
+  stroke: var(--fill-strong);
+}
+
+.hero-ring-fill {
+  stroke: var(--clay);
+  stroke-dasharray: 339.3;
+  stroke-dashoffset: 339.3;
+  transition: stroke-dashoffset 1100ms var(--ease) 150ms;
+}
+
+.hero-cat {
+  position: relative;
+  width: 118px;
+}
+
+.hero-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 8px;
 }
 
 .hero-name {
-  margin: 4px 0 0;
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 1.5rem;
-  font-weight: 600;
-  color: var(--ink);
+  margin: 10px 0 0;
+  font-family: "New York", "Iowan Old Style", Georgia, "Times New Roman", serif;
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.15;
 }
 
 .hero-title {
+  text-wrap: balance;
   margin: 4px 0 0;
-  color: var(--ink-muted);
+  color: var(--sub);
   font-size: 0.9375rem;
 }
 
 .hero-quote {
-  margin: 16px 0 0;
-  padding: 12px 16px;
-  background: var(--accent-soft);
-  border-radius: var(--radius);
-  color: var(--ink);
+  position: relative;
+  text-wrap: balance;
+  margin: 16px auto 0;
+  max-width: 30ch;
+  color: var(--text);
+  font-family: "New York", "Iowan Old Style", Georgia, serif;
   font-style: italic;
-  font-size: 0.9375rem;
+  font-size: 1rem;
+  line-height: 1.4;
 }
-
-/* ── Прогресс ──────────────────────────────────────────────────────────── */
 
 .progress {
   margin-top: 20px;
+  padding: 14px;
+  background: var(--fill);
+  border-radius: var(--radius-md);
   text-align: left;
 }
 
@@ -249,431 +523,1537 @@ h2 {
   justify-content: space-between;
   gap: 8px;
   font-size: 0.875rem;
-  color: var(--ink-muted);
+  font-weight: 600;
 }
 
 .progress-percent {
+  color: var(--clay-ink);
   font-variant-numeric: tabular-nums;
-  font-weight: 600;
-  color: var(--ink);
 }
 
 .progress-track {
-  margin-top: 8px;
-  height: 12px;
-  background: var(--surface-sunken);
-  border: 1px solid var(--line);
+  margin-top: 10px;
+  height: 8px;
+  background: var(--fill-strong);
   border-radius: 999px;
   overflow: hidden;
 }
 
+/* Ширина не анимируется: полоса растёт через scaleX, это дешевле. */
 .progress-fill {
   height: 100%;
-  width: 0;
-  background: var(--accent);
-  border-radius: 999px;
-  transition: width 600ms ease;
+  width: 100%;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--clay) 75%, #f2b48f), var(--clay));
+  border-radius: inherit;
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 1100ms var(--ease) 150ms;
 }
 
 .progress-caption {
   margin: 8px 0 0;
-  font-size: 0.875rem;
-  color: var(--ink-muted);
-}
-
-/* ── Лимиты подписки ───────────────────────────────────────────────────── */
-
-/*
-  Статусы окрашены тремя парами токенов. Текст бейджа — 12px/600, это не
-  «крупный текст» по WCAG, поэтому нужны полные 4.5:1, а не облегчённые 3:1.
-  Заливка полосы — графика, ей достаточно 3:1 к подложке.
-
-  Зелёный и малиновый плохо различимы при дальтонизме, поэтому цвет здесь
-  вторичен: смысл несут слово и три разных по силуэту значка ✓ ⚠️ 🚫.
-*/
-:root {
-  --ok-soft: #daf1e6;
-  --warn: #8a5a00;
-  --warn-soft: #f4ebd7;
-  --danger: #981b30;
-  --danger-soft: #f5dbe0;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --ok-soft: #22352b;
-    --warn: #e8b339;
-    --warn-soft: #393222;
-    --danger: #fb6a82;
-    --danger-soft: #3e2327;
-  }
-}
-
-.limits {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.limit {
-  padding: 14px;
-  background: var(--surface);
-  color: var(--ink);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-}
-
-.limit-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 8px;
-}
-
-.limit-name {
-  font-weight: 600;
-  font-size: 0.9375rem;
-}
-
-.limit-percent {
+  color: var(--hint);
+  font-size: 0.8125rem;
   font-variant-numeric: tabular-nums;
-  font-weight: 600;
 }
 
-.limit .progress-track {
-  margin-top: 8px;
-}
+/* ── Статистика: бенто ─────────────────────────────────────────────────── */
 
-.progress-fill--allowed {
-  background: var(--ok);
-}
-
-.progress-fill--allowed_warning {
-  background: var(--warn);
-}
-
-.progress-fill--rejected {
-  background: var(--danger);
-}
-
-.limit-foot {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin: 8px 0 0;
-  font-size: 0.875rem;
-  color: var(--ink-muted);
-}
-
-.badge--allowed {
-  background: var(--ok-soft);
-  color: var(--ok);
-  border: 1px solid currentColor;
-}
-
-.badge--allowed_warning {
-  background: var(--warn-soft);
-  color: var(--warn);
-  border: 1px solid currentColor;
-}
-
-.badge--rejected {
-  background: var(--danger-soft);
-  color: var(--danger);
-  border: 1px solid currentColor;
-}
-
-/* ── Статистика ────────────────────────────────────────────────────────── */
-
-.stats {
+.bento {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 10px;
+  gap: var(--gap);
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
 .stat {
-  padding: 14px;
-  background: var(--surface);
-  color: var(--ink);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 96px;
+  padding: 14px 14px 13px;
+  background: var(--card);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.stat--wide {
+  grid-column: 1 / -1;
+  min-height: 0;
+  flex-direction: row;
+  align-items: center;
+  gap: 14px;
+}
+
+.stat-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: var(--fill);
+  font-size: 1.05rem;
+  line-height: 1;
+}
+
+.stat--wide .stat-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  background: var(--clay-soft);
+}
+
+.stat-icon svg {
+  display: block;
+}
+
+.stat-body {
+  display: grid;
+  gap: 1px;
+  margin-top: 10px;
+  min-width: 0;
+}
+
+.stat--wide .stat-body {
+  margin: 0;
+  flex: 1;
 }
 
 .stat-value {
-  display: block;
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 1.375rem;
-  font-weight: 600;
+  font-size: 1.5rem;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
   font-variant-numeric: tabular-nums;
-  line-height: 1.2;
+}
+
+.stat--wide .stat-value {
+  font-size: 1.75rem;
 }
 
 .stat-label {
-  display: block;
-  margin-top: 2px;
+  color: var(--hint);
   font-size: 0.8125rem;
-  color: var(--ink-muted);
+  font-weight: 500;
 }
 
-/* ── Галерея котов ─────────────────────────────────────────────────────── */
-
-.cat-grid {
+.stat-side {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  justify-items: end;
+  gap: 1px;
+  text-align: right;
+}
+
+.stat-side b {
+  font-size: 1.0625rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--good);
+}
+
+.stat-side span {
+  color: var(--hint);
+  font-size: 0.75rem;
+}
+
+/* ── График ────────────────────────────────────────────────────────────── */
+
+.chart {
+  position: relative;
+  margin-top: 26px;
+}
+
+.chart svg {
+  display: block;
+  width: 100%;
+  height: 120px;
+  overflow: visible;
+  touch-action: pan-y;
+}
+
+.chart .bar {
+  fill: color-mix(in srgb, var(--clay) 42%, var(--card));
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  transition: fill 200ms var(--ease);
+}
+
+.chart .bar--today {
+  fill: var(--clay);
+}
+
+.chart .bar--on {
+  fill: var(--clay-ink);
+}
+
+.chart .bar-empty {
+  fill: var(--fill-strong);
+}
+
+.chart.is-grown .bar {
+  animation: bar-grow 700ms var(--spring) both;
+  animation-delay: calc(var(--i) * 28ms);
+}
+
+@keyframes bar-grow {
+  from {
+    transform: scaleY(0);
+  }
+}
+
+.chart .avg-line {
+  stroke: var(--hint);
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+  opacity: 0.6;
+}
+
+.chart .hit {
+  fill: transparent;
+  cursor: pointer;
+}
+
+.chart-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  color: var(--hint);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.chart-tip {
+  position: absolute;
+  top: -8px;
+  left: 0;
+  z-index: 2;
+  display: grid;
+  gap: 1px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: var(--text);
+  color: var(--card);
+  font-size: 0.75rem;
+  line-height: 1.3;
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translate(-50%, -100%);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 18%);
+}
+
+.chart-tip b {
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Списки (кооп) ─────────────────────────────────────────────────────── */
+
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 44px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 64px;
+  padding: 10px 16px;
+  position: relative;
+}
+
+/* Разделитель от текста, а не от края: как в настройках Telegram. */
+.row + .row::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 72px;
+  right: 0;
+  height: 1px;
+  background: var(--sep);
+}
+
+.row-art {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 13px;
+  background: var(--fill);
+}
+
+.row-art svg {
+  display: block;
+}
+
+.row-body {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.row-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.row-sub {
+  color: var(--hint);
+  font-size: 0.8125rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-value {
+  display: grid;
+  justify-items: end;
+  font-variant-numeric: tabular-nums;
+}
+
+.row-value b {
+  font-weight: 700;
+}
+
+.row-value span {
+  color: var(--hint);
+  font-size: 0.75rem;
+}
+
+.tag {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--clay-soft);
+  color: var(--clay-ink);
+  font-size: 0.6875rem;
+  font-weight: 700;
+}
+
+.tag--muted {
+  background: var(--fill);
+  color: var(--hint);
+}
+
+/* ── Коты: карусель ────────────────────────────────────────────────────────
+   Десять котов сеткой занимали экран на три прокрутки. Лента листается
+   пальцем вбок и защёлкивается на карточке, текущий кот — по центру. */
+
+.rail {
+  display: flex;
+  gap: 10px;
+  margin: 0 calc(-1 * var(--pad));
+  padding: 4px var(--pad) 10px;
+  list-style: none;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scroll-padding: 0 var(--pad);
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+}
+
+.rail::-webkit-scrollbar {
+  display: none;
+}
+
+.cat-card {
+  flex: 0 0 136px;
+  scroll-snap-align: start;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 14px 10px 12px;
+  background: var(--card);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+
+.cat-card--current {
+  box-shadow:
+    inset 0 0 0 2px var(--clay),
+    var(--shadow);
+}
+
+.cat-card .cat-art {
+  width: 72px;
+  margin-bottom: 4px;
+}
+
+.cat-card--locked .cat-art {
+  filter: grayscale(1) brightness(0.8);
+  opacity: 0.35;
+}
+
+.cat-card-level {
+  color: var(--clay-ink);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.cat-card--locked .cat-card-level {
+  color: var(--hint);
+}
+
+.cat-card-name {
+  font-size: 0.875rem;
+  font-weight: 650;
+  line-height: 1.2;
+  min-height: 2.4em;
+  display: grid;
+  place-items: center;
+}
+
+.cat-card-threshold {
+  color: var(--hint);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Коты за краем ленты стоят: десять одновременных анимаций садят батарею. */
+.cat-card:not(.is-visible) .cat-sprite,
+.cat-card:not(.is-visible) .cat-sprite * {
+  animation-play-state: paused;
+}
+
+/* ── Достижения: плитки ────────────────────────────────────────────────── */
+
+.badges {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
   gap: 10px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.cat-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  min-height: 44px;
-  padding: 14px 10px;
-  background: var(--surface);
-  color: var(--ink);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  text-align: center;
-}
-
-.cat-card--locked {
-  background: var(--locked-bg);
-  color: var(--locked-ink);
-  border-style: dashed;
-}
-
-.cat-card .cat-art {
-  width: 76px;
-}
-
-/*
-  Обесцвечивание закрытых котов — украшение поверх подписи «🔒 Закрыт»,
-  а не способ передать смысл: текст остаётся полноконтрастным.
-*/
-.cat-card--locked .cat-art {
-  filter: grayscale(1);
-  opacity: 0.5;
-}
-
-.cat-card-level {
-  font-size: 0.75rem;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--accent);
-}
-
-.cat-card--locked .cat-card-level {
-  color: var(--locked-ink);
-}
-
-.cat-card-name {
-  font-weight: 600;
-  font-size: 0.9375rem;
-  line-height: 1.25;
-}
-
-.cat-card-threshold {
-  font-size: 0.8125rem;
-  color: var(--ink-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-.cat-card--locked .cat-card-threshold {
-  color: var(--locked-ink);
-}
-
-/* Статус словом, а не только цветом и затемнением: цвет читают не все. */
 .badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 0.75rem;
-  font-weight: 600;
-}
-
-.badge--open {
-  background: var(--accent-soft);
-  color: var(--ink);
-}
-
-.badge--locked {
-  background: transparent;
-  color: var(--locked-ink);
-  border: 1px solid currentColor;
-}
-
-/* ── Достижения ────────────────────────────────────────────────────────── */
-
-.achievements {
-  display: flex;
-  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  display: grid;
+  justify-items: center;
+  align-content: start;
   gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
+  padding: 14px 6px 12px;
+  background: var(--card);
+  border: none;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow);
+  text-align: center;
+  cursor: pointer;
+  transition: transform 160ms var(--ease);
 }
 
-.achievement {
-  display: flex;
-  gap: 12px;
-  align-items: flex-start;
-  min-height: 44px;
-  padding: 12px 14px;
-  background: var(--surface);
-  color: var(--ink);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
+.badge:active {
+  transform: scale(0.96);
 }
 
-.achievement--locked {
-  background: var(--locked-bg);
-  color: var(--locked-ink);
-  border-style: dashed;
-}
-
-.achievement-icon {
-  flex: none;
-  width: 32px;
-  height: 32px;
+.badge-icon {
+  position: relative;
   display: grid;
   place-items: center;
-  font-size: 1.25rem;
-  background: var(--surface-sunken);
-  border-radius: 8px;
+  width: 48px;
+  height: 48px;
+  border-radius: 15px;
+  background: var(--clay-soft);
 }
 
-.achievement--locked .achievement-icon {
-  background: transparent;
-  border: 1px dashed currentColor;
+.badge-icon svg {
+  display: block;
 }
 
-.achievement-name {
-  font-weight: 600;
-  font-size: 0.9375rem;
+.badge-name {
+  font-size: 0.75rem;
+  font-weight: 650;
+  line-height: 1.2;
 }
 
-.achievement-desc {
-  margin: 2px 0 0;
-  font-size: 0.875rem;
-  color: var(--ink-muted);
+:root[data-scheme="dark"] .badge-icon {
+  background: color-mix(in srgb, var(--clay) 18%, #45423d);
 }
 
-.achievement--locked .achievement-desc {
-  color: var(--locked-ink);
+.badge--locked .badge-icon,
+:root[data-scheme="dark"] .badge--locked .badge-icon {
+  background: var(--fill);
 }
 
-/* ── Состояния ─────────────────────────────────────────────────────────── */
-
-.state {
-  padding: 40px 0;
-  text-align: center;
-  color: var(--tg-theme-hint-color, var(--ink-muted));
+.badge--locked .badge-icon svg {
+  opacity: 0.3;
+  filter: grayscale(1);
 }
 
-.state--error {
-  color: var(--accent);
-  font-weight: 600;
+.badge--locked .badge-name {
+  color: var(--hint);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  * {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+.badge-lock {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--card);
+  box-shadow: 0 0 0 2px var(--card);
+  font-size: 0.6875rem;
+}
+
+/* ── Состояния: загрузка и ошибка ──────────────────────────────────────── */
+
+.skeleton {
+  display: grid;
+  gap: var(--gap);
+  padding-top: 10px;
+}
+
+.sk {
+  position: relative;
+  overflow: hidden;
+  background: var(--card);
+  border-radius: var(--radius);
+}
+
+/* Блик едет через transform — анимация не трогает раскладку. */
+.sk::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 20%, var(--fill-strong) 50%, transparent 80%);
+  transform: translateX(-100%);
+  animation: shimmer 1.3s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  to {
+    transform: translateX(100%);
   }
 }
 
-/* ── График расхода ───────────────────────────────────────────────────────
-   Столбцы носят фирменный акцент: 4.91:1 к поверхности в светлой теме и
-   6.55:1 в тёмной при норме 3:1 для графики. Тёмная тема — отдельный шаг той
-   же шкалы, а не автоматическая инверсия.
-
-   Дни простоя рисуются короткой засечкой нейтральным цветом: обнулённый
-   столбец нулевой высоты выглядел бы как пропуск в данных, а это разные вещи. */
-.chart {
-  position: relative;
-  margin-top: 4px;
+.sk-tabs {
+  height: 42px;
+  border-radius: 13px;
 }
 
-.chart svg {
+.sk-hero {
+  height: 360px;
+}
+
+.sk-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--gap);
+}
+
+.sk-stat {
+  height: 96px;
+  border-radius: var(--radius-md);
+}
+
+.sk-block {
+  height: 180px;
+}
+
+.skeleton[hidden] {
+  display: none;
+}
+
+.state {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 72px 12px 24px;
+  text-align: center;
+}
+
+.state[hidden] {
+  display: none;
+}
+
+.state-art {
+  width: 96px;
+  margin-bottom: 8px;
+}
+
+.state-title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.state-text {
+  margin: 0 0 12px;
+  max-width: 32ch;
+  color: var(--hint);
+}
+
+/* ── Тост ──────────────────────────────────────────────────────────────── */
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(24px + var(--safe-bottom));
+  z-index: 60;
+  margin: 0;
+  max-width: calc(100% - 32px);
+  padding: 11px 18px;
+  border-radius: 999px;
+  background: var(--text);
+  color: var(--card);
+  font-size: 0.875rem;
+  font-weight: 600;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 22%);
+  transform: translateX(-50%);
+  animation: toast-in 360ms var(--spring) both;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 16px) scale(0.96);
+  }
+}
+
+/* ── Мой город ──────────────────────────────────────────────────────────────
+   Игровой экран остаётся тёмным в любой теме: так карта читается лучше, и
+   рамка отделяет «игру» от «профиля». Вместо дерева и бронзы — спокойное
+   стекло: плашки поверх карты, док с инструментами снизу. */
+
+.wb {
+  --wb-bg: #111317;
+  --wb-panel: #181b21;
+  --wb-raised: #22262e;
+  --wb-line: rgb(255 255 255 / 8%);
+  --wb-ink: #f3f1ec;
+  --wb-muted: #9aa0ab;
+  --wb-hot: var(--clay);
+  /* Плашки поверх карты без размытия: карта перерисовывается 30 раз в
+     секунду, и blur под ними пересчитывался бы каждый кадр. */
+  --wb-glass: rgb(14 16 20 / 80%);
+
+  position: relative;
+  background: var(--wb-bg);
+  color: var(--wb-ink);
+  border-radius: var(--radius);
+  box-shadow:
+    0 1px 0 rgb(255 255 255 / 4%) inset,
+    0 18px 40px rgb(0 0 0 / 28%);
+  overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.wb-body {
+  position: relative;
+}
+
+/* ── Камера ─────────────────────────────────────────────────────────────────
+   Рамка неподвижна и режет всё лишнее. Мир внутри — сцена, которую двигает
+   transform: это работа видеокарты, без пересчёта раскладки. Высоту рамки
+   ставит JS под пропорции карты, чтобы на 1× мир входил целиком. */
+.wb-viewport {
+  position: relative;
+  overflow: hidden;
+  height: 320px;
+  background: radial-gradient(circle at 50% 50%, rgb(40 46 58 / 55%), transparent 70%), #07080b;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.wb--hand .wb-viewport {
+  cursor: grab;
+}
+
+.wb--hand .wb-viewport.is-moving {
+  cursor: grabbing;
+}
+
+.wb-stage {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  /* Граница мира: чёрная линия и тень в пустоту — видно, где мир кончается. */
+  box-shadow:
+    0 0 0 2px #000,
+    0 0 0 3px rgb(255 255 255 / 10%),
+    0 10px 40px rgb(0 0 0 / 60%);
+}
+
+.wb-stage--anim {
+  transition: transform 280ms var(--ease);
+}
+
+/* Пока палец двигает мир, слой держим на видеокарте; отпустили — браузер
+   перерисует чётко на новом масштабе. */
+.is-moving .wb-stage {
+  will-change: transform;
+}
+
+.wb-map {
   display: block;
   width: 100%;
-  height: 88px;
-  overflow: visible;
+  height: 100%;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
 }
 
-.chart .bar {
-  fill: var(--accent);
+/* Толчок рамки от стихии: коротко и затухая, чтобы не мутило. */
+.wb-body.is-shaking .wb-viewport {
+  animation: wb-shake 420ms var(--ease);
 }
 
-.chart .bar-empty {
-  fill: var(--line);
+@keyframes wb-shake {
+  15% {
+    transform: translate(calc(var(--shake) * -1), calc(var(--shake) * 0.5));
+  }
+  35% {
+    transform: translate(var(--shake), calc(var(--shake) * -0.4));
+  }
+  55% {
+    transform: translate(calc(var(--shake) * -0.5), calc(var(--shake) * 0.3));
+  }
+  75% {
+    transform: translate(calc(var(--shake) * 0.25), 0);
+  }
 }
 
-/* Базовая линия намеренно бледная: она держит взгляд, но не спорит с данными. */
-.chart .baseline {
-  stroke: var(--line);
-  stroke-width: 1;
-}
-
-/* Подпись только у самого высокого столбца. Число над каждым превратило бы
-   график в таблицу, которая и так есть ниже — для скринридера. */
-.chart .peak-label {
-  fill: var(--ink-muted);
-  font-size: 11px;
-  font-weight: 600;
-  text-anchor: middle;
-}
-
-.chart-axis {
+/* Скрим сверху: белый текст плашек читается и на снегу, и на песке. */
+.wb-hud {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 2;
   display: flex;
-  justify-content: space-between;
-  margin-top: 6px;
-  color: var(--ink-muted);
-  font-size: 11px;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 10px 26px 14px;
+  background: linear-gradient(to bottom, rgb(8 10 14 / 70%), rgb(8 10 14 / 0%));
+  pointer-events: none;
   font-variant-numeric: tabular-nums;
 }
 
-.chart-tip {
-  position: absolute;
-  top: -4px;
-  transform: translate(-50%, -100%);
-  padding: 6px 10px;
-  border-radius: 10px;
-  background: var(--ink);
-  color: var(--surface);
-  font-size: 12px;
-  line-height: 1.35;
-  white-space: nowrap;
-  pointer-events: none;
-  box-shadow: 0 6px 18px rgb(0 0 0 / 18%);
-  z-index: 2;
+.wb-hud > * {
+  pointer-events: auto;
 }
 
-/* Область нажатия шире самого столбца: пальцем в двухпиксельную засечку
-   не попасть, а тач-таргет по норме не меньше 44 px. */
-.chart .hit {
-  fill: transparent;
+.wb-hud-main {
+  flex: 1;
+  display: grid;
+  min-width: 0;
+  line-height: 1.2;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 60%);
+}
+
+.wb-hud-name {
+  font-size: 0.9375rem;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-hud-day {
+  color: rgb(243 241 236 / 78%);
+  font-size: 0.75rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 32px;
+  padding: 0 11px 0 8px;
+  border-radius: 999px;
+  background: var(--wb-glass);
+  box-shadow: inset 0 0 0 1px var(--wb-line);
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.wb-round {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: var(--wb-glass);
+  box-shadow: inset 0 0 0 1px var(--wb-line);
+  cursor: pointer;
+  transition: transform 160ms var(--ease);
+}
+
+.wb-round:active {
+  transform: scale(0.92);
+}
+
+.wb-round[aria-expanded="true"] {
+  background: var(--wb-hot);
+}
+
+.wb-hud-icon,
+.wb-inline-icon {
+  vertical-align: -3px;
+  flex: none;
+}
+
+/* Эра — табличка слева снизу на карте. */
+.wb-era {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 11px 0 9px;
+  border-radius: 999px;
+  background: var(--wb-glass);
+  box-shadow: inset 0 0 0 1px var(--wb-line);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.wb-era-num {
+  color: #f6b089;
+  font-family: Georgia, serif;
+  font-size: 0.875rem;
+  letter-spacing: 0;
+}
+
+.wb-era[data-era="1"] .wb-era-num {
+  color: #d9e2ee;
+}
+
+.wb-era[data-era="2"] .wb-era-num {
+  color: #8fdcff;
+}
+
+.wb-era[data-era="2"] {
+  box-shadow:
+    inset 0 0 0 1px rgb(143 220 255 / 45%),
+    0 0 14px rgb(143 220 255 / 30%);
+}
+
+/* Масштаб — вертикальная капсула справа снизу, под большой палец. */
+.wb-zoom {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 2;
+  display: grid;
+  justify-items: center;
+  width: 38px;
+  padding: 2px;
+  border-radius: 999px;
+  background: var(--wb-glass);
+  box-shadow: inset 0 0 0 1px var(--wb-line);
+}
+
+.wb-zoom-btn {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--wb-ink);
+  font-size: 1.25rem;
+  line-height: 1;
   cursor: pointer;
 }
 
-.chart .hit:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 1px;
+.wb-zoom-btn:disabled {
+  opacity: 0.35;
+}
+
+.wb-zoom-btn:active {
+  background: rgb(255 255 255 / 12%);
+}
+
+.wb-zoom-label {
+  color: var(--wb-muted);
+  font-size: 0.625rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Подписи поселений и метки войны поверх карты. Позиции в процентах. */
+.wb-labels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.wb-labels[hidden] {
+  display: none;
+}
+
+.wb-label {
+  position: absolute;
+  transform: translate(-50%, -50%) scale(var(--inv, 1));
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px 2px 4px;
+  border-radius: 999px;
+  background: rgb(12 14 18 / 72%);
+  box-shadow:
+    inset 0 0 0 1px var(--race-color, #fff),
+    0 2px 8px rgb(0 0 0 / 35%);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.wb-label b {
+  color: var(--race-color, #fff);
+  font-variant-numeric: tabular-nums;
+}
+
+.wb-label-icon {
+  flex: none;
+}
+
+.wb-label--war {
+  box-shadow:
+    inset 0 0 0 1px #ff5a5a,
+    0 0 10px rgb(255 90 90 / 55%);
+}
+
+.wb-mark {
+  position: absolute;
+  transform: translate(-50%, -50%) scale(var(--inv, 1));
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: rgb(12 14 18 / 80%);
+  box-shadow:
+    inset 0 0 0 1px #ff5a5a,
+    0 0 12px rgb(255 90 90 / 50%);
+  animation: mark-pulse 1.4s ease-in-out infinite;
+}
+
+.wb-mark--ally {
+  box-shadow:
+    inset 0 0 0 1px #5fe08f,
+    0 0 12px rgb(95 224 143 / 40%);
+  animation: none;
+}
+
+@keyframes mark-pulse {
+  50% {
+    transform: translate(-50%, -50%) scale(calc(var(--inv, 1) * 1.14));
+  }
+}
+
+/* ── Док с инструментами ───────────────────────────────────────────────── */
+
+.wb-dock {
+  display: grid;
+  gap: 8px;
+  padding: 10px 8px calc(8px);
+  background: var(--wb-panel);
+  box-shadow: 0 -1px 0 var(--wb-line);
+}
+
+.wb-sub,
+.wb-tools {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 1px 2px;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+}
+
+.wb-sub::-webkit-scrollbar,
+.wb-tools::-webkit-scrollbar {
+  display: none;
+}
+
+.wb-sub:empty {
+  display: none;
+}
+
+.wb-chip {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 12px 0 8px;
+  border: none;
+  border-radius: 999px;
+  background: var(--wb-raised);
+  color: var(--wb-ink);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 160ms var(--ease),
+    box-shadow 160ms var(--ease);
+}
+
+.wb-chip[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--wb-hot) 22%, var(--wb-raised));
+  box-shadow: inset 0 0 0 1.5px var(--wb-hot);
+}
+
+.wb-chip-icon {
+  flex: none;
+}
+
+.wb-chip-count {
+  min-width: 22px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 35%);
+  color: var(--wb-muted);
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.wb-brush {
+  display: inline-block;
+  border-radius: 999px;
+  background: var(--wb-ink);
+}
+
+.wb-tool {
+  flex: 0 0 auto;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 4px;
+  min-width: 68px;
+  height: 68px;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 16px;
+  background: var(--wb-raised);
+  color: var(--wb-ink);
+  font-size: 0.6875rem;
+  font-weight: 650;
+  cursor: pointer;
+  transition:
+    transform 140ms var(--ease),
+    background 160ms var(--ease);
+}
+
+.wb-tool:active {
+  transform: scale(0.94);
+}
+
+.wb-tool--on {
+  background: color-mix(in srgb, var(--wb-hot) 26%, var(--wb-raised));
+  box-shadow:
+    inset 0 0 0 2px var(--wb-hot),
+    0 6px 16px color-mix(in srgb, var(--wb-hot) 30%, transparent);
+}
+
+.wb-tool-icon {
+  filter: drop-shadow(0 1px 0 rgb(0 0 0 / 55%));
+}
+
+.wb-cats {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 2px;
+  padding: 3px;
+  border-radius: 16px;
+  background: rgb(0 0 0 / 28%);
+}
+
+.wb-cat {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  min-height: 50px;
+  padding: 6px 2px 5px;
+  border: none;
+  border-radius: 13px;
+  background: transparent;
+  color: var(--wb-muted);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition:
+    background 200ms var(--ease),
+    color 200ms var(--ease);
+}
+
+.wb-cat-icon {
+  opacity: 0.7;
+  transition:
+    opacity 200ms var(--ease),
+    transform 300ms var(--spring);
+}
+
+.wb-cat[aria-selected="true"] {
+  background: var(--wb-raised);
+  color: var(--wb-ink);
+}
+
+.wb-cat[aria-selected="true"] .wb-cat-icon {
+  opacity: 1;
+  transform: translateY(-1px) scale(1.08);
+}
+
+.city-hint {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin: 12px 0 0;
+  padding: 12px 14px;
+  background: var(--card);
+  border-radius: var(--radius-md);
+  color: var(--sub);
+  font-size: 0.875rem;
+  line-height: 1.4;
+  box-shadow: var(--shadow);
+}
+
+.city-hint:empty {
+  display: none;
+}
+
+.city-hint::before {
+  content: "💡";
+  flex: none;
+}
+
+/* ── Летопись: лента событий ───────────────────────────────────────────── */
+
+.timeline {
+  position: relative;
+  margin: 0;
+  padding: 4px 0 0;
+  list-style: none;
+}
+
+.timeline li {
+  position: relative;
+  display: grid;
+  grid-template-columns: 48px 1fr;
+  gap: 10px;
+  padding: 8px 4px 8px 0;
+  font-size: 0.9375rem;
+  animation: chron-in 360ms var(--ease) both;
+}
+
+/* Нить ленты — у дня, а не посередине: день главный ориентир. */
+.timeline li::before {
+  content: "";
+  position: absolute;
+  left: 23px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--sep);
+}
+
+.timeline li:first-child::before {
+  top: 18px;
+}
+
+.timeline li:last-child::before {
+  bottom: calc(100% - 18px);
+}
+
+.chronicle-day {
+  position: relative;
+  z-index: 1;
+  justify-self: center;
+  align-self: start;
+  min-width: 38px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px var(--sep);
+  color: var(--hint);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.timeline li:first-child .chronicle-day {
+  background: var(--clay);
+  color: var(--on-clay);
+  box-shadow: none;
+}
+
+.chronicle-empty {
+  display: block !important;
+  padding: 16px !important;
+  background: var(--card);
+  border-radius: var(--radius-md);
+  color: var(--hint);
+}
+
+.chronicle-empty::before {
+  display: none;
+}
+
+@keyframes chron-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+/* ── Шторка настроек ───────────────────────────────────────────────────── */
+
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: rgb(0 0 0 / 45%);
+  opacity: 0;
+  transition: opacity 280ms var(--ease);
+}
+
+.sheet-backdrop.is-open {
+  opacity: 1;
+}
+
+.sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 41;
+  max-height: min(84vh, 720px);
+  display: flex;
+  flex-direction: column;
+  padding: 6px var(--pad) 0;
+  background: var(--card);
+  color: var(--text);
+  border-radius: 24px 24px 0 0;
+  box-shadow: 0 -10px 40px rgb(0 0 0 / 25%);
+  transform: translateY(104%);
+  transition: transform 420ms var(--spring);
+  will-change: transform;
+}
+
+.sheet.is-open {
+  transform: none;
+}
+
+.sheet[hidden],
+.sheet-backdrop[hidden] {
+  display: none;
+}
+
+.sheet-grip {
+  width: 38px;
+  height: 5px;
+  margin: 4px auto 6px;
+  border-radius: 999px;
+  background: var(--fill-strong);
+}
+
+.sheet-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 2px 12px;
+}
+
+.sheet-title {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 700;
+}
+
+.sheet-sub {
+  margin: 2px 0 0;
+  color: var(--hint);
+  font-size: 0.8125rem;
+}
+
+.sheet-close {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 999px;
+  background: var(--fill);
+  color: var(--hint);
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.sheet-body {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 2px calc(20px + var(--safe-bottom));
+  -webkit-overflow-scrolling: touch;
+}
+
+.group {
+  background: var(--fill);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.group-title,
+.wb-settings-sub {
+  margin: 20px 4px 8px;
+  color: var(--hint);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.toggle {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 50px;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+
+.toggle + .toggle::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 14px;
+  right: 0;
+  height: 1px;
+  background: var(--sep);
+}
+
+.toggle--static {
+  cursor: default;
+}
+
+/* Переключатель как в iOS: сам чекбокс, без обёрток — клавиатура и чтецы
+   работают как с обычным полем. */
+.toggle input {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  position: relative;
+  width: 50px;
+  height: 30px;
+  margin: 0;
+  border-radius: 999px;
+  background: var(--fill-strong);
+  cursor: pointer;
+  transition: background 220ms var(--ease);
+}
+
+.toggle input::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 2px 5px rgb(0 0 0 / 22%);
+  transition: transform 300ms var(--spring);
+}
+
+.toggle input:checked {
+  background: var(--good);
+}
+
+.toggle input:checked::after {
+  transform: translateX(20px);
+}
+
+.mini-seg {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 10px;
+  background: var(--fill-strong);
+}
+
+.mini-seg button {
+  min-width: 44px;
+  min-height: 30px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--hint);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.mini-seg button[aria-pressed="true"] {
+  background: var(--thumb);
+  color: var(--text);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 14%);
+}
+
+.wb-maps {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.wb-map-card {
+  display: grid;
+  gap: 3px;
+  padding: 6px 6px 10px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--fill);
+  text-align: left;
+  cursor: pointer;
+  transition: transform 160ms var(--ease);
+}
+
+.wb-map-card:active {
+  transform: scale(0.97);
+}
+
+.wb-map-card--on {
+  box-shadow: inset 0 0 0 2px var(--clay);
+}
+
+.wb-map-card--locked {
+  opacity: 0.45;
+}
+
+.wb-map-thumb {
+  width: 100%;
+  aspect-ratio: 84 / 66;
+  margin-bottom: 4px;
+  border-radius: 11px;
+  image-rendering: pixelated;
+}
+
+.wb-map-name {
+  padding: 0 4px;
+  font-size: 0.875rem;
+  font-weight: 650;
+}
+
+.wb-map-desc {
+  padding: 0 4px;
+  color: var(--hint);
+  font-size: 0.75rem;
+  line-height: 1.25;
+}
+
+.wb-settings-alive {
+  margin: 0 4px;
+  color: var(--hint);
+  font-size: 0.875rem;
+}
+
+.wb-ach-list,
+.wb-top-list {
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  background: var(--fill);
+  border-radius: var(--radius-md);
+  font-size: 0.875rem;
+}
+
+.wb-ach-list li,
+.wb-top-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+}
+
+.wb-top-list {
+  counter-reset: top;
+}
+
+.wb-top-list li::before {
+  counter-increment: top;
+  content: counter(top);
+  flex: none;
+  width: 22px;
+  color: var(--hint);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.wb-top-me {
+  font-weight: 700;
+  color: var(--clay-ink);
+}
+
+.sheet-actions {
+  display: grid;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+/* ── Слабые телефоны и просьба не двигать ────────────────────────────────
+   Telegram на Android сообщает класс производительности. На слабых убираем
+   размытие и поочерёдное появление — они первыми роняют кадры. */
+
+.perf-low .topbar,
+.perf-low .wb-pill,
+.perf-low .wb-round,
+.perf-low .wb-era,
+.perf-low .wb-zoom {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.perf-low .topbar {
+  background: var(--bg);
+}
+
+.perf-low .wb-glass,
+.perf-low .wb {
+  --wb-glass: rgb(17 19 23 / 88%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* ── Живые коты ────────────────────────────────────────────────────────────
@@ -953,958 +2333,309 @@ h2 {
   }
 }
 
-/* Значок закрытого достижения приглушён, но узнаваем: показать, что предстоит
-   получить, полезнее, чем спрятать за заглушкой. Смысл при этом несёт слово
-   «Ещё не получено» рядом, а не одна лишь бледность. */
-.achievement--locked .achievement-icon svg {
-  opacity: 0.35;
-  filter: grayscale(1);
-}
+/* ── Слежение за котом ────────────────────────────────────────────────── */
 
-.achievement-icon svg {
-  display: block;
-}
-
-/* Дорожка без числа: процент подписки недоступен, и рисовать заполнение
-   «примерно столько» нельзя — это враньё ровно там, где ищут точность.
-   Полосатая штриховка читается как «данных нет», а не как «пусто». */
-.progress-track--unknown {
-  background-image: repeating-linear-gradient(
-    135deg,
-    var(--surface-sunken),
-    var(--surface-sunken) 4px,
-    var(--line) 4px,
-    var(--line) 8px
-  );
-}
-
-/* Собственный замер — не процент, поэтому и весом поменьше: он не должен
-   выглядеть как то самое число, которого пока нет. */
-.limit-percent--own {
-  color: var(--ink-muted);
-  font-weight: 600;
-}
-
-/* ── Кооп ─────────────────────────────────────────────────────────────────
-   Строка на человека: кот, имя с пометками, расход справа. Порядок задаёт
-   расход, поэтому номер строки смысла не несёт и не показывается. */
-.coop {
-  list-style: none;
-  margin: 8px 0 0;
-  padding: 0;
-  display: grid;
-  gap: 8px;
-}
-
-.coop-row {
-  display: grid;
-  grid-template-columns: 44px 1fr auto;
+.wb-follow {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  z-index: 3;
+  display: inline-flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
-  border-radius: var(--radius);
-  background: var(--surface-sunken);
+  gap: 6px;
+  height: 32px;
+  padding: 0 4px 0 12px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--clay) 85%, #000);
+  color: #fff;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  transform: translateX(-50%);
+  animation: pop-in 320ms var(--spring) both;
 }
 
-/* Своя строка выделена рамкой, а не цветом текста: цвет здесь уже занят
-   котом, и ещё один смысловой оттенок читался бы как ошибка. */
-.coop-row--you {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
+.wb-follow button {
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 25%);
+  color: #fff;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
 }
 
-.coop-cat {
-  line-height: 0;
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) scale(0.85);
+  }
 }
 
-.coop-cat svg {
-  display: block;
-}
+/* ── Карточка осмотра ─────────────────────────────────────────────────── */
 
-.coop-body {
+.wb-inspect {
+  position: relative;
   display: grid;
-  gap: 2px;
+  gap: 10px;
+  margin: 8px 8px 0;
+  padding: 12px;
+  border-radius: 18px;
+  background: var(--wb-panel);
+  box-shadow: inset 0 0 0 1px var(--wb-line);
+  color: var(--wb-ink);
+  opacity: 0;
+  transform: translateY(-8px);
+  transition:
+    opacity 220ms var(--ease),
+    transform 320ms var(--spring);
+}
+
+.wb-inspect.is-open {
+  opacity: 1;
+  transform: none;
+}
+
+.wb-inspect-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.wb-inspect-art {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 13px;
+  background: var(--wb-raised);
+}
+
+.wb-inspect-titles {
+  flex: 1;
   min-width: 0;
 }
 
-.coop-name {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 600;
-  color: var(--ink);
+.wb-inspect-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.coop-sub {
-  color: var(--ink-muted);
-  font-size: 12px;
-}
-
-.coop-tag {
-  padding: 1px 6px;
-  border-radius: 999px;
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-size: 11px;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.coop-tag--payer {
-  background: var(--locked-bg);
-  color: var(--locked-ink);
-}
-
-.coop-value {
-  display: grid;
-  justify-items: end;
-  gap: 2px;
-}
-
-.coop-tokens {
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  color: var(--ink);
-}
-
-.coop-label {
-  color: var(--ink-muted);
-  font-size: 11px;
-}
-
-/* Короткое сообщение поверх страницы: там, где действие само по себе невидимо.
-   role="status" объявляет его вслух, поэтому цветом смысл не передаётся. */
-.toast {
-  position: fixed;
-  left: 50%;
-  bottom: 24px;
-  transform: translateX(-50%);
-  z-index: 10;
-  margin: 0;
-  max-width: calc(100% - 32px);
-  padding: 10px 16px;
-  border-radius: 999px;
-  background: var(--ink);
-  color: var(--surface);
-  font-size: 13px;
-  box-shadow: 0 8px 24px rgb(0 0 0 / 22%);
-}
-
-/* ── Вкладки ───────────────────────────────────────────────────────────── */
-
-.tabs {
-  display: flex;
-  gap: 6px;
-  margin-top: 14px;
-  padding: 4px;
-  background: var(--surface-sunken);
-  border: 1px solid var(--line);
-  border-radius: 999px;
-}
-
-.tab {
-  flex: 1;
-  min-height: 40px;
-  padding: 8px 12px;
-  background: transparent;
-  color: var(--ink-muted);
-  border: none;
-  border-radius: 999px;
-  font: inherit;
+.wb-inspect-sub {
+  margin: 1px 0 0;
+  color: var(--wb-muted);
+  font-size: 0.75rem;
   font-weight: 600;
-  cursor: pointer;
-  transition: background 0.2s ease, color 0.2s ease;
 }
 
-.tab[aria-selected="true"] {
-  background: var(--surface);
-  color: var(--ink);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 10%);
-}
-
-/* ── Мой город: экран в духе WorldBox ──────────────────────────────────────
-   Единственное место, где мини-апп уходит из кремового света: игровой экран
-   тёмный, как ночная приставка, с деревянно-бронзовой рамой. Панель
-   инструментов внизу — три ряда: подкатегория (народ или размер кисти),
-   инструменты, категории. Всё крупное, под палец. */
-
-.city {
-  margin-top: 14px;
-  animation: city-in 0.45s ease both;
-}
-
-@keyframes city-in {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-.wb {
-  position: relative;
-  --wb-bg: #171512;
-  --wb-panel: #24201b;
-  --wb-line: #4a3a27;
-  --wb-brass: #b3884f;
-  --wb-ink: #f0e6d2;
-  --wb-muted: #a8977c;
-  --wb-hot: #e8792f;
-  background: var(--wb-bg);
-  color: var(--wb-ink);
-  border: 1px solid #0d0b09;
-  border-radius: 18px;
-  box-shadow:
-    inset 0 0 0 2px var(--wb-brass),
-    inset 0 0 0 3px #3a2818,
-    0 18px 40px rgb(0 0 0 / 40%);
-  overflow: hidden;
-  user-select: none;
-  -webkit-user-select: none;
-}
-
-.wb-hud {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 9px 14px 7px;
-  font-size: 0.8125rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  color: var(--wb-ink);
-  background: linear-gradient(to bottom, #2b241d, #1d1915);
-  border-bottom: 1px solid var(--wb-line);
-  font-variant-numeric: tabular-nums;
-}
-
-.wb-hud-item {
-  white-space: nowrap;
-}
-
-.wb-viewport {
-  position: relative;
-  overflow: auto;
-  max-height: 62vh;
-  scrollbar-width: none;
-  overscroll-behavior: contain;
-  background: #1c4a73;
-}
-
-.wb-viewport::-webkit-scrollbar {
-  display: none;
-}
-
-.wb-stage {
-  position: relative;
-  width: 100%;
-  /* На отдалении (0.5×, 0.75×) карта уже вьюпорта — держим по центру. */
-  margin: 0 auto;
-}
-
-.wb-map {
-  display: block;
-  width: 100%;
-  aspect-ratio: 84 / 66;
-  image-rendering: pixelated;
-  image-rendering: crisp-edges;
-  cursor: crosshair;
-}
-
-/* Рука двигает карту — курсор и жест другие. */
-.wb--hand .wb-map {
-  cursor: grab;
-}
-
-.wb-zoom {
-  position: absolute;
-  right: 12px;
-  top: 46px;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 2px;
-  background: rgb(23 21 18 / 85%);
-  border: 1px solid var(--wb-brass);
-  border-radius: 999px;
-  backdrop-filter: blur(4px);
-}
-
-.wb-zoom-btn {
-  width: 34px;
-  height: 34px;
-  padding: 0;
-  background: transparent;
-  color: var(--wb-ink);
+.wb-inspect-close {
+  flex: none;
+  width: 30px;
+  height: 30px;
   border: none;
   border-radius: 999px;
-  font: inherit;
-  font-size: 20px;
+  background: var(--wb-raised);
+  color: var(--wb-muted);
+  font-size: 1.125rem;
   line-height: 1;
   cursor: pointer;
 }
 
-.wb-zoom-btn:active {
-  background: var(--wb-line);
-}
-
-.wb-zoom-label {
-  min-width: 34px;
-  text-align: center;
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: var(--wb-muted);
-}
-
-.wb-panel {
+.wb-inspect-facts {
   display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
   gap: 6px;
-  padding: 8px 8px 10px;
-  background: linear-gradient(to bottom, #1d1915, var(--wb-panel));
-  border-top: 1px solid var(--wb-line);
-}
-
-.wb-sub,
-.wb-tools {
-  display: flex;
-  gap: 6px;
-  overflow-x: auto;
-  padding: 2px;
-  scrollbar-width: none;
-}
-
-.wb-cats {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 4px;
-  padding: 2px;
-}
-
-.wb-sub::-webkit-scrollbar,
-.wb-tools::-webkit-scrollbar,
-.wb-cats::-webkit-scrollbar {
-  display: none;
-}
-
-.wb-sub:empty {
-  display: none;
-}
-
-/* Инструмент: квадратная кнопка с крупным значком и подписью. */
-.wb-tool {
-  flex: 0 0 auto;
-  display: grid;
-  justify-items: center;
-  gap: 3px;
-  min-width: 64px;
-  padding: 7px 8px 6px;
-  background: #2f2821;
-  color: var(--wb-ink);
-  border: 1px solid var(--wb-line);
-  border-bottom-width: 3px;
-  border-radius: 12px;
-  font: inherit;
-  font-size: 0.6875rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  cursor: pointer;
-  transition: transform 0.1s ease, background 0.15s ease;
-}
-
-.wb-tool:active {
-  transform: translateY(1px);
-  border-bottom-width: 2px;
-}
-
-.wb-tool--on {
-  background: #4a2f16;
-  border-color: var(--wb-hot);
-  box-shadow: 0 0 0 1px var(--wb-hot), 0 0 14px rgb(232 121 47 / 45%);
-}
-
-.wb-tool-icon {
-  font-size: 22px;
-  line-height: 1;
-  filter: drop-shadow(0 1px 0 rgb(0 0 0 / 60%));
-}
-
-/* Образец ландшафта вместо эмодзи: цвет кисти — сам её значок. */
-.wb-swatch {
-  width: 24px;
-  height: 22px;
-  border-radius: 5px;
-  border: 1px solid rgb(0 0 0 / 55%);
-  box-shadow: inset 0 -3px 0 rgb(0 0 0 / 22%), inset 0 2px 0 rgb(255 255 255 / 22%);
-}
-
-/* Категория: таблетка с эмодзи и подписью. Активная — горячая. */
-.wb-cat {
-  display: grid;
-  justify-items: center;
-  gap: 3px;
-  min-height: 52px;
-  padding: 6px 2px 5px;
-  background: #1f1b17;
-  color: var(--wb-muted);
-  border: 1px solid var(--wb-line);
-  border-bottom-width: 3px;
-  border-radius: 10px;
-  font: inherit;
-  font-size: 0.625rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  cursor: pointer;
-}
-
-.wb-cat-icon {
-  filter: drop-shadow(0 1px 0 rgb(0 0 0 / 60%));
-  opacity: 0.75;
-}
-
-.wb-cat[aria-selected="true"] {
-  background: #4a2f16;
-  color: var(--wb-ink);
-  border-color: var(--wb-hot);
-  box-shadow: inset 0 0 0 1px var(--wb-hot);
-}
-
-.wb-cat[aria-selected="true"] .wb-cat-icon {
-  opacity: 1;
-}
-
-.wb-hud-icon,
-.wb-inline-icon {
-  vertical-align: -3px;
-  margin-right: 2px;
-}
-
-/* Плашка эры слева на карте: как табличка в WorldBox, бронза на тёмном. */
-.wb-era {
-  position: absolute;
-  left: 12px;
-  top: 46px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 10px 5px 8px;
-  background: rgb(23 21 18 / 88%);
-  color: var(--wb-ink);
-  border: 1px solid var(--wb-brass);
-  border-radius: 8px;
-  box-shadow: inset 0 0 0 1px #3a2818, 0 2px 8px rgb(0 0 0 / 40%);
-  font-size: 0.75rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  backdrop-filter: blur(4px);
-}
-
-.wb-era-num {
-  color: var(--wb-hot);
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 0.9375rem;
-  letter-spacing: 0;
-}
-
-.wb-era[data-era="1"] {
-  border-color: #c9d3df;
-}
-
-.wb-era[data-era="2"] {
-  border-color: #7fd4ff;
-  box-shadow: inset 0 0 0 1px #3a2818, 0 0 12px rgb(127 212 255 / 45%);
-}
-
-.wb-chip-count {
-  padding: 1px 6px;
-  background: rgb(0 0 0 / 35%);
-  border-radius: 999px;
-  font-size: 0.75rem;
-  font-variant-numeric: tabular-nums;
-  color: var(--wb-muted);
-}
-
-/* Подкатегория: народ (цветная точка) или размер кисти (кружок). */
-.wb-chip {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 36px;
-  padding: 4px 12px;
-  background: #1f1b17;
-  color: var(--wb-ink);
-  border: 1px solid var(--wb-line);
-  border-radius: 999px;
-  font: inherit;
-  font-size: 0.8125rem;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.wb-chip[aria-pressed="true"] {
-  border-color: var(--wb-brass);
-  background: #3a2c1c;
-  box-shadow: inset 0 0 0 1px var(--wb-brass);
-}
-
-.wb-dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 3px;
-  border: 1px solid rgb(0 0 0 / 50%);
-  background: var(--dot, #fff);
-}
-
-.wb-brush {
-  display: inline-block;
-  border-radius: 999px;
-  background: var(--wb-ink);
-}
-
-.city-hint {
-  margin: 10px 2px 0;
-  min-height: 1.4em;
-  font-size: 0.9375rem;
-  color: var(--page-ink);
-}
-
-.city-h2 {
-  margin-top: 24px;
-}
-
-.chronicle {
   margin: 0;
   padding: 0;
   list-style: none;
-  display: grid;
-  gap: 6px;
 }
 
-.chronicle li {
-  display: flex;
-  gap: 10px;
-  align-items: baseline;
-  padding: 10px 12px;
-  background: var(--surface);
-  color: var(--ink);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  font-size: 0.9375rem;
-  animation: chron-in 0.35s ease both;
-}
-
-.chronicle-day {
-  flex: 0 0 auto;
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: var(--ink-muted);
-  letter-spacing: 0.04em;
-}
-
-@keyframes chron-in {
-  from {
-    opacity: 0;
-    transform: translateX(-6px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-.chronicle-empty {
-  color: var(--ink-muted);
-}
-
-.city-reset-row {
-  margin: 20px 0 0;
-  text-align: center;
-}
-
-.button--ghost {
-  background: transparent;
-  color: var(--ink-muted);
-  border: 1px solid var(--line);
-  font-weight: 500;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .city,
-  .chronicle li {
-    animation: none;
-  }
-}
-
-.wb-chip-icon {
-  flex: 0 0 auto;
-  filter: drop-shadow(0 1px 0 rgb(0 0 0 / 60%));
-}
-
-/* ── Настройки, подписи территорий, таймер ─────────────────────────────── */
-
-.wb-hud {
-  align-items: center;
-}
-
-.wb-hud-alive {
-  color: var(--wb-muted);
-  font-weight: 600;
-}
-
-.wb-gear {
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  margin: -4px -6px -4px 0;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.wb-gear[aria-expanded="true"] {
-  background: #4a2f16;
-  border-color: var(--wb-hot);
-}
-
-.wb-settings {
-  position: absolute;
-  right: 12px;
-  top: 46px;
-  z-index: 3;
-  width: min(300px, calc(100% - 24px));
-  padding: 12px 14px 14px;
-  background: rgb(23 21 18 / 96%);
-  color: var(--wb-ink);
-  border: 1px solid var(--wb-brass);
-  border-radius: 12px;
-  box-shadow: inset 0 0 0 1px #3a2818, 0 12px 30px rgb(0 0 0 / 55%);
-  display: grid;
-  gap: 10px;
-  font-size: 0.875rem;
-}
-
-.wb-settings-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-size: 0.75rem;
-  color: var(--wb-muted);
-}
-
-.wb-settings-close {
-  width: 30px;
-  height: 30px;
-  background: transparent;
-  color: var(--wb-ink);
-  border: 1px solid var(--wb-line);
-  border-radius: 999px;
-  font-size: 18px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.wb-settings-alive {
-  margin: 0;
-  color: var(--wb-muted);
-  font-size: 0.8125rem;
-}
-
-.wb-switch {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 32px;
-  cursor: pointer;
-}
-
-.wb-switch input {
-  width: 20px;
-  height: 20px;
-  accent-color: var(--wb-hot);
-}
-
-.wb-speed {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.wb-speed span {
-  flex: 1;
-}
-
-.wb-speed button {
-  min-width: 42px;
-  min-height: 32px;
-  background: #1f1b17;
-  color: var(--wb-ink);
-  border: 1px solid var(--wb-line);
-  border-radius: 8px;
-  font: inherit;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.wb-speed button[aria-pressed="true"] {
-  background: var(--wb-hot);
-  color: #1a120a;
-  border-color: var(--wb-hot);
-}
-
-.wb-settings-reset {
-  margin-top: 4px;
-  color: #ff9b7a;
-  border-color: #7a3a2a;
-}
-
-.wb-labels {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-
-/* Подпись королевства: имя и число, с чёрной обводкой — читается и на снегу,
-   и на лесу. Позиция в процентах — не разъезжается при зуме. */
-.wb-label {
-  position: absolute;
-  transform: translate(-50%, -50%);
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 7px 2px 5px;
-  background: rgb(23 21 18 / 72%);
-  color: #fff;
-  border: 1px solid var(--race-color, #fff);
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  white-space: nowrap;
-  text-shadow: 0 1px 0 #000;
-  box-shadow: 0 0 0 1px rgb(0 0 0 / 50%), 0 0 10px rgb(0 0 0 / 40%);
-}
-
-.wb-label b {
-  color: var(--race-color, #fff);
-  font-variant-numeric: tabular-nums;
-}
-
-.wb-label-icon {
-  flex: 0 0 auto;
-}
-
-/* hidden должен побеждать display: grid, иначе панель невидимо перекрывает кнопки. */
-.wb-settings[hidden] {
+.wb-inspect-facts:empty {
   display: none;
 }
 
-/* Шапка на узком экране: переносится, не растягивает раму. */
-.wb-hud {
-  flex-wrap: wrap;
-  gap: 4px 10px;
-  font-size: 0.75rem;
-}
-
-.wb-hud-alive {
-  font-size: 0.6875rem;
-}
-
-/* ── Карты в настройках и маркеры войны/союза ─────────────────────────── */
-
-.wb-settings-sub {
-  margin-top: 4px;
-  font-size: 0.6875rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--wb-muted);
-}
-
-.wb-maps {
+.wb-inspect-facts li {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 8px;
-}
-
-/* Карточка карты: миниатюра-«окно» с внутренней тенью, имя капителью,
-   описание тише. Выбранная горит оранжевым, как активный инструмент. */
-.wb-map-card {
-  display: grid;
-  gap: 4px;
-  padding: 6px;
-  background: #1f1b17;
-  color: var(--wb-ink);
-  border: 1px solid var(--wb-line);
-  border-bottom-width: 3px;
-  border-radius: 10px;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: transform 0.12s ease;
-}
-
-.wb-map-card:active {
-  transform: translateY(1px);
-}
-
-.wb-map-card--on {
-  background: #4a2f16;
-  border-color: var(--wb-hot);
-  box-shadow: inset 0 0 0 1px var(--wb-hot), 0 0 12px rgb(232 121 47 / 40%);
-}
-
-.wb-map-thumb {
-  width: 100%;
-  aspect-ratio: 84 / 66;
-  border-radius: 6px;
-  image-rendering: pixelated;
-  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 50%), inset 0 6px 12px rgb(0 0 0 / 35%);
-}
-
-.wb-map-name {
-  font-size: 0.75rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.wb-map-desc {
-  font-size: 0.6875rem;
-  line-height: 1.25;
+  gap: 1px;
+  padding: 7px 10px;
+  border-radius: 11px;
+  background: var(--wb-raised);
   color: var(--wb-muted);
-}
-
-.wb-mark {
-  position: absolute;
-  transform: translate(-50%, -50%);
-  width: 28px;
-  height: 28px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 999px;
-  background: rgb(23 21 18 / 80%);
-  border: 1px solid #ff4d4d;
-  box-shadow: 0 0 10px rgb(255 77 77 / 55%);
-  animation: mark-pulse 1.2s ease-in-out infinite;
-}
-
-.wb-mark--ally {
-  border-color: #4dff88;
-  box-shadow: 0 0 10px rgb(77 255 136 / 45%);
-  animation: none;
-}
-
-@keyframes mark-pulse {
-  0%,
-  100% {
-    transform: translate(-50%, -50%) scale(1);
-  }
-  50% {
-    transform: translate(-50%, -50%) scale(1.15);
-  }
-}
-
-.wb-label--war {
-  border-color: #ff4d4d;
-  box-shadow: 0 0 0 1px rgb(0 0 0 / 50%), 0 0 10px rgb(255 77 77 / 60%);
-}
-
-.wb-label-war {
-  margin-left: 2px;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .wb-mark {
-    animation: none;
-  }
-}
-
-/* Панель настроек длиннее рамы: прокручивается внутри, а не обрезается. */
-.wb-settings {
-  max-height: calc(100% - 64px);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  touch-action: pan-y;
-  scrollbar-width: thin;
-  -webkit-overflow-scrolling: touch;
-}
-
-.wb-settings::after {
-  content: "";
-  display: block;
-  height: 4px;
-}
-
-/* ── Тело карты: на 1× карта видна целиком, оверлеи привязаны к ней ──── */
-
-.wb-body {
-  position: relative;
-}
-
-/* На 1× ограничения по высоте нет: вся карта на экране. Ограничение и
-   прокрутка появляются только при приближении. */
-.wb-viewport {
-  max-height: none;
-}
-
-.wb-viewport--zoom {
-  max-height: 62vh;
-}
-
-.wb-era,
-.wb-zoom {
-  top: 10px;
-}
-
-.wb-settings {
-  top: 10px;
-  max-height: calc(100% - 20px);
-}
-
-
-.wb-label-stock {
-  flex-basis: 100%;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  font-size: 9px;
+  font-size: 0.6875rem;
   font-weight: 600;
-  color: #e6dcc5;
-  opacity: 0.9;
 }
 
-.wb-label-stock svg {
-  margin-left: 4px;
+.wb-inspect-facts b {
+  color: var(--wb-ink);
+  font-size: 0.8125rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* Достижения острова и рейтинг в настройках. */
-.wb-ach-list,
-.wb-top-list {
-  margin: 4px 0 8px;
-  padding-left: 18px;
-  font-size: 13px;
-  line-height: 1.5;
-}
-.wb-top-me {
+.wb-inspect-follow {
+  min-height: 40px;
+  border: none;
+  border-radius: 12px;
+  background: var(--wb-hot);
+  color: #fff;
+  font-size: 0.875rem;
   font-weight: 700;
+  cursor: pointer;
+  transition: transform 140ms var(--ease);
 }
-.wb-map-card--locked {
-  opacity: 0.45;
-  filter: grayscale(0.7);
+
+.wb-inspect-follow:active {
+  transform: scale(0.97);
+}
+
+/* ── Задания бога ─────────────────────────────────────────────────────── */
+
+.quest {
+  position: relative;
+  margin-top: 12px;
+  overflow: hidden;
+}
+
+.quest-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.quest-rank {
+  color: var(--clay-ink);
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.quest-count {
+  color: var(--hint);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.quest-title {
+  margin: 8px 0 0;
+  font-size: 1.125rem;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+}
+
+.quest-hint {
+  margin: 2px 0 0;
+  color: var(--sub);
+  font-size: 0.875rem;
+}
+
+.quest-track {
+  margin-top: 12px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--fill-strong);
+  overflow: hidden;
+}
+
+.quest-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #f2b48f, var(--clay));
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 700ms var(--spring);
+}
+
+.quest-progress {
+  margin: 6px 0 0;
+  color: var(--hint);
+  font-size: 0.75rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.quest-progress:empty {
+  display: none;
+}
+
+.quest-dots {
+  display: flex;
+  gap: 5px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.quest-dots li {
+  flex: 1;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--fill-strong);
+  transition: background 300ms var(--ease);
+}
+
+.quest-dots li.is-done {
+  background: var(--clay);
+}
+
+.quest-dots li.is-now {
+  background: color-mix(in srgb, var(--clay) 40%, var(--fill-strong));
+}
+
+/* Выполнено: карточка вспыхивает, по ней разлетаются искры. */
+.quest.is-done {
+  animation: quest-pop 700ms var(--spring);
+}
+
+.quest.is-done::after {
+  content: "✦ ✧ ✦ ✧ ✦";
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--clay);
+  font-size: 1.75rem;
+  letter-spacing: 0.5em;
+  pointer-events: none;
+  animation: sparkles 1100ms var(--ease) both;
+}
+
+@keyframes quest-pop {
+  30% {
+    transform: scale(1.03);
+    box-shadow:
+      0 0 0 3px color-mix(in srgb, var(--clay) 50%, transparent),
+      var(--shadow);
+  }
+}
+
+@keyframes sparkles {
+  from {
+    opacity: 1;
+    transform: translateY(10px) scale(0.6);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-26px) scale(1.2);
+  }
+}
+
+/* Пока камера следит за котом, плашка слежения занимает низ рамки — эра
+   уступает место и возвращается, когда слежение снято. */
+.wb-era {
+  transition: opacity 200ms var(--ease);
+}
+
+.wb-body:has(.wb-follow:not([hidden])) .wb-era {
+  opacity: 0;
+  pointer-events: none;
 }

@@ -3,6 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
     <title>Мой Claude-кот</title>
     <link rel="stylesheet" href="/style.css" />
     <!-- Скрипт Telegram лежит у нас: telegram.org с телефона без VPN не открывается, и страница висела на его загрузке. -->
@@ -13,107 +14,77 @@
 
     <p class="toast" id="toast" role="status" hidden></p>
 
+    <!--
+      Скелет вместо строки «Загружаю…»: форма будущей страницы видна сразу,
+      и переход к настоящим данным не дёргает раскладку.
+    -->
+    <div class="skeleton" id="loading" role="status" aria-label="Загружаю профиль">
+      <div class="sk sk-tabs"></div>
+      <div class="sk sk-hero"></div>
+      <div class="sk-row">
+        <div class="sk sk-stat"></div>
+        <div class="sk sk-stat"></div>
+      </div>
+      <div class="sk sk-block"></div>
+    </div>
+
+    <div class="state" id="error" role="alert" hidden>
+      <div class="state-art" id="error-art" aria-hidden="true"></div>
+      <p class="state-title">Что-то пошло не так</p>
+      <p class="state-text" id="error-text"></p>
+      <button class="button" id="error-retry" type="button">Попробовать ещё раз</button>
+    </div>
+
     <div id="app" hidden>
-      <header class="page-header">
-        <h1 id="page-title">Мой Claude-кот</h1>
-        <p class="plan" id="plan-line"></p>
-        <!--
-          Две вкладки: кот со статистикой и город. Настоящие tabs с ролями —
-          переключение стрелками и понятное чтение с экрана.
-        -->
-        <div class="tabs" role="tablist" aria-label="Разделы">
-          <button class="tab" role="tab" id="tab-cat" aria-selected="true" aria-controls="panel-cat" type="button">
+      <h1 class="visually-hidden" id="page-title">Мой Claude-кот</h1>
+
+      <!-- Переключатель разделов липнет к верху: до него не надо листать назад. -->
+      <header class="topbar">
+        <div class="segmented" role="tablist" aria-label="Разделы">
+          <span class="segmented-thumb" aria-hidden="true"></span>
+          <button
+            class="segmented-item"
+            role="tab"
+            id="tab-cat"
+            aria-selected="true"
+            aria-controls="main"
+            type="button"
+          >
             Кот
           </button>
-          <button class="tab" role="tab" id="tab-city" aria-selected="false" aria-controls="panel-city" tabindex="-1" type="button">
-            Мой город
+          <button
+            class="segmented-item"
+            role="tab"
+            id="tab-city"
+            aria-selected="false"
+            aria-controls="panel-city"
+            tabindex="-1"
+            type="button"
+          >
+            Мой мир
           </button>
         </div>
       </header>
 
       <!--
-        Город — отдельная панель до <main>. Внутри — игровой экран в духе
-        WorldBox: тёмная рама, карта, снизу панель инструментов с категориями.
-      -->
-      <section class="city" id="panel-city" role="tabpanel" aria-labelledby="tab-city" tabindex="0" hidden>
-        <div class="wb">
-          <div class="wb-hud" aria-live="polite">
-            <span class="wb-hud-item" id="hud-name"></span>
-            <span class="wb-hud-item" id="hud-pop"></span>
-            <span class="wb-hud-item" id="hud-day"></span>
-            <span class="wb-hud-item wb-hud-alive" id="hud-alive"></span>
-            <button class="wb-gear" id="wb-gear" type="button" aria-label="Настройки" aria-expanded="false"></button>
-          </div>
-
-          <!-- Тело карты: вьюпорт и всё, что висит поверх него, — плашка эры,
-               зум, настройки. Позиции считаются от карты, а не от шапки:
-               шапка на узком экране переносится и меняет высоту. -->
-          <div class="wb-body">
-          <div class="wb-viewport" id="city-viewport">
-            <div class="wb-stage" id="city-stage">
-              <canvas class="wb-map" id="city-map" aria-label="Карта континента четырёх кошачьих народов. Проведи пальцем, чтобы применить выбранный инструмент."></canvas>
-              <!-- Подписи территорий: имя народа и численность, поверх карты. -->
-              <div class="wb-labels" id="city-labels" aria-hidden="true"></div>
-            </div>
-          </div>
-          <div class="wb-era" id="hud-era" aria-live="polite" aria-label="Эра"></div>
-          <div class="wb-zoom" role="group" aria-label="Масштаб">
-            <button class="wb-zoom-btn" id="zoom-out" type="button" aria-label="Отдалить">−</button>
-            <span class="wb-zoom-label" id="zoom-label">1×</span>
-            <button class="wb-zoom-btn" id="zoom-in" type="button" aria-label="Приблизить">+</button>
-          </div>
-
-          <!-- Настройки: поверх карты, как меню в WorldBox. -->
-          <div class="wb-settings" id="wb-settings" role="dialog" aria-label="Настройки острова" hidden>
-            <div class="wb-settings-head">
-              <span>Настройки</span>
-              <button class="wb-settings-close" id="set-close" type="button" aria-label="Закрыть">×</button>
-            </div>
-            <p class="wb-settings-alive" id="set-alive"></p>
-            <label class="wb-switch"><input type="checkbox" id="set-territories" /> <span>Подсвечивать территории</span></label>
-            <label class="wb-switch"><input type="checkbox" id="set-labels" /> <span>Названия поселений</span></label>
-            <label class="wb-switch"><input type="checkbox" id="set-paused" /> <span>Пауза</span></label>
-            <div class="wb-speed" role="group" aria-label="Скорость">
-              <span>Скорость</span>
-              <button type="button" data-speed="1" aria-pressed="true">1×</button>
-              <button type="button" data-speed="2" aria-pressed="false">2×</button>
-              <button type="button" data-speed="4" aria-pressed="false">4×</button>
-            </div>
-            <div class="wb-settings-sub">Карта</div>
-            <div class="wb-maps" id="wb-maps" role="group" aria-label="Выбор карты"></div>
-            <div id="wb-ach"></div>
-            <div id="wb-top"></div>
-            <button class="button button--ghost wb-settings-reset" id="city-story" type="button">Поделиться историей острова</button>
-            <button class="button button--ghost wb-settings-reset" id="city-reset" type="button">Начать остров заново</button>
-          </div>
-
-          </div>
-
-          <div class="wb-panel">
-            <div class="wb-sub" id="wb-sub"></div>
-            <div class="wb-tools" id="wb-tools" role="group" aria-label="Инструменты"></div>
-            <div class="wb-cats" id="wb-cats" role="tablist" aria-label="Категории"></div>
-          </div>
-        </div>
-        <p class="city-hint" id="city-hint" role="status"></p>
-
-        <h2 class="city-h2">Летопись</h2>
-        <ol class="chronicle" id="chronicle" role="list"></ol>
-      </section>
-
-      <!--
         tabindex="-1" обязателен: без него активация skip-ссылки в части
-        WebView проскроллит страницу, но не переставит фокус, и следующий Tab
-        продолжит с прежнего места.
+        WebView проскроллит страницу, но не переставит фокус.
       -->
-      <main id="main" tabindex="-1" role="tabpanel" aria-labelledby="tab-cat">
-        <section class="hero" aria-labelledby="hero-name">
-          <div class="hero-art">
-            <div id="hero-cat" class="cat-art cat-art--large"></div>
+      <main id="main" class="view" tabindex="-1" role="tabpanel" aria-labelledby="tab-cat">
+        <section class="hero card reveal" aria-labelledby="hero-name">
+          <div class="hero-stage">
+            <div class="hero-glow" aria-hidden="true"></div>
+            <svg class="hero-ring" viewBox="0 0 120 120" aria-hidden="true">
+              <circle class="hero-ring-track" cx="60" cy="60" r="54" />
+              <circle class="hero-ring-fill" id="hero-ring" cx="60" cy="60" r="54" />
+            </svg>
+            <div id="hero-cat" class="cat-art hero-cat"></div>
           </div>
 
-          <p class="hero-level" id="hero-level"></p>
-          <!-- Имя кота — настоящий заголовок: по нему работает навигация по H. -->
+          <div class="hero-chips">
+            <span class="chip chip--accent" id="hero-level"></span>
+            <span class="chip" id="plan-line"></span>
+          </div>
           <h2 class="hero-name" id="hero-name"></h2>
           <p class="hero-title" id="hero-title"></p>
           <blockquote class="hero-quote" id="hero-quote"></blockquote>
@@ -138,39 +109,27 @@
           </div>
         </section>
 
-
-        <section aria-labelledby="stats-heading">
-          <h2 id="stats-heading">Статистика</h2>
-          <ul class="stats" id="stats" role="list"></ul>
-          <p class="section-note" id="history-note" hidden></p>
-          <p class="section-note" id="cache-note"></p>
+        <section class="reveal" aria-labelledby="stats-heading">
+          <h2 class="section-title visually-hidden" id="stats-heading">Статистика</h2>
+          <ul class="bento" id="stats" role="list"></ul>
         </section>
 
         <!--
-          График идёт после чисел: он их объясняет, а не заменяет. Сам рисунок
-          помечен role="img" с подписью, а под ним лежит таблица для тех, кто
-          читает экраном, — цифры не должны существовать только в картинке.
+          График идёт после чисел: он их объясняет, а не заменяет. Под ним
+          скрытая таблица — цифры не должны существовать только в картинке.
         -->
-        <!--
-          Кооп показывается только тем, кто делит подписку: одинокому владельцу
-          таблица из одной строки не нужна.
-        -->
-
-        <section aria-labelledby="coop-heading" id="coop-section" hidden>
-          <h2 id="coop-heading">Кооп</h2>
-          <p class="section-note" id="coop-note"></p>
-          <ol class="coop" id="coop" role="list"></ol>
-        </section>
-
-        <section aria-labelledby="chart-heading">
-          <h2 id="chart-heading">Расход по дням</h2>
+        <section class="card reveal" aria-labelledby="chart-heading">
+          <div class="card-head">
+            <h2 class="section-title" id="chart-heading">Расход по дням</h2>
+            <span class="card-head-note" id="chart-total"></span>
+          </div>
           <p class="section-note" id="chart-note"></p>
           <div class="chart" id="chart" hidden>
-            <svg id="chart-svg" role="img" aria-labelledby="chart-alt" preserveAspectRatio="none">
+            <div class="chart-tip" id="chart-tip" role="status" hidden></div>
+            <svg id="chart-svg" role="img" aria-labelledby="chart-alt">
               <title id="chart-alt"></title>
             </svg>
             <div class="chart-axis" id="chart-axis" aria-hidden="true"></div>
-            <div class="chart-tip" id="chart-tip" role="status" hidden></div>
           </div>
           <table class="visually-hidden" id="chart-table">
             <caption>
@@ -186,16 +145,32 @@
           </table>
         </section>
 
-        <section aria-labelledby="cats-heading">
-          <h2 id="cats-heading">Коты</h2>
-          <p class="section-note" id="cats-note"></p>
-          <ul class="cat-grid" id="cat-grid" role="list"></ul>
+        <!-- Кооп виден только тем, кто делит подписку. -->
+        <section class="reveal" aria-labelledby="coop-heading" id="coop-section" hidden>
+          <div class="section-head">
+            <h2 class="section-title" id="coop-heading">Кооп</h2>
+            <span class="section-count" id="coop-count"></span>
+          </div>
+          <p class="section-note" id="coop-note"></p>
+          <ol class="list card card--flush" id="coop" role="list"></ol>
         </section>
 
-        <section aria-labelledby="ach-heading">
-          <h2 id="ach-heading">Достижения</h2>
+        <section class="reveal" aria-labelledby="cats-heading">
+          <div class="section-head">
+            <h2 class="section-title" id="cats-heading">Коты</h2>
+            <span class="section-count" id="cats-count"></span>
+          </div>
+          <p class="section-note" id="cats-note"></p>
+          <ul class="rail" id="cat-grid" role="list"></ul>
+        </section>
+
+        <section class="reveal" aria-labelledby="ach-heading">
+          <div class="section-head">
+            <h2 class="section-title" id="ach-heading">Достижения</h2>
+            <span class="section-count" id="ach-count"></span>
+          </div>
           <p class="section-note" id="ach-note"></p>
-          <ul class="achievements" id="achievements" role="list"></ul>
+          <ul class="badges" id="achievements" role="list"></ul>
         </section>
 
         <p class="share-row">
@@ -204,10 +179,194 @@
           </button>
         </p>
       </main>
+
+      <!--
+        Город — игровой экран: тёмная рама, карта, поверх неё — плашки острова,
+        эры и масштаба, снизу док с инструментами.
+      -->
+      <section
+        class="view city"
+        id="panel-city"
+        role="tabpanel"
+        aria-labelledby="tab-city"
+        tabindex="0"
+        hidden
+      >
+        <div class="wb">
+          <div class="wb-body">
+            <div class="wb-viewport" id="city-viewport">
+              <div class="wb-stage" id="city-stage">
+                <canvas
+                  class="wb-map"
+                  id="city-map"
+                  aria-label="Карта мира кошачьих народов. Проведи пальцем, чтобы применить выбранный инструмент."
+                ></canvas>
+                <div class="wb-labels" id="city-labels" aria-hidden="true"></div>
+              </div>
+            </div>
+
+            <!-- Плашки поверх карты. Скрим сверху держит контраст на снегу и песке. -->
+            <div class="wb-hud" aria-live="polite">
+              <div class="wb-hud-main">
+                <span class="wb-hud-name" id="hud-name"></span>
+                <span class="wb-hud-day" id="hud-day"></span>
+                <span class="visually-hidden" id="hud-alive"></span>
+              </div>
+              <span class="wb-pill" id="hud-pop"></span>
+              <button
+                class="wb-round"
+                id="wb-gear"
+                type="button"
+                aria-label="Настройки острова"
+                aria-expanded="false"
+                aria-controls="wb-settings"
+              ></button>
+            </div>
+
+            <!-- Камера едет за котом: видно за кем и как это прекратить. -->
+            <div class="wb-follow" id="wb-follow" hidden>
+              <span>👁 <span id="wb-follow-name"></span></span>
+              <button type="button" id="wb-follow-stop" aria-label="Перестать следить">×</button>
+            </div>
+
+            <div class="wb-era" id="hud-era" aria-live="polite" aria-label="Эра"></div>
+            <div class="wb-zoom" role="group" aria-label="Масштаб">
+              <button class="wb-zoom-btn" id="zoom-in" type="button" aria-label="Приблизить">
+                +
+              </button>
+              <span class="wb-zoom-label" id="zoom-label">1×</span>
+              <button class="wb-zoom-btn" id="zoom-out" type="button" aria-label="Отдалить">
+                −
+              </button>
+            </div>
+          </div>
+
+          <!-- Осмотр касанием «Рукой»: карточка раскрывается под картой и не закрывает мир. -->
+          <div
+            class="wb-inspect"
+            id="wb-inspect"
+            role="dialog"
+            aria-live="polite"
+            aria-labelledby="wb-inspect-title"
+            hidden
+          >
+            <div class="wb-inspect-head">
+              <span class="wb-inspect-art" id="wb-inspect-art" aria-hidden="true"></span>
+              <div class="wb-inspect-titles">
+                <p class="wb-inspect-title" id="wb-inspect-title"></p>
+                <p class="wb-inspect-sub" id="wb-inspect-sub"></p>
+              </div>
+              <button
+                class="wb-inspect-close"
+                id="wb-inspect-close"
+                type="button"
+                aria-label="Закрыть"
+              >
+                ×
+              </button>
+            </div>
+            <ul class="wb-inspect-facts" id="wb-inspect-facts"></ul>
+            <button class="wb-inspect-follow" id="wb-inspect-follow" type="button">
+              👁 Следить
+            </button>
+          </div>
+
+          <div class="wb-dock">
+            <div class="wb-sub" id="wb-sub"></div>
+            <div class="wb-tools" id="wb-tools" role="group" aria-label="Инструменты"></div>
+            <div class="wb-cats" id="wb-cats" role="tablist" aria-label="Категории"></div>
+          </div>
+        </div>
+
+        <p class="city-hint" id="city-hint" role="status"></p>
+
+        <!--
+          Задания бога: мир песочный, но пустой остров пугает. Цепочка целей
+          ведёт от первого кота до эры Будущего и растит звание бога.
+        -->
+        <section class="quest card" id="quest" aria-labelledby="quest-title">
+          <div class="quest-head">
+            <span class="quest-rank" id="quest-rank"></span>
+            <span class="quest-count" id="quest-count"></span>
+          </div>
+          <p class="quest-title" id="quest-title"></p>
+          <p class="quest-hint" id="quest-hint"></p>
+          <div class="quest-track" aria-hidden="true">
+            <div class="quest-fill" id="quest-fill"></div>
+          </div>
+          <p class="quest-progress" id="quest-progress"></p>
+          <ol class="quest-dots" id="quest-dots" aria-hidden="true"></ol>
+        </section>
+
+        <section class="reveal" aria-labelledby="chronicle-heading">
+          <div class="section-head">
+            <h2 class="section-title" id="chronicle-heading">Летопись</h2>
+          </div>
+          <ol class="timeline" id="chronicle" role="list"></ol>
+        </section>
+      </section>
     </div>
 
-    <p id="loading" class="state" role="status">Загружаю профиль…</p>
-    <p id="error" class="state state--error" role="alert" hidden></p>
+    <!--
+      Настройки острова — шторка снизу, как системные листы: большой палец
+      достаёт до всего, а карта остаётся видна над ней.
+    -->
+    <div class="sheet-backdrop" id="wb-backdrop" hidden></div>
+    <div
+      class="sheet"
+      id="wb-settings"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="set-title"
+      hidden
+    >
+      <div class="sheet-grip" aria-hidden="true"></div>
+      <div class="sheet-head">
+        <div>
+          <p class="sheet-title" id="set-title">Настройки острова</p>
+          <p class="sheet-sub" id="set-alive"></p>
+        </div>
+        <button class="sheet-close" id="set-close" type="button" aria-label="Закрыть">×</button>
+      </div>
+
+      <div class="sheet-body">
+        <div class="group">
+          <label class="toggle"
+            ><span>Подсвечивать территории</span
+            ><input type="checkbox" role="switch" id="set-territories"
+          /></label>
+          <label class="toggle"
+            ><span>Названия поселений</span><input type="checkbox" role="switch" id="set-labels"
+          /></label>
+          <label class="toggle"
+            ><span>Пауза</span><input type="checkbox" role="switch" id="set-paused"
+          /></label>
+          <div class="toggle toggle--static">
+            <span>Скорость</span>
+            <div class="mini-seg" role="group" aria-label="Скорость">
+              <button type="button" data-speed="1" aria-pressed="true">1×</button>
+              <button type="button" data-speed="2" aria-pressed="false">2×</button>
+              <button type="button" data-speed="4" aria-pressed="false">4×</button>
+            </div>
+          </div>
+        </div>
+
+        <p class="group-title">Карта</p>
+        <div class="wb-maps" id="wb-maps" role="group" aria-label="Выбор карты"></div>
+
+        <div id="wb-ach"></div>
+        <div id="wb-top"></div>
+
+        <div class="sheet-actions">
+          <button class="button button--tonal" id="city-story" type="button">
+            Поделиться историей острова
+          </button>
+          <button class="button button--danger" id="city-reset" type="button">
+            Начать остров заново
+          </button>
+        </div>
+      </div>
+    </div>
 
     <script type="module" src="/app.js"></script>
   </body>
