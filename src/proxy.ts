@@ -123,6 +123,29 @@ export async function probe(candidate: ProxyCandidate): Promise<ChannelStatus> {
   }
 }
 
+/** Сколько раз пробуем канал, прежде чем признать его мёртвым. */
+export const PROBE_ATTEMPTS = 3;
+const RETRY_PAUSE_MS = 3_000;
+
+const pause = (ms: number) => new Promise((done) => setTimeout(done, ms));
+
+/**
+ * Проба с повторами: канал мёртв, только если не ответил PROBE_ATTEMPTS раз
+ * подряд. Одиночный сбой — переподключение балансировщика, обрыв QUIC у
+ * Hysteria — не повод дёргать канал и рвать работу агента.
+ */
+export async function probeWithRetry(
+  candidate: ProxyCandidate,
+  attempts = PROBE_ATTEMPTS,
+): Promise<ChannelStatus> {
+  let status = await probe(candidate);
+  for (let attempt = 1; attempt < attempts && !status.reachable; attempt += 1) {
+    await pause(RETRY_PAUSE_MS * attempt);
+    status = await probe(candidate);
+  }
+  return status;
+}
+
 export interface ChannelChoice {
   active: ChannelStatus | null;
   checked: ChannelStatus[];
@@ -135,7 +158,7 @@ export interface ChannelChoice {
  */
 export async function chooseChannel(
   pool: ProxyCandidate[],
-  options: { requireCountry?: string } = {},
+  options: { requireCountry?: string; passes?: number } = {},
 ): Promise<ChannelChoice> {
   const checked: ChannelStatus[] = [];
 
@@ -143,6 +166,23 @@ export async function chooseChannel(
   checked.push(direct);
   if (direct.reachable) return { active: direct, checked };
 
+  // Пул обходим до трёх раз: между проходами прокси успевает переключить
+  // сервер, а балансировщик — выкинуть мёртвый. Сдаёмся, только если за все
+  // проходы не ответил никто.
+  const passes = options.passes ?? PROBE_ATTEMPTS;
+  for (let pass = 0; pass < passes; pass += 1) {
+    if (pass > 0) await pause(RETRY_PAUSE_MS * pass);
+    const found = await firstReachable(pool, checked, options);
+    if (found) return { active: found, checked };
+  }
+  return { active: null, checked };
+}
+
+async function firstReachable(
+  pool: ProxyCandidate[],
+  checked: ChannelStatus[],
+  options: { requireCountry?: string },
+): Promise<ChannelStatus | null> {
   for (const candidate of pool) {
     const status = await probe(candidate);
     checked.push(status);
@@ -154,10 +194,9 @@ export async function chooseChannel(
         `⚠️  ${candidate.label}: выход через ${status.country ?? "неизвестно"}, ожидался ${options.requireCountry}`,
       );
     }
-    return { active: status, checked };
+    return status;
   }
-
-  return { active: null, checked };
+  return null;
 }
 
 export function describeChannel(status: ChannelStatus): string {
@@ -205,7 +244,11 @@ export interface ChannelWatchOptions {
   onChange?: (next: ChannelStatus | null, previous: ChannelStatus | null) => void;
 }
 
-const WATCH_INTERVAL_MS = 10 * 60_000;
+/*
+ * Раз в минуту: проба дешёвая (один запрос), а бот без канала — это молчание
+ * в чате. Упавший канал засчитывается после трёх неудачных проб подряд.
+ */
+const WATCH_INTERVAL_MS = 60_000;
 
 export function startChannelWatch(
   pool: ProxyCandidate[],
@@ -221,7 +264,7 @@ export function startChannelWatch(
     try {
       const previous = activeChannel();
       if (previous) {
-        const again = await probe(previous.candidate);
+        const again = await probeWithRetry(previous.candidate);
         if (again.reachable) {
           // Канал жив: обновляем снимок, чтобы /status показывал свежие данные.
           setActiveChannel(again);

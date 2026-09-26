@@ -1,253 +1,239 @@
 #!/usr/bin/env bash
 #
-# Починка каналов выхода, когда VPN-подписка протухла.
+# Сторож каналов выхода: проверяет прокси и пересобирает их из VPN-подписок.
 #
-# Зачем: провайдер время от времени переставляет серверы — германский узел
-# переезжает на новый адрес, gslb-домен ротируется. Конфиг xray статичен,
-# поэтому в один день все каналы разом умирают, и бот пишет «Живого канала до
-# Anthropic не осталось», пока кто-нибудь не пересоберёт proxy/xray.json
-# руками. Скрипт делает это сам.
+# Защита в несколько эшелонов (с 25.09.2026):
+#   1. xray: балансировщик основной подписки сам исключает упавшие серверы;
+#   2. xray: если мертвы все основные, главный вход 10800 сам уводит трафик на
+#      резервную подписку (выход loopback → резервный балансировщик 10830);
+#   3. бот: проверяет свой канал раз в минуту, падение засчитывает после трёх
+#      неудачных проб подряд и перебирает пул до трёх раз (src/proxy.ts);
+#   4. этот скрипт: раз в 10 минут пробует все порты, мёртвые — до трёх раз, и
+#      пересобирает конфиг из обеих подписок (каждую качает с трёх попыток,
+#      при недоступности берёт кэш).
 #
-# Чинит по факту поломки, а не по расписанию: подписка отдаёт адреса с
-# балансировкой и почти на каждый запрос присылает чуть другой набор, так что
-# «конфиг отличается от подписки» — не признак беды. Признак беды один: ни
-# один канал не доходит до Anthropic. Пока хоть один жив, ничего не трогаем —
-# перезапуск прокси рвёт живые соединения агента.
+# Решения:
+#   • главный вход жив и живых основных серверов не меньше MIN_ALIVE — порядок;
+#   • вход жив, но основных мало (или работаем уже на резерве) — пересобираем
+#     заранее, не чаще раза в COOLDOWN, и раз в сутки предупреждаем владельца;
+#   • вход мёртв — пересобираем сразу.
+# Новый конфиг сперва проверяет сам xray; если с ним стало хуже — откат. Пул
+# портов у бота постоянный, поэтому бот при пересборке не перезапускается.
 #
-# Ссылка на подписку лежит вне репозитория, рядом со списком авторов выкатки:
-# это ключ от VPN. В .env ему тоже не место — .env целиком уезжает в контейнер
-# к агенту, а тому знать ключ незачем.
-#
-# Коды возврата: 0 — порядок (каналы живы либо починены), 1 — не повезло
-# сейчас (подписка не ответила), 2 — нужен человек: конфиг не применился либо
-# новая подписка тоже не работает и пришлось откатиться. Таймер считает
-# единицу нормой, двойку — поломкой.
+# Коды возврата: 0 — порядок; 1 — временная неудача (подписки не ответили);
+# 2 — нужен человек. Таймер считает единицу нормой.
 set -uo pipefail
 
 APP_DIR=${APP_DIR:-/opt/claude-telegram}
 SUB_FILE=${SUB_FILE:-/etc/claude-telegram/subscription.url}
+BACKUP_SUB_FILE=${BACKUP_SUB_FILE:-/etc/claude-telegram/subscription-backup.url}
 BACKUP_DIR=${BACKUP_DIR:-/root/claude-telegram-backups}
-STATE_FILE=${STATE_FILE:-/var/lib/claude-telegram/refresh-proxy.state}
-# Страна в том виде, в каком её пишет провайдер в названиях серверов.
-COUNTRY=${COUNTRY:-Germany}
-# Больше десяти копий конфига никто не откатывает, а ключи в них живые.
-KEEP_BACKUPS=${KEEP_BACKUPS:-10}
+STATE_DIR=${STATE_DIR:-/var/lib/claude-telegram}
 NETWORK=${NETWORK:-claude-telegram}
 CONTAINER=${CONTAINER:-claude-telegram}
+PROXY_HOST=${PROXY_HOST:-claude-proxy}
+XRAY_IMAGE=${XRAY_IMAGE:-ghcr.io/xtls/xray-core:latest}
+MIN_ALIVE=${MIN_ALIVE:-4}
+COOLDOWN=${COOLDOWN:-7200}
+KEEP_BACKUPS=${KEEP_BACKUPS:-10}
+ATTEMPTS=${ATTEMPTS:-3}
+ENTRY_PORT=10800
+BACKUP_PORT=10830
 
-# Отправка владельцу общая со сторожем и автовыкаткой.
 # shellcheck source=scripts/notify-owner.sh
 source "$APP_DIR/scripts/notify-owner.sh"
 
 cd "$APP_DIR" || exit 1
-mkdir -p "$(dirname "$STATE_FILE")"
+mkdir -p "$STATE_DIR" "$BACKUP_DIR"
+config=$APP_DIR/proxy/xray.json
+state_file=$STATE_DIR/refresh-proxy.state
+rebuilt_file=$STATE_DIR/proxy-rebuilt-at
+warned_file=$STATE_DIR/proxy-low-warned-at
 
-# Пробуем через тот же образ, что и бот: curl в нём уже есть, тянуть чужой
-# образ ради одной команды незачем. Имя берём у живого контейнера, чтобы не
-# гадать, как compose назвал сборку.
+now=$(date +%s)
+read_num() { [ -f "$1" ] && cat "$1" || echo 0; }
+last_state() { [ -f "$state_file" ] && cat "$state_file" || echo ok; }
+remember() { echo "$1" > "$state_file"; }
+first_line() { [ -f "$1" ] && grep -vE '^[[:space:]]*(#|$)' "$1" | head -1 | tr -d '[:space:]'; }
+
 PROBE_IMAGE=$(docker inspect --format '{{.Config.Image}}' "$CONTAINER" 2>/dev/null)
 [ -z "$PROBE_IMAGE" ] && PROBE_IMAGE=claude-telegram-bot
 
-# Живой канал — тот, что доносит запрос до Anthropic. 401 значит «дошли, но
-# без ключа», ровно как в пробе самого бота (src/proxy.ts).
-probe_port() {
-  docker run --rm --network "$NETWORK" "$PROBE_IMAGE" \
-    curl -s -o /dev/null -w '%{http_code}' --max-time 20 \
-    -x "http://claude-proxy:$1" https://api.anthropic.com/v1/models 2>/dev/null
-}
-
-count_alive() {
-  local port alive=0
-  for port in $1; do
-    [ "$(probe_port "$port")" = "401" ] && alive=$((alive + 1))
-  done
-  echo "$alive"
-}
-
+# «порт тег» по входам конфига: по тегу видно, чья это подписка (s-p… / s-b…).
 ports_of() {
-  # Порты берём из самого конфига, а не из счёта серверов: так их число и
-  # порядок всегда совпадают с тем, что слушает xray.
-  python3 -c 'import json,sys; print(" ".join(str(i["port"]) for i in json.load(open(sys.argv[1]))["inbounds"]))' "$1"
+  python3 -c 'import json,sys
+for i in json.load(open(sys.argv[1]))["inbounds"]:
+    print(i["port"], i["tag"])' "$1"
 }
 
-# Тревожим один раз за поломку, а не на каждый запуск таймера: иначе при
-# долгой аварии у провайдера чат превратится в ленту одинаковых сообщений.
-remember() { echo "$1" > "$STATE_FILE"; }
-last_state() { [ -f "$STATE_FILE" ] && cat "$STATE_FILE" || echo ok; }
+# Все пробы одним контейнером; порт, не ответивший 401, пробуем ещё до
+# ATTEMPTS раз с паузой — единичный сбой не повод считать сервер мёртвым.
+# Печатает «порт код».
+probe_all() {
+  docker run --rm --network "$NETWORK" "$PROBE_IMAGE" sh -c '
+    for p in '"$1"'; do
+      c=000
+      for try in $(seq 1 '"$ATTEMPTS"'); do
+        c=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 -x "http://'"$PROXY_HOST"':$p" https://api.anthropic.com/v1/models)
+        [ "$c" = 401 ] && break
+        [ "$try" -lt '"$ATTEMPTS"' ] && sleep 3
+      done
+      echo "$p $c"
+    done' 2>/dev/null
+}
 
-config=$APP_DIR/proxy/xray.json
+# $1 — «порт тег», $2 — вывод probe_all. Заполняет entry, backup_in,
+# p_alive/p_total (основная), b_alive/b_total (резервная).
+summarize() {
+  local joined
+  joined=$(join <(echo "$1" | sort) <(echo "$2" | sort))
+  entry=$(echo "$joined" | awk -v e="$ENTRY_PORT" '$1 == e {print $3}')
+  backup_in=$(echo "$joined" | awk -v b="$BACKUP_PORT" '$1 == b {print $3}')
+  p_total=$(echo "$joined" | awk '$2 ~ /^s-p/' | wc -l)
+  p_alive=$(echo "$joined" | awk '$2 ~ /^s-p/ && $3 == "401"' | wc -l)
+  b_total=$(echo "$joined" | awk '$2 ~ /^s-b/' | wc -l)
+  b_alive=$(echo "$joined" | awk '$2 ~ /^s-b/ && $3 == "401"' | wc -l)
+  entry=${entry:-none}
+  backup_in=${backup_in:-none}
+}
 
-# ── Страны ──────────────────────────────────────────────────────────────────
-#
-# Германия основная: серверов в подписке пять, и латентность до Anthropic там
-# лучшая. Польша запасная — сервер всего один, поэтому уходим туда только когда
-# от Германии не осталось ничего.
-#
-# Правило простое. Легла вся Германия — переключаемся на Польшу немедленно,
-# бот не должен лежать. Дальше каждые полчаса пробуем Германию снова. Ожила за
-# сутки — возвращаемся. Не ожила — Польша становится основной, и метания
-# прекращаются: провайдер явно увёл немецкие адреса надолго, и дёргать канал
-# каждые полчаса значит рвать живые соединения агента без всякой пользы.
-FALLBACK_COUNTRY=${FALLBACK_COUNTRY:-Poland}
-GRACE_SEC=${GRACE_SEC:-86400}
-PRIMARY_FILE=${PRIMARY_FILE:-/var/lib/claude-telegram/proxy-primary}
-RUNNING_FILE=${RUNNING_FILE:-/var/lib/claude-telegram/proxy-running}
-DOWN_FILE=${DOWN_FILE:-/var/lib/claude-telegram/proxy-primary-down-since}
-
-read_state() { [ -f "$1" ] && cat "$1" || echo "$2"; }
-PRIMARY=$(read_state "$PRIMARY_FILE" "$COUNTRY")
-RUNNING=$(read_state "$RUNNING_FILE" "$PRIMARY")
-
-if [ ! -f "$SUB_FILE" ]; then
-  echo "нет ссылки на подписку в $SUB_FILE — чинить нечем"
-  exit 2
-fi
-SUBSCRIPTION_URL=$(grep -vE '^[[:space:]]*(#|$)' "$SUB_FILE" | head -1 | tr -d '[:space:]')
-export SUBSCRIPTION_URL
-if [ -z "$SUBSCRIPTION_URL" ]; then
-  echo "файл $SUB_FILE пуст"
-  exit 2
-fi
-
-TMP_DIR=$(mktemp -d)
-trap 'rm -rf "$TMP_DIR"' EXIT
-mkdir -p "$BACKUP_DIR"
+describe() {
+  echo "вход ${entry}, резерв ${backup_in}; основная $p_alive из $p_total, резервная $b_alive из $b_total"
+}
 
 apply_config() {
   cp "$1" "$config" || return 1
   chmod 400 "$config"
   chown 65532:65532 "$config"
   docker compose restart proxy > /dev/null 2>&1 || return 1
-  sleep 8
+  # Балансировщику нужна минута на замеры; отдельные порты отвечают сразу.
+  sleep 70
 }
 
-# Пул в .env — единственное место, откуда бот узнаёт о портах. Если их число
-# изменилось, старый пул либо не увидит новых каналов, либо будет ходить в те,
-# которых уже нет.
-sync_pool() {
-  local report=$1
-  local pool current
+# Пул в .env — единственное место, откуда бот знает порты. С постоянной
+# раскладкой он меняется только при смене схемы; тогда же снимается
+# требование страны: выход выбирает балансировщик, годность проверяет проба.
+sync_env() {
+  local report=$1 pool current country
   pool=$(grep -oE '^PROXY_POOL=.*' "$report" | head -1)
-  current=$(grep -E '^PROXY_POOL=' "$APP_DIR/.env" | head -1)
-  if [ -n "$pool" ] && [ "$pool" != "$current" ]; then
-    cp -a "$APP_DIR/.env" "$BACKUP_DIR/.env.bak-$(date +%F-%H%M%S)"
-    # Пишем через awk, а не sed: в адресах есть слэши, и любой разделитель sed
-    # рано или поздно встретится внутри значения.
-    awk -v line="$pool" '/^PROXY_POOL=/ {print line; next} {print}' "$APP_DIR/.env" > "$TMP_DIR/env" \
-      && cat "$TMP_DIR/env" > "$APP_DIR/.env"
-    echo "пул портов изменился, пересоздаю бота"
-    # Именно up -d: restart не перечитывает env_file, и бот остался бы со
-    # старым пулом до следующей выкатки.
+  current=$(grep -E '^PROXY_POOL=' .env | head -1)
+  country=$(grep -E '^PROXY_REQUIRE_COUNTRY=.+' .env | head -1)
+  if { [ -n "$pool" ] && [ "$pool" != "$current" ]; } || [ -n "$country" ]; then
+    cp -a .env "$BACKUP_DIR/.env.bak-$(date +%F-%H%M%S)"
+    awk -v line="$pool" '
+      /^PROXY_POOL=/ { print line; next }
+      /^PROXY_REQUIRE_COUNTRY=/ { print "PROXY_REQUIRE_COUNTRY="; next }
+      { print }' .env > "$TMP_DIR/env" && cat "$TMP_DIR/env" > .env
+    echo "пул портов обновлён, пересоздаю бота"
+    # up -d, а не restart: только так бот перечитает env_file.
     docker compose up -d bot > /dev/null 2>&1
-  else
-    # Пул прежний, но бот сейчас сидит без канала и сам перепроверится только
-    # через десять минут. Рвать нечего — поэтому будим сразу.
-    docker compose restart bot > /dev/null 2>&1
   fi
 }
 
-# Собирает конфиг для страны и применяет, если хоть один канал ожил.
-# Возвращает 0 и оставляет страну работающей; 1 — конфиг откатан.
-try_country() {
-  local country=$1
-  local dir=$TMP_DIR/$country
-  local report=$TMP_DIR/report-$country
-  mkdir -p "$dir"
-
-  if ! OUT_DIR="$dir" python3 "$APP_DIR/scripts/make-proxy-config.py" "$country" > "$report" 2>&1; then
-    echo "подписка не разобралась для страны $country:"
-    cat "$report"
-    return 1
-  fi
-  cat "$report"
-
-  local backup
-  backup=$BACKUP_DIR/xray.json.bak-$(date +%F-%H%M%S)
-  cp -a "$config" "$backup" || return 1
-  chmod 600 "$backup"
-
-  if ! apply_config "$dir/xray.json"; then
-    echo "не удалось применить конфиг страны $country"
-    apply_config "$backup"
-    return 1
-  fi
-
-  local ports alive
-  ports=$(ports_of "$config")
-  alive=$(count_alive "$ports")
-  if [ "$alive" -eq 0 ]; then
-    echo "страна $country не отвечает — откатываюсь"
-    apply_config "$backup"
-    return 1
-  fi
-
-  sync_pool "$report"
-  echo "$country" > "$RUNNING_FILE"
-  echo "страна $country: живых каналов $alive из $(echo "$ports" | wc -w)"
-  return 0
+prune_backups() {
+  find "$BACKUP_DIR" -maxdepth 1 -name "xray.json.bak-*" -printf "%T@ %p\\n" | sort -rn |
+    tail -n +"$((KEEP_BACKUPS + 1))" | cut -d" " -f2- | xargs -r rm -f
 }
 
-old_ports=$(ports_of "$config")
-alive_before=$(count_alive "$old_ports")
+TMP_DIR=$(mktemp -d)
+trap 'rm -rf "$TMP_DIR"' EXIT
 
-if [ "$alive_before" -gt 0 ]; then
-  echo "каналов живо: $alive_before из $(echo "$old_ports" | wc -w)"
+layout=$(ports_of "$config")
+before=$(probe_all "$(echo "$layout" | cut -d" " -f1 | tr '\n' ' ')")
+summarize "$layout" "$before"
+old_entry=$entry
+old_p_alive=$p_alive
+old_alive=$((p_alive + b_alive))
+echo "сейчас: $(describe)"
 
-  # Работаем на основной стране — всё в порядке, подписку не трогаем.
-  if [ "$RUNNING" = "$PRIMARY" ]; then
-    rm -f "$DOWN_FILE"
-    [ "$(last_state)" != "ok" ] && notify "✅ Каналы VPN снова живы: $alive_before из $(echo "$old_ports" | wc -w)."
-    remember ok
-    exit 0
-  fi
+layout_old=true
+echo "$layout" | grep -q "^$BACKUP_PORT " && layout_old=false
 
-  # Сидим на запасной. Раз в полчаса проверяем, не ожила ли основная.
-  echo "сейчас на запасной стране $RUNNING, пробую вернуться на $PRIMARY"
-  if try_country "$PRIMARY"; then
-    rm -f "$DOWN_FILE"
-    notify "🇩🇪 $PRIMARY снова отвечает — вернул основной канал."
-    remember ok
-    exit 0
-  fi
+if ! $layout_old && [ "$entry" = "401" ] && [ "$p_alive" -ge "$MIN_ALIVE" ]; then
+  [ "$(last_state)" != "ok" ] && notify "✅ Каналы VPN в порядке: основная подписка $p_alive из $p_total, резервная $b_alive из $b_total."
+  rm -f "$warned_file"
+  remember ok
+  exit 0
+fi
 
-  # Не ожила. Если ждём дольше суток, перестаём дёргать канал каждые полчаса.
-  down_since=$(read_state "$DOWN_FILE" "$(date +%s)")
-  echo "$down_since" > "$DOWN_FILE"
-  waited=$(( $(date +%s) - down_since ))
-  if [ "$waited" -ge "$GRACE_SEC" ]; then
-    echo "$RUNNING" > "$PRIMARY_FILE"
-    rm -f "$DOWN_FILE"
-    notify "🇵🇱 $PRIMARY не поднялась за сутки. Делаю $RUNNING основной страной — переключения прекращаю."
-  else
-    echo "жду $PRIMARY ещё $(( (GRACE_SEC - waited) / 3600 )) ч"
+since=$((now - $(read_num "$rebuilt_file")))
+if ! $layout_old && [ "$entry" = "401" ] && [ "$since" -lt "$COOLDOWN" ]; then
+  echo "основных серверов мало ($p_alive), но пересборка была $((since / 60)) мин назад — жду"
+  if [ $((now - $(read_num "$warned_file"))) -gt 86400 ]; then
+    if [ "$p_alive" -eq 0 ]; then
+      notify "⚠️ Основная VPN-подписка не отвечает — бот работает через резервную ($b_alive из $b_total живы). Похоже, основную пора продлить или сменить."
+    else
+      notify "⚠️ В основной VPN-подписке мало живых серверов: $p_alive из $p_total. Бот работает, резерв наготове ($b_alive из $b_total)."
+    fi
+    echo "$now" > "$warned_file"
   fi
   remember ok
   exit 0
 fi
 
-echo "живых каналов не осталось, пересобираю конфиг из подписки"
+SUBSCRIPTION_URL=$(first_line "$SUB_FILE")
+BACKUP_SUBSCRIPTION_URL=$(first_line "$BACKUP_SUB_FILE")
+export SUBSCRIPTION_URL BACKUP_SUBSCRIPTION_URL
+if [ -z "$SUBSCRIPTION_URL" ] && [ -z "$BACKUP_SUBSCRIPTION_URL" ]; then
+  echo "нет ни основной ($SUB_FILE), ни резервной ($BACKUP_SUB_FILE) подписки"
+  exit 2
+fi
 
-# Сперва основная страна: адреса у провайдера ротируются, и чаще всего
-# достаточно взять свежие из подписки.
-if try_country "$PRIMARY"; then
-  rm -f "$DOWN_FILE"
-  notify "🌍 Каналы VPN легли, пересобрал их из подписки ($PRIMARY)."
+echo "пересобираю каналы из подписок"
+if ! OUT_DIR="$TMP_DIR/new" STATE_DIR="$STATE_DIR" \
+  python3 "$APP_DIR/scripts/make-proxy-config.py" > "$TMP_DIR/report" 2>&1; then
+  cat "$TMP_DIR/report"
+  if [ "$old_entry" != "401" ] && [ "$old_alive" -eq 0 ] && [ "$(last_state)" != "broken" ]; then
+    notify "‼️ Все каналы VPN мертвы, а подписки не разбираются: $(tail -1 "$TMP_DIR/report" | head -c 300)"
+    remember broken
+  fi
+  exit 1
+fi
+cat "$TMP_DIR/report"
+
+# Битый конфиг уронил бы прокси целиком — сперва его проверяет сам xray.
+chmod 444 "$TMP_DIR/new/xray.json"
+if ! docker run --rm -v "$TMP_DIR/new/xray.json:/c.json:ro" "$XRAY_IMAGE" run -test -c /c.json > "$TMP_DIR/test" 2>&1; then
+  echo "xray не принял новый конфиг:"
+  tail -5 "$TMP_DIR/test"
+  notify "‼️ Новый конфиг VPN не прошёл проверку xray — оставил старый. $(tail -1 "$TMP_DIR/test" | head -c 200)"
+  exit 2
+fi
+
+backup=$BACKUP_DIR/xray.json.bak-$(date +%F-%H%M%S)
+cp -a "$config" "$backup" && chmod 600 "$backup"
+
+if ! apply_config "$TMP_DIR/new/xray.json"; then
+  echo "не удалось применить — откатываюсь"
+  apply_config "$backup"
+  exit 2
+fi
+echo "$now" > "$rebuilt_file"
+
+layout=$(ports_of "$config")
+after=$(probe_all "$(echo "$layout" | cut -d" " -f1 | tr '\n' ' ')")
+summarize "$layout" "$after"
+echo "после пересборки: $(describe)"
+
+# Хуже, чем было, — откат: вход молчит, а до пересборки что-то работало.
+if [ "$entry" != "401" ] && [ "$((p_alive + b_alive))" -le "$old_alive" ] && [ "$old_alive" -gt 0 ]; then
+  echo "с новым конфигом не лучше — откатываюсь"
+  apply_config "$backup"
+  notify "⚠️ Пересобрал VPN из подписок, но стало не лучше — вернул прежний конфиг."
+  exit 2
+fi
+
+sync_env "$TMP_DIR/report"
+prune_backups
+
+if [ "$entry" = "401" ]; then
+  if $layout_old || [ "$old_entry" != "401" ] || [ "$p_alive" -lt "$old_p_alive" ] || [ "$(last_state)" != "ok" ]; then
+    notify "🔁 Каналы VPN пересобраны: основная $p_alive из $p_total, резервная $b_alive из $b_total."
+  fi
   remember ok
   exit 0
 fi
 
-# Основная не поднялась. Отмечаем начало аварии и немедленно уходим на
-# запасную: сутки без бота - недопустимо, ждать будем уже на живом канале.
-[ -f "$DOWN_FILE" ] || date +%s > "$DOWN_FILE"
-
-if [ "$PRIMARY" != "$FALLBACK_COUNTRY" ] && try_country "$FALLBACK_COUNTRY"; then
-  notify "🇵🇱 $PRIMARY легла целиком, ушёл на $FALLBACK_COUNTRY. Буду пробовать вернуться каждые полчаса; если за сутки не выйдет, $FALLBACK_COUNTRY станет основной."
-  remember ok
-  exit 0
-fi
-
-if [ "$(last_state)" != "broken" ]; then
-  notify "‼️ Не отвечает ни $PRIMARY, ни $FALLBACK_COUNTRY. Похоже, дело в подписке или в сети сервера — нужен человек."
-fi
+[ "$(last_state)" != "broken" ] && notify "‼️ После пересборки главный вход VPN не отвечает (основная $p_alive, резервная $b_alive). Похоже, кончились обе подписки — нужна новая ссылка."
 remember broken
 exit 2

@@ -80,7 +80,8 @@ export function ensureSession(options: EnsureOptions): ChatSession {
   const output = new TelegramOutput(api, chatId);
   // Кнопкам под ответом нужно знать, где искать репозиторий.
   output.projectDir = cwd;
-  const permissionMode = (chatRow?.permission_mode ?? "default") as PermissionMode;
+  const permissionMode = (chatRow?.permission_mode ??
+    config.defaultPermissionMode) as PermissionMode;
 
   const conversation = new Conversation({
     chatId,
@@ -153,7 +154,7 @@ export async function resetSession(chatId: number, userId: number): Promise<void
     userId,
     project: chatRow?.project ?? "default",
     sessionId: null,
-    permissionMode: chatRow?.permission_mode ?? "default",
+    permissionMode: chatRow?.permission_mode ?? config.defaultPermissionMode,
   });
 }
 
@@ -169,7 +170,13 @@ export async function switchProject(
     await session.conversation.close();
     sessions.delete(chatId);
   }
-  saveChat({ chatId, userId, project: safe, sessionId: null, permissionMode: "default" });
+  saveChat({
+    chatId,
+    userId,
+    project: safe,
+    sessionId: null,
+    permissionMode: config.defaultPermissionMode,
+  });
   workspaceFor(userId, safe);
   return safe;
 }
@@ -254,7 +261,7 @@ export async function startBackgroundTask(
     model: user.model,
     // Фоновая задача не начинает с чужого места: продолжать чей-то диалог она
     // не должна, у неё своя мысль.
-    permissionMode: (chatRow?.permission_mode ?? "default") as PermissionMode,
+    permissionMode: (chatRow?.permission_mode ?? config.defaultPermissionMode) as PermissionMode,
     permissionTimeoutMs: config.permissionTimeoutMs,
     resumeSessionId: null,
     output,
@@ -284,4 +291,53 @@ export async function stopBackgroundTask(chatId: number, id: number): Promise<bo
   await task.conversation.close().catch(() => undefined);
   background.get(chatId)?.delete(id);
   return true;
+}
+
+/**
+ * Канал выхода сменился.
+ *
+ * Адрес прокси подпроцесс агента получает один раз, при запуске, и живёт с ним
+ * много ходов подряд (см. buildEnv в conversation.ts). После смены канала он
+ * так и бился бы в мёртвый адрес, пока SDK не исчерпает повторы: в чате это
+ * выглядело как бесконечное «связь оборвалась, переподключаюсь» (21.09.2026).
+ * Поэтому живые диалоги закрываем: следующее сообщение поднимет сессию заново,
+ * уже с новым каналом, а контекст вернётся через resume по session_id из базы.
+ *
+ * close() ждёт, пока подпроцесс доиграет, а застрявший в повторах доигрывает
+ * минутами — поэтому из реестра сессию убираем сразу, а закрытие не ждём.
+ * Фоновые задачи закрываем тоже: продолжать им нечем.
+ *
+ * Возвращает число закрытых диалогов.
+ */
+export function restartSessionsForChannelChange(): number {
+  let closed = 0;
+  for (const [chatId, session] of sessions) {
+    sessions.delete(chatId);
+    if (session.conversation.closed) continue;
+    closed++;
+    const wasBusy = session.conversation.busy;
+    void session.conversation
+      .interrupt()
+      .catch(() => undefined)
+      .then(() => session.conversation.close())
+      .catch(() => undefined);
+    // Простаивающий диалог переподнимется незаметно. Прерванную задачу
+    // человек должен увидеть: иначе она просто перестанет отвечать.
+    if (wasBusy) {
+      void session.output
+        .send(
+          "⚠️ Канал выхода в интернет сменился, текущую задачу пришлось прервать.\n\n" +
+            "Напиши, что делать дальше — продолжу с того же места.",
+        )
+        .catch(() => undefined);
+    }
+  }
+  for (const [chatId, tasks] of background) {
+    for (const task of tasks.values()) {
+      closed++;
+      void task.conversation.close().catch(() => undefined);
+    }
+    background.delete(chatId);
+  }
+  return closed;
 }
