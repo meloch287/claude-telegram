@@ -1,4 +1,4 @@
-import { createServer } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { extname, normalize, resolve } from "node:path";
@@ -18,6 +18,10 @@ import {
   recordWorldScore,
   topWorlds,
   worldRank,
+  listWorldSaves,
+  putWorldSave,
+  deleteWorldSave,
+  WORLD_SAVE_MAX_BYTES,
 } from "../db.js";
 import { ACHIEVEMENTS, CAT_LEVELS, catForTokens, catProgress, nextCat } from "../cats.js";
 import { MODELS } from "../bot/keyboards.js";
@@ -239,6 +243,78 @@ function profilePayload(userId: number) {
   };
 }
 
+/**
+ * Тело запроса целиком, но не больше limit байт. Превысило — null: дочитывать
+ * гигабайт от чужого клиента ради отказа незачем.
+ */
+async function readBody(req: IncomingMessage, limit: number): Promise<string | null> {
+  const parts: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > limit) return null;
+    parts.push(chunk as Buffer);
+  }
+  return Buffer.concat(parts).toString("utf8");
+}
+
+function sendJson(res: ServerResponse, status: number, body: unknown): void {
+  res.writeHead(status, {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+  });
+  res.end(JSON.stringify(body));
+}
+
+/**
+ * Облачная копия мира: GET — все снимки человека, PUT — записать один,
+ * DELETE — стереть («вырастить мир заново» должно стирать и копию, иначе
+ * старый остров вернулся бы при следующем открытии).
+ */
+async function handleWorldSave(
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: URL,
+  userId: number,
+): Promise<void> {
+  if (req.method === "GET") {
+    sendJson(res, 200, { items: listWorldSaves(userId) });
+    return;
+  }
+  if (req.method === "DELETE") {
+    deleteWorldSave(userId, url.searchParams.get("key") ?? "");
+    sendJson(res, 200, { ok: true });
+    return;
+  }
+  if (req.method !== "PUT") {
+    sendJson(res, 405, { error: "method" });
+    return;
+  }
+  // Запас сверху на JSON-обёртку и экранирование кавычек внутри снимка.
+  const raw = await readBody(req, WORLD_SAVE_MAX_BYTES * 2);
+  if (raw === null) {
+    sendJson(res, 413, { error: "size" });
+    return;
+  }
+  let body: { key?: unknown; data?: unknown };
+  try {
+    body = JSON.parse(raw) as { key?: unknown; data?: unknown };
+  } catch {
+    sendJson(res, 400, { error: "bad json" });
+    return;
+  }
+  if (typeof body.key !== "string" || typeof body.data !== "string") {
+    sendJson(res, 400, { error: "key and data must be strings" });
+    return;
+  }
+  const result = putWorldSave(userId, body.key, body.data);
+  if ("error" in result) {
+    sendJson(res, result.error === "size" ? 413 : result.error === "limit" ? 409 : 400, result);
+    return;
+  }
+  sendJson(res, 200, { ok: true, updatedAt: result.updatedAt });
+}
+
 async function serveStatic(
   pathname: string,
 ): Promise<{ body: Buffer; type: string; etag: string } | null> {
@@ -332,6 +408,22 @@ export function startMiniAppServer(): void {
         "cache-control": "no-store",
       });
       res.end(JSON.stringify({ top, me: rank ? { rank } : null }));
+      return;
+    }
+
+    if (url.pathname === "/api/world-save") {
+      const initData = req.headers["x-telegram-init-data"];
+      const userId = authenticate(typeof initData === "string" ? initData : null);
+      if (userId === null) {
+        sendJson(res, 401, { error: "invalid init data" });
+        return;
+      }
+      try {
+        await handleWorldSave(req, res, url, userId);
+      } catch (error) {
+        console.error("world-save:", error);
+        if (!res.headersSent) sendJson(res, 500, { error: "internal" });
+      }
       return;
     }
 

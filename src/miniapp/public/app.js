@@ -2,6 +2,7 @@ import { catSvg, claudeStar } from "./cat-art.js";
 import { achievementSvg } from "./achievement-art.js";
 import { createWorld, RACES, TERRAIN_TOOLS, MAPS, renderPreview, W, H } from "./world.js";
 import { icon } from "./icons.js";
+import { createCloud } from "./cloud.js";
 
 const tg = window.Telegram?.WebApp;
 const nf = new Intl.NumberFormat("ru-RU");
@@ -1743,7 +1744,8 @@ function setupCity(profile) {
         } catch {
           /* ничего */
         }
-        location.reload();
+        // Выбор карты — тоже ключ world:*: пусть уедет в копию до перезагрузки.
+        void cloud.flush().then(() => location.reload());
       };
       ask(
         `Перейти на карту «${m.name}»? Текущий остров сохранится, вернуться можно в любой момент.`,
@@ -1771,7 +1773,8 @@ function setupCity(profile) {
   el("city-reset").addEventListener("click", () => {
     const go = () => {
       world.reset();
-      location.reload();
+      // Сначала стираем и копию на сервере, иначе старый остров вернётся из неё.
+      void cloud.flush().then(() => location.reload());
     };
     ask("Стереть всё и вырастить мир заново?", go);
   });
@@ -1907,6 +1910,9 @@ function fail(message) {
  * Демо-режим (?demo=1) рисует страницу на выдуманных данных — чтобы смотреть
  * вёрстку в обычном браузере без подписанных initData.
  */
+/** Облачная копия мира; до входа через Telegram — заглушка без сети. */
+let cloud = createCloud(null);
+
 async function loadDemo() {
   const response = await fetch("/demo-profile.json");
   return response.json();
@@ -1939,6 +1945,11 @@ async function main() {
     return;
   }
 
+  // Копию мира забираем параллельно с профилем: к созданию мира она должна
+  // уже лежать в localStorage, а лишнего ожидания на открытии не хочется.
+  cloud = createCloud(initData);
+  const pulling = cloud.pull();
+
   try {
     const response = await fetch("/api/profile", {
       headers: { "X-Telegram-Init-Data": initData },
@@ -1952,6 +1963,8 @@ async function main() {
       return;
     }
     const profile = await response.json();
+    await pulling;
+    cloud.start();
     // Показываем до отрисовки: размеры контейнеров (график, лента котов)
     // нужны уже в render, а у скрытых они нулевые.
     show();

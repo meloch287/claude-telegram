@@ -1309,3 +1309,72 @@ test("шаг задачи в Markdown: команда одной строкой 
     true,
   );
 });
+
+test("копия мира: новое устройство забирает остров, а свой ключ уходит на сервер", async () => {
+  const { planMerge } = await import("../src/miniapp/public/cloud.js");
+  const plan = planMerge(
+    { "world:map:7": "forest" },
+    [{ key: "world:v8:7:island", data: "{остров}", updatedAt: 100 }],
+    {},
+  );
+  assert.deepEqual(plan.take, [{ key: "world:v8:7:island", data: "{остров}", updatedAt: 100 }]);
+  assert.deepEqual(plan.upload, ["world:map:7"]);
+  assert.deepEqual(plan.synced, { "world:v8:7:island": 100 });
+});
+
+test("копия мира: кто прав, решает серверная метка, а не часы телефона", async () => {
+  const { planMerge } = await import("../src/miniapp/public/cloud.js");
+  const key = "world:v8:7:island";
+  const remote = [{ key, data: '{"savedAt":1}', updatedAt: 100 }];
+  // Сервер не менялся с нашей сверки — менялись только мы.
+  assert.deepEqual(planMerge({ [key]: '{"savedAt":1}x' }, remote, { [key]: 100 }).upload, [key]);
+  // Сервер сменился — остров правили на другом устройстве, берём его.
+  const other = planMerge({ [key]: '{"savedAt":999}' }, remote, { [key]: 50 });
+  assert.deepEqual(
+    other.take.map((i) => i.key),
+    [key],
+  );
+  // Ни разу не сверялись — побеждает снимок, сохранённый позже.
+  assert.deepEqual(planMerge({ [key]: '{"savedAt":999}' }, remote, {}).upload, [key]);
+  assert.deepEqual(planMerge({ [key]: '{"savedAt":0}' }, remote, {}).take.length, 1);
+});
+
+test("копия мира: стёртый на другом устройстве остров стирается, потерянная база — нет", async () => {
+  const { planMerge } = await import("../src/miniapp/public/cloud.js");
+  const local = { "world:v8:7:island": "{старый}", "world:map:7": "island" };
+  const stamps = { "world:v8:7:island": 100, "world:map:7": 100 };
+  const reset = planMerge(local, [{ key: "world:map:7", data: "island", updatedAt: 100 }], stamps);
+  assert.deepEqual(reset.drop, ["world:v8:7:island"]);
+  const lost = planMerge(local, [], stamps);
+  assert.deepEqual(lost.drop, [], "пустой сервер при известных метках — не повод стирать остров");
+  assert.deepEqual(lost.upload.sort(), Object.keys(local).sort());
+});
+
+test("копия мира в базе: только ключи world:*, лимит размера и числа ключей", async () => {
+  const db = await import("../src/db.js");
+  const user = 990_001;
+  const first = db.putWorldSave(user, "world:v8:1:island", "{остров}");
+  assert.ok("updatedAt" in first);
+  assert.deepEqual(db.putWorldSave(user, "tab", "1"), { error: "key" });
+  assert.deepEqual(db.putWorldSave(user, "world:x", "я".repeat(db.WORLD_SAVE_MAX_BYTES)), {
+    error: "size",
+  });
+  assert.deepEqual(
+    db.listWorldSaves(user).map((s) => [s.key, s.data]),
+    [["world:v8:1:island", "{остров}"]],
+  );
+  assert.deepEqual(db.listWorldSaves(user + 1), [], "чужой остров не виден");
+  for (let i = 0; i < db.WORLD_SAVE_MAX_KEYS; i += 1) db.putWorldSave(user, `world:k${i}`, "1");
+  assert.deepEqual(db.putWorldSave(user, "world:лишний", "1"), { error: "key" });
+  assert.deepEqual(db.putWorldSave(user, "world:extra", "1"), { error: "limit" });
+  assert.ok(
+    "updatedAt" in db.putWorldSave(user, "world:k0", "2"),
+    "перезапись не упирается в лимит",
+  );
+  db.deleteWorldSave(user, "world:v8:1:island");
+  assert.equal(
+    db.listWorldSaves(user).some((s) => s.key === "world:v8:1:island"),
+    false,
+  );
+  for (const s of db.listWorldSaves(user)) db.deleteWorldSave(user, s.key);
+});

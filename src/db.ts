@@ -114,6 +114,17 @@ CREATE TABLE IF NOT EXISTS world_scores (
   seed       INTEGER NOT NULL DEFAULT 0,
   updated_at INTEGER NOT NULL
 );
+-- Облачная копия мира из мини-аппа. Раньше остров жил только в localStorage
+-- телефона: новое устройство или очистка Telegram стирали его целиком. Храним
+-- те же снимки, что лежат в localStorage под ключами world:*, как есть, строкой:
+-- сервер в них не заглядывает, а мир меняет формат сохранения без миграций здесь.
+CREATE TABLE IF NOT EXISTS world_saves (
+  user_id    INTEGER NOT NULL,
+  key        TEXT NOT NULL,
+  data       TEXT NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, key)
+);
 CREATE TABLE IF NOT EXISTS running_tasks (
   chat_id    INTEGER PRIMARY KEY,
   message_id INTEGER NOT NULL,
@@ -236,6 +247,16 @@ const stmts = {
       " ON CONFLICT(chat_id) DO UPDATE SET message_id = excluded.message_id, started_at = excluded.started_at",
   ),
   clearRunning: db.prepare("DELETE FROM running_tasks WHERE chat_id = ?"),
+  listWorldSaves: db.prepare(
+    "SELECT key, data, updated_at FROM world_saves WHERE user_id = ? ORDER BY key",
+  ),
+  putWorldSave: db.prepare(
+    "INSERT INTO world_saves (user_id, key, data, updated_at) VALUES (?, ?, ?, ?)" +
+      " ON CONFLICT(user_id, key) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at",
+  ),
+  deleteWorldSave: db.prepare("DELETE FROM world_saves WHERE user_id = ? AND key = ?"),
+  hasWorldSave: db.prepare("SELECT 1 FROM world_saves WHERE user_id = ? AND key = ?"),
+  countWorldSaves: db.prepare("SELECT COUNT(*) AS n FROM world_saves WHERE user_id = ?"),
   allRunning: db.prepare("SELECT chat_id, message_id, started_at FROM running_tasks"),
   getUser: db.prepare("SELECT * FROM users WHERE user_id = ?"),
   insertUser: db.prepare("INSERT OR IGNORE INTO users (user_id, created_at) VALUES (?, ?)"),
@@ -776,4 +797,48 @@ export function worldRank(userId: number): number | null {
     (r) => r.user_id === userId,
   );
   return has ? row.rank : null;
+}
+
+/**
+ * Облачная копия мира. Ключ — тот же, что в localStorage мини-аппа (world:*),
+ * данные — та же строка. Метка времени серверная: по ней клиент понимает,
+ * менял ли остров кто-то другой с последней синхронизации, и часы телефонов
+ * в этом не участвуют.
+ */
+export const WORLD_SAVE_KEY = /^world:[A-Za-z0-9:_.-]{1,96}$/;
+export const WORLD_SAVE_MAX_BYTES = 512 * 1024;
+export const WORLD_SAVE_MAX_KEYS = 64;
+
+export type WorldSave = { key: string; data: string; updatedAt: number };
+
+export function listWorldSaves(userId: number): WorldSave[] {
+  const rows = stmts.listWorldSaves.all(userId) as {
+    key: string;
+    data: string;
+    updated_at: number;
+  }[];
+  return rows.map((r) => ({ key: r.key, data: r.data, updatedAt: r.updated_at }));
+}
+
+/**
+ * Записать снимок. Возвращает метку, которую клиент запомнит как «общую»,
+ * или причину отказа: чужой ключ, слишком большой снимок, слишком много ключей.
+ */
+export function putWorldSave(
+  userId: number,
+  key: string,
+  data: string,
+): { updatedAt: number } | { error: "key" | "size" | "limit" } {
+  if (!WORLD_SAVE_KEY.test(key)) return { error: "key" };
+  if (Buffer.byteLength(data) > WORLD_SAVE_MAX_BYTES) return { error: "size" };
+  const known = stmts.hasWorldSave.get(userId, key) !== undefined;
+  const count = (stmts.countWorldSaves.get(userId) as { n: number }).n;
+  if (!known && count >= WORLD_SAVE_MAX_KEYS) return { error: "limit" };
+  const updatedAt = Date.now();
+  stmts.putWorldSave.run(userId, key, data, updatedAt);
+  return { updatedAt };
+}
+
+export function deleteWorldSave(userId: number, key: string): void {
+  stmts.deleteWorldSave.run(userId, key);
 }
