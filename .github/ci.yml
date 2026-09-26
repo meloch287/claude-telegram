@@ -50,6 +50,9 @@ jobs:
       - name: Тесты
         run: npm test
 
+      - name: Мини-апп в браузере
+        run: npx playwright-core install --with-deps chromium && npm run test:e2e
+
   deploy:
     name: Деплой на сервер
     needs: checks
