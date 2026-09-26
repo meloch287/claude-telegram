@@ -854,6 +854,20 @@ function setupCity(profile) {
   const subRow = el("wb-sub");
   const hint = el("city-hint");
 
+  /** Ряд прокручивается вбок — показываем затухание у края, за которым есть ещё кнопки. */
+  function edgeFade(row) {
+    const update = () => {
+      const rest = row.scrollWidth - row.clientWidth - row.scrollLeft;
+      row.classList.toggle("wb-more-left", row.scrollLeft > 4);
+      row.classList.toggle("wb-more-right", rest > 4);
+    };
+    row.addEventListener("scroll", update, { passive: true });
+    if ("ResizeObserver" in window) new window.ResizeObserver(update).observe(row);
+    return update;
+  }
+  const fadeTools = edgeFade(toolsRow);
+  const fadeSub = edgeFade(subRow);
+
   // Стартовый инструмент — рука: первое движение пальцем должно двигать
   // карту, а не рисовать землю. Кисть выбирают осознанно.
   const HAND_TOOL = CATEGORIES.flatMap((c) => c.tools).find((t) => t.kind === "hand");
@@ -936,6 +950,7 @@ function setupCity(profile) {
       tag.style.left = `${((v.x + 0.5) / W) * 100}%`;
       tag.style.top = `${((v.y - 1.2) / H) * 100}%`;
       tag.style.setProperty("--race-color", v.zone);
+      tag.dataset.pop = String(v.pop);
       tag.insertAdjacentHTML("afterbegin", icon(`race-${RACES[v.race].id}`, 14, "wb-label-icon"));
       const name = document.createElement("span");
       name.append(text(v.name));
@@ -948,7 +963,36 @@ function setupCity(profile) {
       tag.title = `Основал ${v.founder}${v.king ? `. Король ${v.king}` : ""}. Домов: ${v.houses}. Брёвен ${v.wood}, камня ${v.stone}, еды ${v.food}${v.ore ? `, руды ${v.ore}` : ""}${v.gold ? `, золота ${v.gold}` : ""}${v.weapons ? `, оружия ${v.weapons}` : ""}${v.temple ? ", храм" : ""}${v.walls ? ", стены" : ""}${v.shipyard ? ", верфь" : ""}. Недовольство ${v.unrest}%, вера ${v.faith}%`;
       labels.append(tag);
     }
+    scheduleDeclutter();
   };
+
+  /**
+   * Подписи деревень не лежат стопкой: крупные подписываем первыми, а плашку,
+   * которая налезла бы на уже показанную, прячем, пока карту не приблизят.
+   * На телефоне соседние деревни иначе сливались в нечитаемый ком.
+   */
+  let declutterFrame = 0;
+  function declutterLabels() {
+    declutterFrame = 0;
+    const tags = [...labels.querySelectorAll(".wb-label")].sort(
+      (a, b) => Number(b.dataset.pop) - Number(a.dataset.pop),
+    );
+    // Сначала меряем все, потом переключаем: иначе каждое переключение
+    // заставляло бы браузер пересчитывать раскладку заново.
+    const boxes = tags.map((tag) => tag.getBoundingClientRect());
+    const placed = [];
+    const hidden = boxes.map((r) => {
+      const hit = placed.some(
+        (p) => r.left < p.right + 3 && r.right > p.left - 3 && r.top < p.bottom && r.bottom > p.top,
+      );
+      if (!hit) placed.push(r);
+      return hit;
+    });
+    tags.forEach((tag, i) => tag.classList.toggle("wb-label--hidden", hidden[i]));
+  }
+  function scheduleDeclutter() {
+    if (!declutterFrame) declutterFrame = requestAnimationFrame(declutterLabels);
+  }
 
   let lastHud = null;
   let lastScoreSent = 0;
@@ -1127,11 +1171,19 @@ function setupCity(profile) {
       ol.className = "wb-top-list";
       for (const row of data.top || []) {
         const li = document.createElement("li");
+        // Имя отдельной строкой, цифры мелко под ним: на узком экране в одну
+        // строку с кнопками всё это растягивалось на три.
         const label = document.createElement("span");
         label.className = "wb-top-label";
-        label.append(
-          text(`${row.name} — ${nf.format(row.score)} · ${row.pop} котов, день ${row.day}`),
+        const name = document.createElement("b");
+        name.append(text(row.name));
+        const stats = document.createElement("small");
+        stats.append(
+          text(
+            `${nf.format(row.score)} оч. · ${row.pop} ${plural(row.pop, "кот", "кота", "котов")} · день ${row.day}`,
+          ),
         );
+        label.append(name, stats);
         li.append(label);
         if (row.me) li.className = "wb-top-me";
         else if (row.id && !visiting) li.append(islandActions(row));
@@ -1266,6 +1318,7 @@ function setupCity(profile) {
       b.addEventListener("click", () => setTool(tool));
       toolsRow.append(b);
     }
+    fadeTools();
   }
 
   function renderSub() {
@@ -1303,6 +1356,7 @@ function setupCity(profile) {
         subRow.append(b);
       });
     }
+    fadeSub();
   }
 
   /* ── Камера и жесты ────────────────────────────────────────────────────────
@@ -1355,6 +1409,9 @@ function setupCity(profile) {
       `${cam.scale < 10 ? cam.scale.toFixed(cam.scale % 1 ? 1 : 0) : Math.round(cam.scale)}×`;
     el("zoom-out").disabled = cam.scale <= MIN_SCALE + 0.001;
     el("zoom-in").disabled = cam.scale >= MAX_SCALE - 0.001;
+    scheduleDeclutter();
+    // Плавный зум меряем ещё раз, когда он доедет.
+    if (animate) setTimeout(scheduleDeclutter, 340);
   }
 
   /** Зум к точке вьюпорта: мир под пальцем остаётся под пальцем. */
@@ -2024,7 +2081,9 @@ function setupVisit(wb, island) {
   const bar = document.createElement("div");
   bar.className = "wb-visit";
   const label = document.createElement("span");
-  label.append(text(`👀 В гостях: ${island.name}`));
+  // Имя острова уже крупно в шапке карты — на плашке оно только обрезалось бы.
+  label.append(text("👀 В гостях"));
+  bar.setAttribute("aria-label", `В гостях: ${island.name}`);
   const home = document.createElement("button");
   home.type = "button";
   home.textContent = "Домой";
@@ -2069,8 +2128,13 @@ async function welcomeBack(world) {
   const list = el("wb-away-list");
   list.replaceChildren(
     ...lines.map((line) => {
+      // Эмодзи отдельной колонкой: перенесённая строка не уезжает под него.
       const li = document.createElement("li");
-      li.append(text(line));
+      const cut = line.indexOf(" ");
+      const ico = document.createElement("span");
+      ico.className = "wb-away-ico";
+      ico.append(text(cut > 0 ? line.slice(0, cut) : ""));
+      li.append(ico, text(cut > 0 ? line.slice(cut + 1) : line));
       return li;
     }),
   );

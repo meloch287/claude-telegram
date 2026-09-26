@@ -2677,6 +2677,12 @@ main:focus,
   font-size: 0.8125rem;
 }
 
+.wb-away-list li {
+  display: grid;
+  grid-template-columns: 26px 1fr;
+  align-items: start;
+}
+
 .wb-away-list {
   display: grid;
   gap: 6px;
@@ -2706,8 +2712,28 @@ main:focus,
 /* ── Соседи в рейтинге и гостевой режим ─────────────────────────────────── */
 
 .wb-top-label {
+  display: grid;
   flex: 1;
+  gap: 1px;
   min-width: 0;
+}
+
+.wb-top-label b {
+  overflow: hidden;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-top-label small {
+  color: var(--hint);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.wb-top-me .wb-top-label small {
+  color: inherit;
+  opacity: 0.8;
 }
 
 .wb-top-actions {
@@ -2774,4 +2800,68 @@ main:focus,
 .wb--visit ~ .quest,
 .wb--visit ~ .city-hint {
   display: none;
+}
+
+/* ── Телефон: подписи без наложений, ряды с подсказкой прокрутки ────────── */
+
+.wb-label {
+  transition:
+    opacity 180ms var(--ease),
+    visibility 180ms;
+}
+
+/* Налезла бы на подпись крупной деревни — ждёт, пока карту приблизят. */
+.wb-label--hidden {
+  visibility: hidden;
+  opacity: 0;
+}
+
+/* За краем ряда есть ещё кнопки — край плавно гаснет. */
+.wb-more-right {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 36px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 36px), transparent);
+}
+
+.wb-more-left {
+  -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 36px), transparent);
+  mask-image: linear-gradient(to left, #000 calc(100% - 36px), transparent);
+}
+
+.wb-more-left.wb-more-right {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 36px,
+    #000 calc(100% - 36px),
+    transparent
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 36px,
+    #000 calc(100% - 36px),
+    transparent
+  );
+}
+
+/* Узкий экран: плитки компактнее, чтобы в ряд влезало больше инструментов. */
+@media (max-width: 400px) {
+  .wb-tool {
+    min-width: 58px;
+    height: 58px;
+    padding: 5px 7px;
+    border-radius: 14px;
+    font-size: 0.625rem;
+  }
+
+  .wb-chip {
+    height: 32px;
+    padding: 0 10px 0 6px;
+    font-size: 0.75rem;
+  }
+
+  .wb-dock {
+    gap: 6px;
+    padding: 8px 6px 6px;
+  }
 }

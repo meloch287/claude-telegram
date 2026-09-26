@@ -17,6 +17,9 @@ import { extname, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, devices, type Browser, type BrowserContext, type Page } from "playwright-core";
 
+/** Какой телефон изображаем: E2E_DEVICE="iPhone SE" проверит самый узкий экран. */
+const PHONE = devices[process.env.E2E_DEVICE ?? "iPhone 12 Pro"]!;
+
 const PUBLIC_DIR = resolve(fileURLToPath(new URL("../src/miniapp/public", import.meta.url)));
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -152,7 +155,7 @@ const KEEP_NAMES_SHIM = { content: "globalThis.__name = (fn) => fn;" };
 before(async () => {
   ({ server, origin } = await startServer());
   browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || undefined });
-  context = await browser.newContext({ ...devices["iPhone 12 Pro"], colorScheme: "dark" });
+  context = await browser.newContext({ ...PHONE, colorScheme: "dark" });
   await context.addInitScript(KEEP_NAMES_SHIM);
   page = await context.newPage();
   page.on("pageerror", (e) => errors.push(String(e)));
@@ -489,7 +492,7 @@ test("мир анимируется, вкладка «Кот» после мир
 test("облачная копия: остров переезжает на новый телефон", async () => {
   // Телефон — отдельный контекст браузера со своим localStorage.
   const phone = async () => {
-    const ctx = await browser.newContext({ ...devices["iPhone 12 Pro"], colorScheme: "dark" });
+    const ctx = await browser.newContext({ ...PHONE, colorScheme: "dark" });
     await ctx.addInitScript(KEEP_NAMES_SHIM);
     // Запоминаем, что мир прочитал из localStorage при создании: так видно,
     // что копия легла туда раньше, чем мир вырос заново.
@@ -580,7 +583,7 @@ const shot = async (tab: Page, name: string) => {
 
 /** Телефон в режиме Telegram: подтверждения соглашаются сами, всплывашки пишутся в __popups. */
 async function telegramPhone(path = "/") {
-  const ctx = await browser.newContext({ ...devices["iPhone 12 Pro"], colorScheme: "dark" });
+  const ctx = await browser.newContext({ ...PHONE, colorScheme: "dark" });
   await ctx.addInitScript(KEEP_NAMES_SHIM);
   const tab = await ctx.newPage();
   tab.on("pageerror", (e) => errors.push(String(e)));
