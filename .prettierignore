@@ -10,3 +10,5 @@ docs/cats/
 # Документы свёрстаны вручную: абзацы разбиты по смыслу, а не по ширине.
 # Prettier переносит их заново и ломает читаемость.
 *.md
+# SDK Telegram, скачанный как есть с telegram.org: чужой код не форматируем.
+src/miniapp/public/telegram-web-app.js

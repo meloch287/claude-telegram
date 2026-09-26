@@ -11,6 +11,8 @@ export default tseslint.config(
       "claude-home/**",
       "proxy/**",
       "docs/**",
+      // SDK Telegram, скачанный как есть с telegram.org: чужой код не правим.
+      "src/miniapp/public/telegram-web-app.js",
     ],
   },
   js.configs.recommended,
@@ -31,6 +33,7 @@ export default tseslint.config(
         URLSearchParams: "readonly",
         setTimeout: "readonly",
         clearTimeout: "readonly",
+        requestAnimationFrame: "readonly",
       },
     },
   },

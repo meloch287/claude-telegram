@@ -228,7 +228,9 @@ const stmts = {
   topWorlds: db.prepare(
     "SELECT w.user_id, w.score, w.pop, w.day, w.era, w.seed, u.display_name FROM world_scores w LEFT JOIN users u ON u.user_id = w.user_id ORDER BY w.score DESC LIMIT ?",
   ),
-  worldRank: db.prepare("SELECT COUNT(*) + 1 AS rank FROM world_scores WHERE score > (SELECT score FROM world_scores WHERE user_id = ?)"),
+  worldRank: db.prepare(
+    "SELECT COUNT(*) + 1 AS rank FROM world_scores WHERE score > (SELECT score FROM world_scores WHERE user_id = ?)",
+  ),
   markRunning: db.prepare(
     "INSERT INTO running_tasks (chat_id, message_id, started_at) VALUES (?, ?, ?)" +
       " ON CONFLICT(chat_id) DO UPDATE SET message_id = excluded.message_id, started_at = excluded.started_at",
@@ -742,15 +744,36 @@ export function runningTasks(): { chat_id: number; message_id: number; started_a
 }
 
 /** Рейтинг живости островов из мини-аппа «Мой город». */
-export function recordWorldScore(userId: number, s: { score: number; pop: number; day: number; era: number; seed: number }): void {
-  stmts.upsertWorldScore.run(userId, Math.max(0, Math.floor(s.score)), s.pop | 0, s.day | 0, s.era | 0, s.seed | 0, Date.now());
+export function recordWorldScore(
+  userId: number,
+  s: { score: number; pop: number; day: number; era: number; seed: number },
+): void {
+  stmts.upsertWorldScore.run(
+    userId,
+    Math.max(0, Math.floor(s.score)),
+    s.pop | 0,
+    s.day | 0,
+    s.era | 0,
+    s.seed | 0,
+    Date.now(),
+  );
 }
-export function topWorlds(limit = 10): Array<{ user_id: number; score: number; pop: number; day: number; era: number; seed: number; display_name: string | null }> {
+export function topWorlds(limit = 10): Array<{
+  user_id: number;
+  score: number;
+  pop: number;
+  day: number;
+  era: number;
+  seed: number;
+  display_name: string | null;
+}> {
   return stmts.topWorlds.all(limit) as never;
 }
 export function worldRank(userId: number): number | null {
   const row = stmts.worldRank.get(userId) as { rank: number } | undefined;
   if (!row) return null;
-  const has = (stmts.topWorlds.all(1000) as Array<{ user_id: number }>).some((r) => r.user_id === userId);
+  const has = (stmts.topWorlds.all(1000) as Array<{ user_id: number }>).some(
+    (r) => r.user_id === userId,
+  );
   return has ? row.rank : null;
 }

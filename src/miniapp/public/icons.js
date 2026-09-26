@@ -613,7 +613,9 @@ export function icon(name, size = 24, className = "") {
       }
       let w = 1;
       while (x + w < row.length && row[x + w] === ch) w += 1;
-      rects.push(`<rect x="${x}" y="${y}" width="${w}" height="1" fill="${PALETTE[ch] ?? "#f0f"}"/>`);
+      rects.push(
+        `<rect x="${x}" y="${y}" width="${w}" height="1" fill="${PALETTE[ch] ?? "#f0f"}"/>`,
+      );
       x += w;
     }
   });

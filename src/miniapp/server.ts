@@ -286,8 +286,20 @@ export function startMiniAppServer(): void {
         if (raw.length > 4096) break;
       }
       try {
-        const body = JSON.parse(raw || "{}") as { score?: number; pop?: number; day?: number; era?: number; seed?: number };
-        recordWorldScore(userId, { score: Number(body.score) || 0, pop: Number(body.pop) || 0, day: Number(body.day) || 1, era: Number(body.era) || 0, seed: Number(body.seed) || 0 });
+        const body = JSON.parse(raw || "{}") as {
+          score?: number;
+          pop?: number;
+          day?: number;
+          era?: number;
+          seed?: number;
+        };
+        recordWorldScore(userId, {
+          score: Number(body.score) || 0,
+          pop: Number(body.pop) || 0,
+          day: Number(body.day) || 1,
+          era: Number(body.era) || 0,
+          seed: Number(body.seed) || 0,
+        });
         res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
         res.end(JSON.stringify({ ok: true }));
       } catch {
@@ -315,7 +327,10 @@ export function startMiniAppServer(): void {
         me: r.user_id === userId,
       }));
       const rank = worldRank(userId);
-      res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+      res.writeHead(200, {
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": "no-store",
+      });
       res.end(JSON.stringify({ top, me: rank ? { rank } : null }));
       return;
     }

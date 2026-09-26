@@ -204,7 +204,8 @@ export function buildTerrain(seed, mapId = "island") {
   const rnd = rng(seed + 77);
   // Архипелаг: несколько центров, от ближайшего — спад высоты.
   const centers = [];
-  for (let i = 0; i < 4; i += 1) centers.push({ x: 0.2 + rnd() * 0.6, y: 0.2 + rnd() * 0.6, r: 0.16 + rnd() * 0.12 });
+  for (let i = 0; i < 4; i += 1)
+    centers.push({ x: 0.2 + rnd() * 0.6, y: 0.2 + rnd() * 0.6, r: 0.16 + rnd() * 0.12 });
   const tiles = new Uint8Array(W * H);
   for (let y = 0; y < H; y += 1) {
     for (let x = 0; x < W; x += 1) {
@@ -223,7 +224,8 @@ export function buildTerrain(seed, mapId = "island") {
       switch (mapId) {
         case "archipelago": {
           let best = Infinity;
-          for (const c of centers) best = Math.min(best, Math.hypot(u - c.x, (v - c.y) * 1.1) / c.r);
+          for (const c of centers)
+            best = Math.min(best, Math.hypot(u - c.x, (v - c.y) * 1.1) / c.r);
           h -= Math.max(0, best - 0.45) * 1.1;
           sea = 0.28;
           shallow = 0.36;
@@ -331,7 +333,13 @@ const FOOD_PER_HARVEST = 5;
 const WALL_COST = 20;
 const ORE_CHANCE = 0.3;
 const GOLD_CHANCE = 0.12;
-const JOB_NAMES = { fisher: "рыбаком", farmer: "фермером", smith: "кузнецом", healer: "лекарем", priest: "жрецом" };
+const JOB_NAMES = {
+  fisher: "рыбаком",
+  farmer: "фермером",
+  smith: "кузнецом",
+  healer: "лекарем",
+  priest: "жрецом",
+};
 const MINE_TICKS = 1800;
 const LOGS_PER_TREE = 5;
 const STONE_PER_DIG = 5;
@@ -341,11 +349,96 @@ const STONE_PER_DIG = 5;
    у королевств в WorldBox. Слоги у народов разные: люди звучат по-домашнему,
    эльфы певуче, орки рыкают, гномы стучат. */
 const SYLLABLES = {
-  human: ["мур", "бар", "вас", "тим", "мяу", "пуш", "сём", "фил", "ры", "жик", "кот", "мо", "ло", "ти", "ня", "сик"],
-  elf: ["эль", "ли", "ара", "ниэ", "тал", "сэ", "ло", "ри", "вэ", "ан", "иль", "фэ", "ми", "лэн", "ая", "ор"],
-  orc: ["гр", "рох", "ург", "заг", "мор", "кх", "дар", "гор", "рык", "шаг", "ог", "рум", "бар", "тук", "ур", "дрг"],
-  gnome: ["дур", "бол", "кам", "тор", "гим", "фар", "нор", "бром", "дин", "гро", "ин", "ок", "лун", "торн", "ир", "бек"],
-  robot: ["зет", "икс", "бип", "рок", "мех", "кло", "вольт", "нео", "бит", "трон", "ом", "цикл", "ал", "гир", "дрон", "юнит"],
+  human: [
+    "мур",
+    "бар",
+    "вас",
+    "тим",
+    "мяу",
+    "пуш",
+    "сём",
+    "фил",
+    "ры",
+    "жик",
+    "кот",
+    "мо",
+    "ло",
+    "ти",
+    "ня",
+    "сик",
+  ],
+  elf: [
+    "эль",
+    "ли",
+    "ара",
+    "ниэ",
+    "тал",
+    "сэ",
+    "ло",
+    "ри",
+    "вэ",
+    "ан",
+    "иль",
+    "фэ",
+    "ми",
+    "лэн",
+    "ая",
+    "ор",
+  ],
+  orc: [
+    "гр",
+    "рох",
+    "ург",
+    "заг",
+    "мор",
+    "кх",
+    "дар",
+    "гор",
+    "рык",
+    "шаг",
+    "ог",
+    "рум",
+    "бар",
+    "тук",
+    "ур",
+    "дрг",
+  ],
+  gnome: [
+    "дур",
+    "бол",
+    "кам",
+    "тор",
+    "гим",
+    "фар",
+    "нор",
+    "бром",
+    "дин",
+    "гро",
+    "ин",
+    "ок",
+    "лун",
+    "торн",
+    "ир",
+    "бек",
+  ],
+  robot: [
+    "зет",
+    "икс",
+    "бип",
+    "рок",
+    "мех",
+    "кло",
+    "вольт",
+    "нео",
+    "бит",
+    "трон",
+    "ом",
+    "цикл",
+    "ал",
+    "гир",
+    "дрон",
+    "юнит",
+  ],
 };
 const SUFFIX = {
   robot: ["-7", "-9", "порт", "блок", "ядро", "сектор"],
@@ -381,7 +474,16 @@ export const ERAS = [
   { id: "future", name: "Будущее", days: 6, houses: 12 },
 ];
 
-export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVillages, map = "island" }) {
+export function createWorld({
+  seed,
+  stats,
+  canvas,
+  onEvent,
+  onRaces,
+  onHud,
+  onVillages,
+  map = "island",
+}) {
   const rand = rng(seed * 7 + 13);
   // У каждой карты своё сохранение: пять миров живут параллельно.
   const storeKey = `world:v${SAVE_VERSION}:${seed}:${map}`;
@@ -453,27 +555,32 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
   // Плодовитость от настоящих чисел: серия дней и токены ускоряют рождения.
   const fertility = 1 + Math.min(3, Math.sqrt(tokens / 2_000_000) + (stats.streakDays || 0) / 10);
 
-  function placeHouse(r, near) {
-    const race = RACES[r];
-    for (let attempt = 0; attempt < 80; attempt += 1) {
-      const radius = 1 + Math.floor(attempt / 10);
-      const x = near.x + Math.round((rand() * 2 - 1) * radius * 2);
-      const y = near.y + Math.round((rand() * 2 - 1) * radius * 1.4);
-      if (!inside(x, y) || !race.canBuild(tileAt(x, y))) continue;
-      if (state.houses.some((h) => h.x === x && h.y === y)) continue;
-      if (state.homes.some((h) => h && h.x === x && h.y === y)) continue;
-      state.houses.push({ x, y, race: r });
-      state.trees.delete(idx(x, y));
-      return true;
-    }
-    return false;
-  }
-
   function newCat(x, y, r, v = 0) {
     // px/py — где кот нарисован; x/y — клетка, куда идёт. Между ними кот
     // плавно доезжает, и движение видно, а не мигает по клеткам. task —
     // дело, ради которого он остановится (стройка); без дела кот бродит.
-    const c = { x, y, px: x, py: y, race: r, v, name: catName(RACES[r].id), tx: x, ty: y, wait: Math.floor(Math.random() * 8), step: Math.random(), face: 1, gait: 0, task: null, warrior: false, hp: 3, cd: 0, job: null, hero: false, king: false };
+    const c = {
+      x,
+      y,
+      px: x,
+      py: y,
+      race: r,
+      v,
+      name: catName(RACES[r].id),
+      tx: x,
+      ty: y,
+      wait: Math.floor(Math.random() * 8),
+      step: Math.random(),
+      face: 1,
+      gait: 0,
+      task: null,
+      warrior: false,
+      hp: 3,
+      cd: 0,
+      job: null,
+      hero: false,
+      king: false,
+    };
     // Герой — один на полсотни: живучий и бьёт втрое, имя попадёт в летопись.
     if (Math.random() < 0.02 && state.cats.length >= 8) {
       c.hero = true;
@@ -505,7 +612,22 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
 
   function foundVillage(r, x, y, founder = null) {
     const who = founder || catName(RACES[r].id);
-    state.villages.push({ race: r, x, y, name: villageName(RACES[r].id, who), founder: who, wood: 0, stone: 0, food: 12, unrest: 0, shipyard: null, temple: null, ore: 0, gold: 0, weapons: 0 });
+    state.villages.push({
+      race: r,
+      x,
+      y,
+      name: villageName(RACES[r].id, who),
+      founder: who,
+      wood: 0,
+      stone: 0,
+      food: 12,
+      unrest: 0,
+      shipyard: null,
+      temple: null,
+      ore: 0,
+      gold: 0,
+      weapons: 0,
+    });
     if (!state.homes[r]) {
       state.homes[r] = state.villages[state.villages.length - 1];
       // Первый основатель народа — его первый король.
@@ -587,7 +709,12 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
         const cur = state.tiles[idx(x, y)];
         if (cur <= T.WATER && step > 2) break;
         const opts = [];
-        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        for (const [dx, dy] of [
+          [1, 0],
+          [-1, 0],
+          [0, 1],
+          [0, -1],
+        ]) {
           const nx = x + dx;
           const ny = y + dy;
           if (!inside(nx, ny)) continue;
@@ -640,7 +767,19 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
             relations: state.relations,
             wars: state.wars,
             allies: state.allies,
-            cats: state.cats.map((c) => [c.x, c.y, c.race, c.v, c.warrior ? 1 : 0, c.hp, c.name, c.job || null, c.hero ? 1 : 0, c.king ? 1 : 0, c.sick ? 1 : 0]),
+            cats: state.cats.map((c) => [
+              c.x,
+              c.y,
+              c.race,
+              c.v,
+              c.warrior ? 1 : 0,
+              c.hp,
+              c.name,
+              c.job || null,
+              c.hero ? 1 : 0,
+              c.king ? 1 : 0,
+              c.sick ? 1 : 0,
+            ]),
             savedAt: Date.now(),
             day: state.day,
             era: state.era,
@@ -672,12 +811,20 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
   function restore() {
     try {
       const saved = JSON.parse(localStorage.getItem(storeKey) || "null");
-      if (!saved || saved.v !== SAVE_VERSION || !Array.isArray(saved.tiles) || saved.tiles.length !== W * H) return false;
+      if (
+        !saved ||
+        saved.v !== SAVE_VERSION ||
+        !Array.isArray(saved.tiles) ||
+        saved.tiles.length !== W * H
+      )
+        return false;
       state.tiles = Uint8Array.from(saved.tiles);
       state.trees = new Set(saved.trees || []);
       state.flowers = new Set(saved.flowers || []);
       state.houses = saved.houses || [];
-      state.homes = Array.isArray(saved.homes) ? saved.homes.map((h) => h || null) : RACES.map(() => null);
+      state.homes = Array.isArray(saved.homes)
+        ? saved.homes.map((h) => h || null)
+        : RACES.map(() => null);
       state.villages = Array.isArray(saved.villages) ? saved.villages : [];
       for (const v of state.villages) {
         v.wood = v.wood || 0;
@@ -694,31 +841,60 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       state.roadLinks = Array.isArray(saved.roadLinks) ? saved.roadLinks : [];
       state.walls = new Map((saved.walls || []).map(([i, c]) => [i, c]));
       state.towers = Array.isArray(saved.towers) ? saved.towers : [];
-      state.kings = Array.isArray(saved.kings) && saved.kings.length === RACES.length ? saved.kings : RACES.map(() => null);
-      state.faith = Array.isArray(saved.faith) && saved.faith.length === RACES.length ? saved.faith : RACES.map(() => 50);
+      state.kings =
+        Array.isArray(saved.kings) && saved.kings.length === RACES.length
+          ? saved.kings
+          : RACES.map(() => null);
+      state.faith =
+        Array.isArray(saved.faith) && saved.faith.length === RACES.length
+          ? saved.faith
+          : RACES.map(() => 50);
       state.graves = Array.isArray(saved.graves) ? saved.graves : [];
       state.farms = new Set(saved.farms || []);
       state.lastVisit = saved.lastVisit || Date.now();
       state.islandAch = Array.isArray(saved.islandAch) ? saved.islandAch : [];
       state.flags = saved.flags && typeof saved.flags === "object" ? saved.flags : {};
-      state.blessed = Array.isArray(saved.blessed) && saved.blessed.length === RACES.length ? saved.blessed : RACES.map(() => 0);
-      state.cursed = Array.isArray(saved.cursed) && saved.cursed.length === RACES.length ? saved.cursed : RACES.map(() => 0);
+      state.blessed =
+        Array.isArray(saved.blessed) && saved.blessed.length === RACES.length
+          ? saved.blessed
+          : RACES.map(() => 0);
+      state.cursed =
+        Array.isArray(saved.cursed) && saved.cursed.length === RACES.length
+          ? saved.cursed
+          : RACES.map(() => 0);
       for (const h of state.houses) if (h.lvl === undefined) h.lvl = 0;
-      state.relations = Array.isArray(saved.relations) && saved.relations.length === RACES.length ? saved.relations : RACES.map(() => RACES.map(() => "peace"));
+      state.relations =
+        Array.isArray(saved.relations) && saved.relations.length === RACES.length
+          ? saved.relations
+          : RACES.map(() => RACES.map(() => "peace"));
       state.wars = Array.isArray(saved.wars) ? saved.wars : [];
       state.volcanoes = Array.isArray(saved.volcanoes) ? saved.volcanoes : [];
       state.allies = Array.isArray(saved.allies) ? saved.allies : [];
-      state.cats = (saved.cats || []).map(([x, y, r, v = 0, w = 0, hp = 3, name = null, job = null, hero = 0, king = 0, sick = 0]) => {
-        const c = newCat(x, y, r, v);
-        c.warrior = Boolean(w);
-        c.hp = hp;
-        c.job = job || null;
-        c.hero = Boolean(hero);
-        c.king = Boolean(king);
-        c.sick = Boolean(sick);
-        if (name) c.name = name;
-        return c;
-      });
+      state.cats = (saved.cats || []).map(
+        ([
+          x,
+          y,
+          r,
+          v = 0,
+          w = 0,
+          hp = 3,
+          name = null,
+          job = null,
+          hero = 0,
+          king = 0,
+          sick = 0,
+        ]) => {
+          const c = newCat(x, y, r, v);
+          c.warrior = Boolean(w);
+          c.hp = hp;
+          c.job = job || null;
+          c.hero = Boolean(hero);
+          c.king = Boolean(king);
+          c.sick = Boolean(sick);
+          if (name) c.name = name;
+          return c;
+        },
+      );
       for (const v of state.villages) {
         if (!v.name) {
           v.founder = v.founder || catName(RACES[v.race].id);
@@ -727,7 +903,10 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       }
       state.savedAt = saved.savedAt || Date.now();
       state.day = saved.day || 1;
-      state.era = Array.isArray(saved.era) && saved.era.length === RACES.length ? saved.era : RACES.map(() => 0);
+      state.era =
+        Array.isArray(saved.era) && saved.era.length === RACES.length
+          ? saved.era
+          : RACES.map(() => 0);
       state.born = saved.born || Date.now();
       state.ships = (saved.ships || []).map(([x, y, r]) => newShip(x, y, r));
       state.chronicle = saved.chronicle || [];
@@ -823,21 +1002,40 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
   /* ── Летопись ─────────────────────────────────────────────────────────── */
 
   const lines = {
-    born: (r, name, village) => (name ? `В ${village || "деревне"} у ${RACES[r].plural} родился котёнок ${name}.` : `У ${RACES[r].plural} родился котёнок.`),
-    settle: (r, founder, village) => (founder ? `${founder} из ${RACES[r].plural} основал поселение ${village}.` : `${RACES[r].name} основали поселение.`),
-    colony: (r, founder, village) => (founder ? `${founder} увёл ${RACES[r].plural} на новое место: деревня ${village}.` : `${RACES[r].name} основали новую деревню.`),
-    away: (b, h) => `Пока тебя не было: родилось ${b} кот${plural(b)}, построено ${h} дом${plural(h)}.`,
+    born: (r, name, village) =>
+      name
+        ? `В ${village || "деревне"} у ${RACES[r].plural} родился котёнок ${name}.`
+        : `У ${RACES[r].plural} родился котёнок.`,
+    settle: (r, founder, village) =>
+      founder
+        ? `${founder} из ${RACES[r].plural} основал поселение ${village}.`
+        : `${RACES[r].name} основали поселение.`,
+    colony: (r, founder, village) =>
+      founder
+        ? `${founder} увёл ${RACES[r].plural} на новое место: деревня ${village}.`
+        : `${RACES[r].name} основали новую деревню.`,
+    away: (b, h) =>
+      `Пока тебя не было: родилось ${b} кот${plural(b)}, построено ${h} дом${plural(h)}.`,
     war: (a, b) => `⚔ ${RACES[a].name} объявили войну ${RACES[b].dat}!`,
-    join: (c, a, b) => `⚔ ${RACES[c].name} вступают в войну против ${RACES[b].plural} на стороне ${RACES[a].plural}.`,
+    join: (c, a, b) =>
+      `⚔ ${RACES[c].name} вступают в войну против ${RACES[b].plural} на стороне ${RACES[a].plural}.`,
     ally: (a, b) => `🤝 ${RACES[a].name} и ${RACES[b].name.toLowerCase()} заключили союз.`,
     allyEnd: (a, b) => `Союз ${RACES[a].plural} и ${RACES[b].plural} распался.`,
-    peace: (a, b, ka, kb) => `Мир между ${RACES[a].instr} и ${RACES[b].instr}. Потери: ${ka} и ${kb}.`,
+    peace: (a, b, ka, kb) =>
+      `Мир между ${RACES[a].instr} и ${RACES[b].instr}. Потери: ${ka} и ${kb}.`,
     arson: (a, b) => `${RACES[a].name} подожгли дом ${RACES[b].plural}.`,
-    fallen: (r, name, village) => `Пал воин ${name || ""} ${RACES[r].plural}${village ? ` из ${village}` : ""}.`.replace("  ", " "),
+    fallen: (r, name, village) =>
+      `Пал воин ${name || ""} ${RACES[r].plural}${village ? ` из ${village}` : ""}.`.replace(
+        "  ",
+        " ",
+      ),
     built: (r) => `${RACES[r].name} построили себе дом.`,
-    upgraded: (r, lvl) => `${RACES[r].name} ${lvl === 1 ? "надстроили второй этаж" : "возвели башню"}.`,
-    shipyard: (r, village) => `В ${village} ${RACES[r].plural === "людей-котов" ? "люди-коты" : RACES[r].name.toLowerCase()} поставили верфь — можно в море.`,
-    grow: (n) => `Пока тебя не было, родилось ${n} кот${plural(n)} — остров растёт от твоей работы.`,
+    upgraded: (r, lvl) =>
+      `${RACES[r].name} ${lvl === 1 ? "надстроили второй этаж" : "возвели башню"}.`,
+    shipyard: (r, village) =>
+      `В ${village} ${RACES[r].plural === "людей-котов" ? "люди-коты" : RACES[r].name.toLowerCase()} поставили верфь — можно в море.`,
+    grow: (n) =>
+      `Пока тебя не было, родилось ${n} кот${plural(n)} — остров растёт от твоей работы.`,
     spawn: (n, r) => `Бог призвал ${n} ${RACES[r].plural}.`,
     house: (r) => `${RACES[r].name} обживают новый дом.`,
     tree: () => "Бог посадил лес.",
@@ -847,17 +1045,33 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     stone: () => "Бог воздвиг горы.",
     fire: () => "Пожар! Коты бегут.",
     bolt: () => "Молния ударила с ясного неба.",
-    season: (s) => ({ spring: "Пришла весна: тает снег, на лугах цветы.", summer: "Лето: жара, поля зреют.", autumn: "Осень: лес рыжеет, коты запасаются.", winter: "Зима: снег лёг на остров, реки встали." })[s],
-    weather: (k) => ({ rain: "Пошёл дождь — пожары гаснут.", storm: "Гроза! Молнии бьют сами.", drought: "Засуха: земля трескается, лес сохнет.", snow: "Снегопад укрыл остров.", clear: "Небо прояснилось." })[k],
+    season: (s) =>
+      ({
+        spring: "Пришла весна: тает снег, на лугах цветы.",
+        summer: "Лето: жара, поля зреют.",
+        autumn: "Осень: лес рыжеет, коты запасаются.",
+        winter: "Зима: снег лёг на остров, реки встали.",
+      })[s],
+    weather: (k) =>
+      ({
+        rain: "Пошёл дождь — пожары гаснут.",
+        storm: "Гроза! Молнии бьют сами.",
+        drought: "Засуха: земля трескается, лес сохнет.",
+        snow: "Снегопад укрыл остров.",
+        clear: "Небо прояснилось.",
+      })[k],
     volcano: () => "Бог поднял вулкан.",
     crown: (r, name) => `${name} коронован: у ${RACES[r].plural} есть король.`,
     kingDied: (r, old, heir) => `Король ${old} ${RACES[r].plural} умер. Трон занял ${heir}.`,
     kingFell: (r, name) => `Король ${name} ${RACES[r].plural} пал в бою — смута!`,
-    hero: (r, name) => `У ${RACES[r].plural} родился герой ${name}: в десять раз сильнее любого кота.`,
-    heroFell: (r, name) => `Герой ${name} ${RACES[r].plural} погиб. На месте гибели — камень с именем.`,
+    hero: (r, name) =>
+      `У ${RACES[r].plural} родился герой ${name}: в десять раз сильнее любого кота.`,
+    heroFell: (r, name) =>
+      `Герой ${name} ${RACES[r].plural} погиб. На месте гибели — камень с именем.`,
     job: (r, name, job) => `${name} из ${RACES[r].plural} стал ${JOB_NAMES[job]}.`,
     hunger: (r, v) => `В ${v} голод: ${RACES[r].name} ропщут.`,
-    revolt: (r, v, to) => `Бунт в ${v}: деревня отделилась от ${RACES[r].plural} и присягнула ${RACES[to].dat}.`,
+    revolt: (r, v, to) =>
+      `Бунт в ${v}: деревня отделилась от ${RACES[r].plural} и присягнула ${RACES[to].dat}.`,
     temple: (r, v) => `${RACES[r].name} возвели храм в ${v}.`,
     prayer: (r) => `Жрец ${RACES[r].plural} молится богу. Вера крепнет.`,
     faithLow: (r) => `Бог давно не заходил: культ ${RACES[r].plural} слабеет.`,
@@ -872,7 +1086,10 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     pirateRaid: (r, v) => `Пираты разграбили ${v} у ${RACES[r].plural}.`,
     pirateDead: (r) => `Воины ${RACES[r].plural} отбили пиратов — те пошли ко дну.`,
     ore: (r) => `Шахтёры ${RACES[r].plural} нашли железную руду.`,
-    plague: (r) => (r == null ? "На остров пришла чума." : `Чума у ${RACES[r].plural}: больные кашляют, лекари сбиваются с лап.`),
+    plague: (r) =>
+      r == null
+        ? "На остров пришла чума."
+        : `Чума у ${RACES[r].plural}: больные кашляют, лекари сбиваются с лап.`,
     plagueEnd: () => "Чума отступила.",
     quake: () => "Землетрясение! Дома трещат, горы растут.",
     tsunami: () => "Цунами! Волна идёт на берег.",
@@ -888,13 +1105,21 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     ufoTaken: (r, n) => `Тарелка забрала ${n} ${RACES[r].plural} и улетела.`,
     gold: (r, v) => `В горах у ${v} нашли золото! Казна ${RACES[r].plural} полнеет.`,
     weapons: (r) => `Кузнец ${RACES[r].plural} выковал оружие: воины бьют сильнее.`,
-    eruption: (r) => (r == null ? "Вулкан проснулся: лава течёт по склонам." : `Вулкан извергается рядом с землёй ${RACES[r].plural}!`),
+    eruption: (r) =>
+      r == null
+        ? "Вулкан проснулся: лава течёт по склонам."
+        : `Вулкан извергается рядом с землёй ${RACES[r].plural}!`,
     wolf: (r, name) => `Волки напали на ${name} из ${RACES[r].plural}.`,
-    dragon: (r) => (r == null ? "Над горами кружит дракон." : `Дракон сжёг дом ${RACES[r].plural}.`),
+    dragon: (r) =>
+      r == null ? "Над горами кружит дракон." : `Дракон сжёг дом ${RACES[r].plural}.`,
     mouse: (r, name) => `${name} из ${RACES[r].plural} поймал мышь.`,
-    nuke: (r) => (r == null ? "Атомный взрыв выжег пустошь." : `Атомный гриб встал над землёй ${RACES[r].plural}.`),
+    nuke: (r) =>
+      r == null
+        ? "Атомный взрыв выжег пустошь."
+        : `Атомный гриб встал над землёй ${RACES[r].plural}.`,
     collapse: (r) => `Город ${RACES[r].plural} пал: имя забыто, склады пусты. Всё заново.`,
-    meteor: (r) => (r == null ? "С неба упал метеорит." : `Метеорит упал рядом с деревней ${RACES[r].plural}.`),
+    meteor: (r) =>
+      r == null ? "С неба упал метеорит." : `Метеорит упал рядом с деревней ${RACES[r].plural}.`,
     drown: (n) => `${n} кот${plural(n)} уплыл${n === 1 ? "" : "и"} на плотах: их землю затопило.`,
     trade: (a, b) => `${RACES[a].name} торгуют с ${RACES[b].instr}.`,
     festival: (r) => `У ${RACES[r].plural} праздник урожая.`,
@@ -986,7 +1211,9 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       sums[r].y += (i / W) | 0;
       sums[r].n += 1;
     }
-    state.centers = sums.map((a) => (a.n ? { x: a.x / a.n + 0.5, y: a.y / a.n + 0.5, area: a.n } : null));
+    state.centers = sums.map((a) =>
+      a.n ? { x: a.x / a.n + 0.5, y: a.y / a.n + 0.5, area: a.n } : null,
+    );
     bakeOverlay();
   }
 
@@ -1006,7 +1233,9 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       kept.push(v);
     });
     state.villages = kept;
-    state.roadLinks = state.roadLinks.map((l) => ({ ...l, a: remap.get(l.a), b: remap.get(l.b) })).filter((l) => l.a !== undefined && l.b !== undefined);
+    state.roadLinks = state.roadLinks
+      .map((l) => ({ ...l, a: remap.get(l.a), b: remap.get(l.b) }))
+      .filter((l) => l.a !== undefined && l.b !== undefined);
     state.homes[r] = null;
     state.kings[r] = null;
     state.faith[r] = 50;
@@ -1015,7 +1244,9 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     state.ships = state.ships.filter((sh) => sh.race !== r);
     for (const [i, wl] of [...state.walls]) if (wl.race === r) state.walls.delete(i);
     state.towers = state.towers.filter((t) => t.race !== r);
-    state.roadLinks = state.roadLinks.filter((l) => state.villages[l.a]?.race !== r && state.villages[l.b]?.race !== r);
+    state.roadLinks = state.roadLinks.filter(
+      (l) => state.villages[l.a]?.race !== r && state.villages[l.b]?.race !== r,
+    );
     state.caravans = state.caravans.filter((cv) => cv.race !== r);
     for (const c of state.cats) {
       if (c.race === r) {
@@ -1088,7 +1319,7 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
         gold: v.gold || 0,
         weapons: v.weapons || 0,
         walls: state.towers.some((t) => t.race === v.race && state.homes[v.race] === v),
-        king: state.homes[v.race] === v ? state.kings[v.race]?.name ?? null : null,
+        king: state.homes[v.race] === v ? (state.kings[v.race]?.name ?? null) : null,
         faith: state.faith[v.race],
         shipyard: Boolean(v.shipyard),
       })),
@@ -1111,8 +1342,16 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       ach: state.islandAch.map((id) => ISLAND_ACH.find((a) => a.id === id)?.title).filter(Boolean),
       achTotal: ISLAND_ACH.length,
       discovered: state.discovered,
-      score: state.cats.length * 3 + state.houses.length * 2 + state.day * 10 + Math.max(...state.era) * 50 + state.villages.length * 5 + state.islandAch.length * 20,
-      kings: state.kings.map((k, r) => (k ? { race: RACES[r].name, name: k.name } : null)).filter(Boolean),
+      score:
+        state.cats.length * 3 +
+        state.houses.length * 2 +
+        state.day * 10 +
+        Math.max(...state.era) * 50 +
+        state.villages.length * 5 +
+        state.islandAch.length * 20,
+      kings: state.kings
+        .map((k, r) => (k ? { race: RACES[r].name, name: k.name } : null))
+        .filter(Boolean),
       season: season().name,
       weather: WEATHER[state.weather.kind]?.name ?? "",
       pop: state.cats.length,
@@ -1257,7 +1496,12 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       return;
     }
     if (t.kind === "farm") {
-      if (village) village.food = (village.food || 0) + FOOD_PER_HARVEST + (season().id === "summer" ? 3 : 0) - (isWinter() ? 4 : 0);
+      if (village)
+        village.food =
+          (village.food || 0) +
+          FOOD_PER_HARVEST +
+          (season().id === "summer" ? 3 : 0) -
+          (isWinter() ? 4 : 0);
       state.farms.add(idx(t.x, t.y));
       puff(t.x, t.y, "#e0c05a", 4, "dust");
       bakeArea(t.x, t.y, t.x, t.y);
@@ -1326,7 +1570,10 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       return;
     }
     if (t.kind !== "build") return;
-    if (!RACES[c.race].canBuild(tileAt(t.x, t.y)) || state.houses.some((h) => h.x === t.x && h.y === t.y)) {
+    if (
+      !RACES[c.race].canBuild(tileAt(t.x, t.y)) ||
+      state.houses.some((h) => h.x === t.x && h.y === t.y)
+    ) {
       if (village) village.wood += COST.house.wood; // брёвна не пропали
       return;
     }
@@ -1369,7 +1616,9 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
   function nearestTree(village, radius = 10) {
     let best = null;
     let bestD = Infinity;
-    const busy = new Set(state.cats.filter((c) => c.task?.kind === "chop").map((c) => idx(c.task.x, c.task.y)));
+    const busy = new Set(
+      state.cats.filter((c) => c.task?.kind === "chop").map((c) => idx(c.task.x, c.task.y)),
+    );
     for (let dy = -radius; dy <= radius; dy += 1) {
       for (let dx = -radius; dx <= radius; dx += 1) {
         const x = village.x + dx;
@@ -1425,7 +1674,11 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
         const t = tileAt(x, y);
         if (t !== T.SAND && t !== T.GRASS) continue;
         if (state.houses.some((h) => h.x === x && h.y === y)) continue;
-        const water = tileAt(x + 1, y) <= T.WATER || tileAt(x - 1, y) <= T.WATER || tileAt(x, y + 1) <= T.WATER || tileAt(x, y - 1) <= T.WATER;
+        const water =
+          tileAt(x + 1, y) <= T.WATER ||
+          tileAt(x - 1, y) <= T.WATER ||
+          tileAt(x, y + 1) <= T.WATER ||
+          tileAt(x, y - 1) <= T.WATER;
         if (!water) continue;
         const d = dx * dx + dy * dy;
         if (d < bestD) {
@@ -1448,17 +1701,22 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     const vi = Math.floor(Math.random() * state.villages.length);
     const village = state.villages[vi];
     const r = village.race;
-    const race = RACES[r];
     const mine = state.cats.filter((c) => c.v === vi);
     if (!mine.length) return;
     const houses = state.houses.filter((h) => h.v === vi);
-    const needHouses = houses.length < Math.ceil(mine.length / 3) && state.houses.filter((h) => h.race === r).length < 48;
+    const needHouses =
+      houses.length < Math.ceil(mine.length / 3) &&
+      state.houses.filter((h) => h.race === r).length < 48;
     const era = state.era[r] || 0;
     const needUpgrade = houses.find((h) => (h.lvl || 0) < era);
     const wantShipyard = !village.shipyard && houses.length >= 2;
 
     // 1. Стройка за брёвна.
-    if (needHouses && village.wood >= COST.house.wood && !mine.some((c) => c.task?.kind === "build")) {
+    if (
+      needHouses &&
+      village.wood >= COST.house.wood &&
+      !mine.some((c) => c.task?.kind === "build")
+    ) {
       const site = pickSite(r, village);
       const worker = site && idleCatNear(vi, site.x, site.y);
       if (worker) {
@@ -1468,7 +1726,13 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       }
     }
     // 1б. Храм: с эры Средневековья, за камень, один на деревню.
-    if (!village.temple && era >= 1 && houses.length >= 4 && village.stone >= 15 && !mine.some((c) => c.task?.kind === "temple")) {
+    if (
+      !village.temple &&
+      era >= 1 &&
+      houses.length >= 4 &&
+      village.stone >= 15 &&
+      !mine.some((c) => c.task?.kind === "temple")
+    ) {
       const site = pickSite(r, village);
       const worker = site && idleCatNear(vi, site.x, site.y);
       if (worker) {
@@ -1478,7 +1742,11 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       }
     }
     // 2. Верфь.
-    if (wantShipyard && village.wood >= COST.shipyard.wood && !mine.some((c) => c.task?.kind === "shipyard")) {
+    if (
+      wantShipyard &&
+      village.wood >= COST.shipyard.wood &&
+      !mine.some((c) => c.task?.kind === "shipyard")
+    ) {
       const shore = nearestShore(village);
       const worker = shore && idleCatNear(vi, shore.x, shore.y);
       if (worker) {
@@ -1488,7 +1756,12 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       }
     }
     // 3. Улучшение дома под эру.
-    if (needUpgrade && village.wood >= COST.upgrade.wood && village.stone >= COST.upgrade.stone && !mine.some((c) => c.task?.kind === "upgrade")) {
+    if (
+      needUpgrade &&
+      village.wood >= COST.upgrade.wood &&
+      village.stone >= COST.upgrade.stone &&
+      !mine.some((c) => c.task?.kind === "upgrade")
+    ) {
       const worker = idleCatNear(vi, needUpgrade.x, needUpgrade.y);
       if (worker) {
         village.wood -= COST.upgrade.wood;
@@ -1526,7 +1799,12 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       const x = Math.floor(Math.random() * W);
       const y = Math.floor(Math.random() * H);
       const i = idx(x, y);
-      if (state.tiles[i] === T.GRASS && !state.trees.has(i) && !state.flowers.has(i) && !state.houses.some((h) => h.x === x && h.y === y)) {
+      if (
+        state.tiles[i] === T.GRASS &&
+        !state.trees.has(i) &&
+        !state.flowers.has(i) &&
+        !state.houses.some((h) => h.x === x && h.y === y)
+      ) {
         state.flowers.add(i);
         bakeArea(x, y, x, y);
       }
@@ -1565,7 +1843,8 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     // Коты плодятся сами: деревня и без домов кормит троих, каждый дом —
     // ещё четверых. Раньше без домов рождений не было вовсе, и остров
     // замирал, пока коты копили брёвна. Потолок — под большую карту.
-    if (state.tick % Math.max(90, Math.round(420 / fertility)) !== 0 || state.cats.length >= 400) return;
+    if (state.tick % Math.max(90, Math.round(420 / fertility)) !== 0 || state.cats.length >= 400)
+      return;
     const r = Math.floor(Math.random() * RACES.length);
     const vs = villagesOf(r);
     if (!vs.length || state.pop[r] === 0) return;
@@ -1576,7 +1855,8 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     if (vs.every((i) => (state.villages[i].food || 0) <= 0)) return;
     if (state.faith[r] < 60 && Math.random() < 0.15) return;
     if (state.cursed[r] > 0) return;
-    if (state.blessed[r] > 0 && Math.random() < 0.5 && state.pop[r] < capacity - 1) spawnCat(r, vs[Math.floor(Math.random() * vs.length)]);
+    if (state.blessed[r] > 0 && Math.random() < 0.5 && state.pop[r] < capacity - 1)
+      spawnCat(r, vs[Math.floor(Math.random() * vs.length)]);
     if (spawnCat(r, vs[Math.floor(Math.random() * vs.length)])) {
       const kitten = state.cats[state.cats.length - 1];
       puff(kitten.x, kitten.y, "#ff6f91", 5, "heart");
@@ -1680,7 +1960,9 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
   function breakAlliance(a, b) {
     state.relations[a][b] = "peace";
     state.relations[b][a] = "peace";
-    state.allies = state.allies.filter((o) => !((o.a === a && o.b === b) || (o.a === b && o.b === a)));
+    state.allies = state.allies.filter(
+      (o) => !((o.a === a && o.b === b) || (o.a === b && o.b === a)),
+    );
     chronicle("allyEnd", a, b);
   }
 
@@ -1733,27 +2015,44 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
 
   function weaponOf(c) {
     const era = state.era[c.race] || 0;
-    return era === 0 ? { kind: "bow", range: 4, cd: 30 } : era === 1 ? { kind: "sword", range: 1, cd: 18 } : { kind: "blaster", range: 5, cd: 24 };
+    return era === 0
+      ? { kind: "bow", range: 4, cd: 30 }
+      : era === 1
+        ? { kind: "sword", range: 1, cd: 18 }
+        : { kind: "blaster", range: 5, cd: 24 };
   }
 
   function killCat(victim, byRace) {
     state.cats = state.cats.filter((o) => o !== victim);
     puff(victim.x, victim.y, "#d9d3c4", 6, "dust");
     // Призрак кота поднимается к небу.
-    state.particles.push({ x: victim.x * PX + 1, y: victim.y * PX + 1, vx: 0, vy: -0.25, ttl: 60, life: 60, color: "#ffffff", kind: "ghost" });
-    const w = state.wars.find((o) => (o.a === victim.race && o.b === byRace) || (o.b === victim.race && o.a === byRace));
+    state.particles.push({
+      x: victim.x * PX + 1,
+      y: victim.y * PX + 1,
+      vx: 0,
+      vy: -0.25,
+      ttl: 60,
+      life: 60,
+      color: "#ffffff",
+      kind: "ghost",
+    });
+    const w = state.wars.find(
+      (o) => (o.a === victim.race && o.b === byRace) || (o.b === victim.race && o.a === byRace),
+    );
     if (w) w.kills[victim.race === w.a ? 0 : 1] += 1;
     if (victim.hero) {
       state.graves.push({ x: victim.x, y: victim.y, name: victim.name, race: victim.race });
       chronicle("heroFell", victim.race, victim.name);
       bakeArea(victim.x, victim.y, victim.x, victim.y);
-    } else if (victim.warrior) chronicle("fallen", victim.race, victim.name, state.villages[victim.v]?.name);
+    } else if (victim.warrior)
+      chronicle("fallen", victim.race, victim.name, state.villages[victim.v]?.name);
     if (victim.king) {
       chronicle("kingFell", victim.race, victim.name);
       state.flags.kingFell = true;
       state.kings[victim.race] = null;
       // Смута: без короля деревни ропщут вдвое сильнее.
-      for (const v of state.villages) if (v.race === victim.race) v.unrest = Math.min(100, (v.unrest || 0) + 25);
+      for (const v of state.villages)
+        if (v.race === victim.race) v.unrest = Math.min(100, (v.unrest || 0) + 25);
       succession(victim.race, null);
     }
   }
@@ -1816,15 +2115,19 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       c.job = job;
       if (Math.random() < 0.5) chronicle("job", r, c.name, job);
     };
-    if (idle.length && v.shipyard && count("fisher") < 1 + Math.floor(mine.length / 12)) give(idle.pop(), "fisher");
-    if (idle.length && count("farmer") < 1 + Math.floor(mine.length / 8)) give(idle.pop(), "farmer");
-    if (idle.length && (state.era[r] || 0) >= 1 && v.stone >= 10 && count("smith") < 1) give(idle.pop(), "smith");
+    if (idle.length && v.shipyard && count("fisher") < 1 + Math.floor(mine.length / 12))
+      give(idle.pop(), "fisher");
+    if (idle.length && count("farmer") < 1 + Math.floor(mine.length / 8))
+      give(idle.pop(), "farmer");
+    if (idle.length && (state.era[r] || 0) >= 1 && v.stone >= 10 && count("smith") < 1)
+      give(idle.pop(), "smith");
     if (idle.length && count("healer") < 1 && mine.length >= 6) give(idle.pop(), "healer");
     if (idle.length && v.temple && count("priest") < 1) give(idle.pop(), "priest");
     // Работа: рыбак и фермер ходят на промысел, кузнец точит, лекарь лечит, жрец молится.
     for (const c of mine) {
       if (c.task || !c.job) continue;
-      if (c.job === "fisher" && v.shipyard) assign(c, { kind: "fish", x: v.shipyard.x, y: v.shipyard.y, ttl: 240, v: vi });
+      if (c.job === "fisher" && v.shipyard)
+        assign(c, { kind: "fish", x: v.shipyard.x, y: v.shipyard.y, ttl: 240, v: vi });
       else if (c.job === "farmer") {
         const site = nearestFarmSite(v);
         if (site) assign(c, { kind: "farm", x: site.x, y: site.y, ttl: 300, v: vi });
@@ -1832,7 +2135,8 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       else if (c.job === "healer") {
         const sick = mine.find((o) => o !== c && o.hp < (o.hero ? 30 : 3));
         if (sick) assign(c, { kind: "heal", x: sick.x, y: sick.y, ttl: 90, v: vi, who: sick });
-      } else if (c.job === "priest" && v.temple) assign(c, { kind: "pray", x: v.temple.x, y: v.temple.y, ttl: 300, v: vi });
+      } else if (c.job === "priest" && v.temple)
+        assign(c, { kind: "pray", x: v.temple.x, y: v.temple.y, ttl: 300, v: vi });
     }
     // Еда: каждый кот ест понемногу; мыши и промысел пополняют.
     // Зимой еда уходит вдвое быстрее, летом поля щедрее.
@@ -1849,7 +2153,8 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       v.unrest = Math.max(0, (v.unrest || 0) - 2);
     }
     // Война затянулась — недовольство.
-    if (state.wars.some((wr) => (wr.a === r || wr.b === r) && wr.ttl < 1800)) v.unrest = Math.min(100, v.unrest + 3);
+    if (state.wars.some((wr) => (wr.a === r || wr.b === r) && wr.ttl < 1800))
+      v.unrest = Math.min(100, v.unrest + 3);
     // Вера: с храмом и жрецом растёт, без внимания бога падает.
     if (v.temple && count("priest")) state.faith[r] = Math.min(100, state.faith[r] + 1);
     if (state.faith[r] > 60) v.unrest = Math.max(0, v.unrest - 1);
@@ -1912,7 +2217,12 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     if (to === null) to = others[0];
     v.race = to;
     v.unrest = 0;
-    for (const c of state.cats) if (c.v === vi) { c.race = to; c.king = false; c.task = null; }
+    for (const c of state.cats)
+      if (c.v === vi) {
+        c.race = to;
+        c.king = false;
+        c.task = null;
+      }
     for (const h of state.houses) if (h.v === vi) h.race = to;
     chronicle("revolt", r, v.name, to);
     state.needBake = true;
@@ -1940,8 +2250,14 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       }
       if (x === b.x && y === b.y) break;
       const e2 = err * 2;
-      if (e2 > -dy) { err -= dy; x += sx; }
-      if (e2 < dx) { err += dx; y += sy; }
+      if (e2 > -dy) {
+        err -= dy;
+        x += sx;
+      }
+      if (e2 < dx) {
+        err += dx;
+        y += sy;
+      }
     }
     for (const i of path) {
       state.roads.add(i);
@@ -1963,7 +2279,12 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
             const a = state.villages[vs[i]];
             const b = state.villages[vs[j]];
             if (Math.abs(a.x - b.x) + Math.abs(a.y - b.y) > 26) continue;
-            if (state.roadLinks.some((l) => (l.a === vs[i] && l.b === vs[j]) || (l.a === vs[j] && l.b === vs[i]))) continue;
+            if (
+              state.roadLinks.some(
+                (l) => (l.a === vs[i] && l.b === vs[j]) || (l.a === vs[j] && l.b === vs[i]),
+              )
+            )
+              continue;
             if (a.wood >= 2 && layRoad(vs[i], vs[j])) {
               a.wood -= 2;
               persist();
@@ -1983,7 +2304,14 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
         if (rich[0].food > 20) {
           rich[0].food -= 8;
           rich[0].wood = Math.max(0, rich[0].wood - 3);
-          state.caravans.push({ path: rich[2], i: 0, race: a.race, to: rich[1], from: rich[0], t: 0 });
+          state.caravans.push({
+            path: rich[2],
+            i: 0,
+            race: a.race,
+            to: rich[1],
+            from: rich[0],
+            t: 0,
+          });
         }
       }
     }
@@ -2015,7 +2343,11 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
           const x = home.x + dx;
           const y = home.y + dy;
           if (!inside(x, y) || tileAt(x, y) <= T.WATER || tileAt(x, y) >= T.MOUNTAIN) continue;
-          if (state.houses.some((h) => h.x === x && h.y === y) || state.villages.some((v) => v.x === x && v.y === y)) continue;
+          if (
+            state.houses.some((h) => h.x === x && h.y === y) ||
+            state.villages.some((v) => v.x === x && v.y === y)
+          )
+            continue;
           if (state.roads.has(idx(x, y))) continue; // ворота — где дорога
           cells.push({ x, y, corner: Math.abs(dx) === R && Math.abs(dy) === R });
         }
@@ -2039,11 +2371,26 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
         t.cd -= 1;
         continue;
       }
-      const foe = state.cats.find((c) => c.warrior && atWar(t.race, c.race) && Math.abs(c.x - t.x) <= 4 && Math.abs(c.y - t.y) <= 4);
+      const foe = state.cats.find(
+        (c) =>
+          c.warrior &&
+          atWar(t.race, c.race) &&
+          Math.abs(c.x - t.x) <= 4 &&
+          Math.abs(c.y - t.y) <= 4,
+      );
       if (!foe) continue;
       foe.hp -= 1;
       puff(foe.x, foe.y, "#e0242f", 3, "hit");
-      state.particles.push({ x: t.x * PX + 4, y: t.y * PX - 2, vx: (foe.x - t.x) * 0.9, vy: (foe.y - t.y) * 0.9, ttl: 10, life: 10, color: "#f4efe2", kind: "spark" });
+      state.particles.push({
+        x: t.x * PX + 4,
+        y: t.y * PX - 2,
+        vx: (foe.x - t.x) * 0.9,
+        vy: (foe.y - t.y) * 0.9,
+        ttl: 10,
+        life: 10,
+        color: "#f4efe2",
+        kind: "spark",
+      });
       t.cd = 40;
       if (foe.hp <= 0) killCat(foe, t.race);
     }
@@ -2051,7 +2398,12 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     if (state.tick % 30 === 0 && state.walls.size) {
       for (const c of state.cats) {
         if (!c.warrior) continue;
-        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        for (const [dx, dy] of [
+          [1, 0],
+          [-1, 0],
+          [0, 1],
+          [0, -1],
+        ]) {
           const i = idx(c.x + dx, c.y + dy);
           const wl = state.walls.get(i);
           if (!wl || !atWar(c.race, wl.race)) continue;
@@ -2075,7 +2427,14 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     if (state.tick % 300 === 150) {
       for (const sh of state.ships) {
         if (sh.wait <= 0) continue;
-        const v = state.villages.find((o) => o.shipyard && o.race !== sh.race && !atWar(o.race, sh.race) && Math.abs(o.shipyard.x - sh.x) <= 3 && Math.abs(o.shipyard.y - sh.y) <= 3);
+        const v = state.villages.find(
+          (o) =>
+            o.shipyard &&
+            o.race !== sh.race &&
+            !atWar(o.race, sh.race) &&
+            Math.abs(o.shipyard.x - sh.x) <= 3 &&
+            Math.abs(o.shipyard.y - sh.y) <= 3,
+        );
         if (!v) continue;
         const home = state.homes[sh.race];
         v.food = (v.food || 0) + 6;
@@ -2088,13 +2447,26 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       }
     }
     // Пираты: с эры Средневековья, в открытом море.
-    if (state.tick % 1800 === 900 && state.pirates.length < 2 && Math.max(...state.era) >= 1 && state.ships.length + state.villages.filter((v) => v.shipyard).length > 0) {
+    if (
+      state.tick % 1800 === 900 &&
+      state.pirates.length < 2 &&
+      Math.max(...state.era) >= 1 &&
+      state.ships.length + state.villages.filter((v) => v.shipyard).length > 0
+    ) {
       for (let attempt = 0; attempt < 40; attempt += 1) {
         const x = Math.floor(Math.random() * W);
         const y = Math.floor(Math.random() * H);
         if (state.tiles[idx(x, y)] !== T.DEEP) continue;
         const a = Math.random() * Math.PI * 2;
-        state.pirates.push({ x, y, vx: Math.cos(a) * 0.06, vy: Math.sin(a) * 0.06, wait: 0, face: 1, hp: 4 });
+        state.pirates.push({
+          x,
+          y,
+          vx: Math.cos(a) * 0.06,
+          vy: Math.sin(a) * 0.06,
+          wait: 0,
+          face: 1,
+          hp: 4,
+        });
         chronicle("pirate");
         break;
       }
@@ -2108,12 +2480,18 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
         let bestD = Infinity;
         for (const sh of state.ships) {
           const d = Math.abs(sh.x - p.x) + Math.abs(sh.y - p.y);
-          if (d < bestD) { bestD = d; target = { x: sh.x, y: sh.y }; }
+          if (d < bestD) {
+            bestD = d;
+            target = { x: sh.x, y: sh.y };
+          }
         }
         for (const v of state.villages) {
           if (!v.shipyard) continue;
           const d = Math.abs(v.shipyard.x - p.x) + Math.abs(v.shipyard.y - p.y);
-          if (d < bestD) { bestD = d; target = v.shipyard; }
+          if (d < bestD) {
+            bestD = d;
+            target = v.shipyard;
+          }
         }
         if (target && Math.random() < 0.1) {
           const a = Math.atan2(target.y - p.y, target.x - p.x);
@@ -2122,7 +2500,10 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
         }
         const nx = p.x + p.vx;
         const ny = p.y + p.vy;
-        if (inside(Math.round(nx), Math.round(ny)) && tileAt(Math.round(nx), Math.round(ny)) <= T.WATER) {
+        if (
+          inside(Math.round(nx), Math.round(ny)) &&
+          tileAt(Math.round(nx), Math.round(ny)) <= T.WATER
+        ) {
           p.x = nx;
           p.y = ny;
           if (Math.abs(p.vx) > 0.001) p.face = p.vx > 0 ? 1 : -1;
@@ -2134,14 +2515,21 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
         }
       }
       // Абордаж и грабёж.
-      const victim = state.ships.find((sh) => Math.abs(sh.x - p.x) <= 1.5 && Math.abs(sh.y - p.y) <= 1.5);
+      const victim = state.ships.find(
+        (sh) => Math.abs(sh.x - p.x) <= 1.5 && Math.abs(sh.y - p.y) <= 1.5,
+      );
       if (victim && state.tick % 20 === 0) {
         state.ships = state.ships.filter((sh) => sh !== victim);
         puff(Math.round(victim.x), Math.round(victim.y), "#5b3d22", 8, "dust");
         chronicle("pirateSink", victim.race);
       }
       if (state.tick % 240 === 0) {
-        const yard = state.villages.find((v) => v.shipyard && Math.abs(v.shipyard.x - p.x) <= 2.5 && Math.abs(v.shipyard.y - p.y) <= 2.5);
+        const yard = state.villages.find(
+          (v) =>
+            v.shipyard &&
+            Math.abs(v.shipyard.x - p.x) <= 2.5 &&
+            Math.abs(v.shipyard.y - p.y) <= 2.5,
+        );
         if (yard) {
           yard.food = Math.max(0, (yard.food || 0) - 5);
           yard.wood = Math.max(0, yard.wood - 5);
@@ -2152,7 +2540,9 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       }
       // Воины на берегу отстреливаются.
       if (state.tick % 45 === 0) {
-        const guard = state.cats.find((c) => c.warrior && Math.abs(c.x - p.x) <= 3 && Math.abs(c.y - p.y) <= 3);
+        const guard = state.cats.find(
+          (c) => c.warrior && Math.abs(c.x - p.x) <= 3 && Math.abs(c.y - p.y) <= 3,
+        );
         if (guard) {
           p.hp -= 1;
           puff(Math.round(p.x), Math.round(p.y), "#e0242f", 3, "hit");
@@ -2171,7 +2561,12 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
   function plagueTick() {
     const sick = state.cats.filter((c) => c.sick);
     // Сама приходит редко и только в людный остров.
-    if (!sick.length && state.tick % 3000 === 1500 && state.cats.length >= 25 && Math.random() < 0.25) {
+    if (
+      !sick.length &&
+      state.tick % 3000 === 1500 &&
+      state.cats.length >= 25 &&
+      Math.random() < 0.25
+    ) {
       const c = state.cats[Math.floor(Math.random() * state.cats.length)];
       c.sick = true;
       chronicle("plague", c.race);
@@ -2206,7 +2601,8 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       for (const h of state.cats) {
         if (h.job !== "healer" || h.task) continue;
         const patient = sick.find((s) => s.v === h.v);
-        if (patient) assign(h, { kind: "heal", x: patient.x, y: patient.y, ttl: 60, v: h.v, who: patient });
+        if (patient)
+          assign(h, { kind: "heal", x: patient.x, y: patient.y, ttl: 60, v: h.v, who: patient });
       }
     }
   }
@@ -2222,7 +2618,7 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
         puff(h.x, h.y, "#c9b48a", 8, "dust");
       }
     }
-    for (const [i, wl] of [...state.walls]) {
+    for (const [i] of [...state.walls]) {
       const wx = i % W;
       const wy = (i / W) | 0;
       if (Math.abs(wx - x) <= R && Math.abs(wy - y) <= R && Math.random() < 0.5) {
@@ -2266,7 +2662,10 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       for (let i = 0; i < W * H; i += 1) {
         if (state.tiles[i] !== T.DEEP) continue;
         const d = Math.abs((i % W) - x) + Math.abs(((i / W) | 0) - y);
-        if (d < bestD) { bestD = d; best = i; }
+        if (d < bestD) {
+          bestD = d;
+          best = i;
+        }
       }
       if (best === null) return;
       x = best % W;
@@ -2277,7 +2676,10 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     for (let i = 0; i < W * H; i += 1) {
       if (state.tiles[i] < T.SAND) continue;
       const d = Math.abs((i % W) - x) + Math.abs(((i / W) | 0) - y);
-      if (d < bestD) { bestD = d; target = i; }
+      if (d < bestD) {
+        bestD = d;
+        target = i;
+      }
     }
     if (target === null) return;
     const tx = target % W;
@@ -2288,7 +2690,11 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
   }
   function tsunamiTick() {
     if (!state.tsunami) {
-      if (state.tick % 6000 === 3000 && Math.random() < 0.2 && state.villages.some((v) => v.shipyard)) {
+      if (
+        state.tick % 6000 === 3000 &&
+        Math.random() < 0.2 &&
+        state.villages.some((v) => v.shipyard)
+      ) {
         const v = state.villages.find((o) => o.shipyard);
         startTsunami(v.shipyard.x + 6, v.shipyard.y);
       }
@@ -2315,7 +2721,7 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       const i = idx(x, y);
       if (state.tiles[i] >= T.SAND) {
         onLand = true;
-        ts.depth = (ts.depth || 0);
+        ts.depth = ts.depth || 0;
         state.trees.delete(i);
         state.flowers.delete(i);
         state.farms.delete(i);
@@ -2323,7 +2729,9 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
         for (const c of [...state.cats]) if (c.x === x && c.y === y) killCat(c, null);
         bakeArea(x, y, x, y);
       }
-      for (const sh of [...state.ships]) if (Math.abs(sh.x - x) <= 1 && Math.abs(sh.y - y) <= 1) state.ships = state.ships.filter((o) => o !== sh);
+      for (const sh of [...state.ships])
+        if (Math.abs(sh.x - x) <= 1 && Math.abs(sh.y - y) <= 1)
+          state.ships = state.ships.filter((o) => o !== sh);
     }
     if (onLand) {
       ts.land = (ts.land || 0) + 1;
@@ -2340,22 +2748,40 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       if (state.blessed[r] > 0) {
         state.blessed[r] -= 1;
         if (state.blessed[r] === 0) chronicle("blessEnd", r);
-        else if (state.tick % 20 === 0 && state.homes[r]) puff(state.homes[r].x + Math.round(Math.random() * 4 - 2), state.homes[r].y + Math.round(Math.random() * 2 - 1), "#ffd23a", 1, "heart");
-        for (const v of state.villages) if (v.race === r && state.tick % 120 === 0) v.unrest = Math.max(0, (v.unrest || 0) - 3);
+        else if (state.tick % 20 === 0 && state.homes[r])
+          puff(
+            state.homes[r].x + Math.round(Math.random() * 4 - 2),
+            state.homes[r].y + Math.round(Math.random() * 2 - 1),
+            "#ffd23a",
+            1,
+            "heart",
+          );
+        for (const v of state.villages)
+          if (v.race === r && state.tick % 120 === 0) v.unrest = Math.max(0, (v.unrest || 0) - 3);
       }
       if (state.cursed[r] > 0) {
         state.cursed[r] -= 1;
         if (state.cursed[r] === 0) chronicle("curseEnd", r);
         else {
-          if (state.tick % 20 === 0 && state.homes[r]) puff(state.homes[r].x + Math.round(Math.random() * 4 - 2), state.homes[r].y + Math.round(Math.random() * 2 - 1), "#4a4643", 1, "dust");
+          if (state.tick % 20 === 0 && state.homes[r])
+            puff(
+              state.homes[r].x + Math.round(Math.random() * 4 - 2),
+              state.homes[r].y + Math.round(Math.random() * 2 - 1),
+              "#4a4643",
+              1,
+              "dust",
+            );
           if (state.tick % 300 === 0) {
             const hs = state.houses.filter((h) => h.race === r);
             if (hs.length) {
               const h = hs[Math.floor(Math.random() * hs.length)];
-              if (!state.fires.some((f) => f.x === h.x && f.y === h.y)) state.fires.push({ x: h.x, y: h.y, ttl: 60 });
+              if (!state.fires.some((f) => f.x === h.x && f.y === h.y))
+                state.fires.push({ x: h.x, y: h.y, ttl: 60 });
             }
           }
-          for (const v of state.villages) if (v.race === r && state.tick % 120 === 0) v.unrest = Math.min(100, (v.unrest || 0) + 3);
+          for (const v of state.villages)
+            if (v.race === r && state.tick % 120 === 0)
+              v.unrest = Math.min(100, (v.unrest || 0) + 3);
         }
       }
     }
@@ -2385,16 +2811,28 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
 
   const ISLAND_ACH = [
     { id: "first", title: "Первое поселение", test: () => state.villages.length >= 1 },
-    { id: "four", title: "Четыре народа живут вместе", test: () => RACES.slice(0, 4).every((_, r) => state.pop[r] > 0) },
+    {
+      id: "four",
+      title: "Четыре народа живут вместе",
+      test: () => RACES.slice(0, 4).every((_, r) => state.pop[r] > 0),
+    },
     { id: "hundred", title: "Сто котов", test: () => state.cats.length >= 100 },
     { id: "future", title: "Эра Будущего", test: () => Math.max(...state.era) >= 2 },
-    { id: "nuke", title: "Пережил атомную бомбу", test: () => state.flags.nuked && state.cats.length > 0 },
+    {
+      id: "nuke",
+      title: "Пережил атомную бомбу",
+      test: () => state.flags.nuked && state.cats.length > 0,
+    },
     { id: "plague", title: "Пережили чуму", test: () => state.flags.plagueEnded },
     { id: "eruption", title: "Видели извержение", test: () => state.flags.eruption },
     { id: "pirates", title: "Пираты отбиты", test: () => state.flags.piratesBeaten },
     { id: "temple", title: "Первый храм", test: () => state.villages.some((v) => v.temple) },
     { id: "king", title: "Король пал в бою", test: () => state.flags.kingFell },
-    { id: "robots", title: "Гости из будущего", test: () => RACES.some((r, i) => r.id === "robot" && state.pop[i] > 0) },
+    {
+      id: "robots",
+      title: "Гости из будущего",
+      test: () => RACES.some((r, i) => r.id === "robot" && state.pop[i] > 0),
+    },
     { id: "hour", title: "Остров живёт час", test: () => Date.now() - state.born > 3_600_000 },
     { id: "walls", title: "Крепость", test: () => state.towers.length >= 4 },
   ];
@@ -2402,18 +2840,29 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     if (state.tick % 300 !== 150) return;
     for (const a of ISLAND_ACH) {
       if (state.islandAch.includes(a.id)) continue;
-      let ok = false;
-      try { ok = Boolean(a.test()); } catch { ok = false; }
+      let ok;
+      try {
+        ok = Boolean(a.test());
+      } catch {
+        ok = false;
+      }
       if (!ok) continue;
       state.islandAch.push(a.id);
       chronicle("achievement", a.title);
-      if (state.homes.find(Boolean)) { const h = state.homes.find(Boolean); puff(h.x, h.y, "#ffd23a", 10, "spark"); }
+      if (state.homes.find(Boolean)) {
+        const h = state.homes.find(Boolean);
+        puff(h.x, h.y, "#ffd23a", 10, "spark");
+      }
       persist();
     }
   }
   const discoverKey = `world:discovered:${seed}`;
   function loadDiscovered() {
-    try { state.discovered = JSON.parse(localStorage.getItem(discoverKey) || "[]"); } catch { state.discovered = []; }
+    try {
+      state.discovered = JSON.parse(localStorage.getItem(discoverKey) || "[]");
+    } catch {
+      state.discovered = [];
+    }
     if (!Array.isArray(state.discovered)) state.discovered = [];
   }
   function discoverTick() {
@@ -2424,16 +2873,34 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     if (!left.length || Math.random() < 0.4) return;
     const found = left[Math.floor(Math.random() * left.length)];
     state.discovered.push(found.id);
-    try { localStorage.setItem(discoverKey, JSON.stringify(state.discovered)); } catch { /* пусть */ }
+    try {
+      localStorage.setItem(discoverKey, JSON.stringify(state.discovered));
+    } catch {
+      /* пусть */
+    }
     chronicle("discover", found.name);
   }
 
   function ufoTick() {
     if (!state.ufo) {
-      if (Math.max(...state.era) >= 2 && state.tick % 2400 === 1200 && Math.random() < 0.35 && state.villages.length) {
+      if (
+        Math.max(...state.era) >= 2 &&
+        state.tick % 2400 === 1200 &&
+        Math.random() < 0.35 &&
+        state.villages.length
+      ) {
         const v = state.villages[Math.floor(Math.random() * state.villages.length)];
         const fromLeft = Math.random() < 0.5;
-        state.ufo = { x: fromLeft ? -4 : W + 4, y: Math.max(2, v.y - 3), tx: v.x, ty: v.y, t: 0, phase: "fly", taken: 0, race: v.race };
+        state.ufo = {
+          x: fromLeft ? -4 : W + 4,
+          y: Math.max(2, v.y - 3),
+          tx: v.x,
+          ty: v.y,
+          t: 0,
+          phase: "fly",
+          taken: 0,
+          race: v.race,
+        };
         chronicle("ufo");
       }
       return;
@@ -2518,7 +2985,14 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
         const a = Math.floor(code / 10);
         const b = code % 10;
         const orc = RACES[a].id === "orc" || RACES[b].id === "orc";
-        if (!atWar(a, b) && !allied(a, b) && state.pop[a] >= 6 && state.pop[b] >= 6 && Math.random() < (orc ? 0.3 : 0.12)) declareWar(a, b);
+        if (
+          !atWar(a, b) &&
+          !allied(a, b) &&
+          state.pop[a] >= 6 &&
+          state.pop[b] >= 6 &&
+          Math.random() < (orc ? 0.3 : 0.12)
+        )
+          declareWar(a, b);
       }
     }
 
@@ -2540,7 +3014,13 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       const wp = weaponOf(c);
       const foe = nearestEnemy(c, 12);
       const house = nearestEnemyHouse(c, 14);
-      const target = foe && (!house || Math.max(Math.abs(foe.x - c.x), Math.abs(foe.y - c.y)) <= Math.max(Math.abs(house.x - c.x), Math.abs(house.y - c.y))) ? foe : house;
+      const target =
+        foe &&
+        (!house ||
+          Math.max(Math.abs(foe.x - c.x), Math.abs(foe.y - c.y)) <=
+            Math.max(Math.abs(house.x - c.x), Math.abs(house.y - c.y)))
+          ? foe
+          : house;
       if (!target) {
         // Никого рядом — идём к ближайшей вражеской деревне.
         let dest = null;
@@ -2579,11 +3059,21 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
         // залп стрел по дуге и луч бластера со вспышкой. Какая — по оружию и
         // тому, дерётся ли цель в ответ.
         const duel = isCat && target.warrior && weaponOf(target).kind === "sword";
-        c.anim = { kind: duel ? "brawl" : "lunge", t: duel ? 14 : 8, dx: c.face, dy: Math.sign(target.y - c.y) };
+        c.anim = {
+          kind: duel ? "brawl" : "lunge",
+          t: duel ? 14 : 8,
+          dx: c.face,
+          dy: Math.sign(target.y - c.y),
+        };
         if (duel) target.anim = { kind: "brawl", t: 14, dx: -c.face, dy: 0 };
         puff(target.x, target.y, "#fff3a3", 3, "spark");
         if (isCat) {
-          target.hp -= c.hero ? 3 : 1 + (state.blessed[c.race] > 0 ? 1 : 0) + (state.villages[c.v]?.weapons > 0 ? 1 : 0) + (state.cats.some((o) => o.race === c.race && o.job === "smith") ? 1 : 0);
+          target.hp -= c.hero
+            ? 3
+            : 1 +
+              (state.blessed[c.race] > 0 ? 1 : 0) +
+              (state.villages[c.v]?.weapons > 0 ? 1 : 0) +
+              (state.cats.some((o) => o.race === c.race && o.job === "smith") ? 1 : 0);
           target.hit = 5;
           if (!duel) target.anim = { kind: "knock", t: 8, dx: c.face, dy: 0 };
           puff(target.x, target.y, "#e0242f", 3, "hit");
@@ -2635,7 +3125,11 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
         const x = f.x + Math.round(Math.random() * 2 - 1);
         const y = f.y + Math.round(Math.random() * 2 - 1);
         const i = idx(x, y);
-        if (inside(x, y) && (state.trees.has(i) || state.houses.some((h) => h.x === x && h.y === y)) && !state.fires.some((o) => o.x === x && o.y === y)) {
+        if (
+          inside(x, y) &&
+          (state.trees.has(i) || state.houses.some((h) => h.x === x && h.y === y)) &&
+          !state.fires.some((o) => o.x === x && o.y === y)
+        ) {
           state.fires.push({ x, y, ttl: 40 + Math.floor(Math.random() * 40) });
         }
       }
@@ -2686,7 +3180,8 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
   function strikeBolt(x, y) {
     state.bolts.push({ x, y, ttl: 12 });
     const i = idx(x, y);
-    if (state.trees.has(i) || state.houses.some((h) => h.x === x && h.y === y)) state.fires.push({ x, y, ttl: 50 });
+    if (state.trees.has(i) || state.houses.some((h) => h.x === x && h.y === y))
+      state.fires.push({ x, y, ttl: 50 });
     for (const c of [...state.cats]) {
       const dx = Math.abs(c.x - x);
       const dy = Math.abs(c.y - y);
@@ -2709,9 +3204,10 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     if (wth.ttl <= 0) {
       const s = season().id;
       const roll = Math.random();
-      let kind = "clear";
+      let kind;
       if (s === "winter") kind = roll < 0.45 ? "snow" : roll < 0.6 ? "storm" : "clear";
-      else if (s === "summer") kind = roll < 0.25 ? "rain" : roll < 0.4 ? "storm" : roll < 0.6 ? "drought" : "clear";
+      else if (s === "summer")
+        kind = roll < 0.25 ? "rain" : roll < 0.4 ? "storm" : roll < 0.6 ? "drought" : "clear";
       else kind = roll < 0.35 ? "rain" : roll < 0.5 ? "storm" : "clear";
       if (kind !== wth.kind) chronicle("weather", kind);
       wth.kind = kind;
@@ -2757,8 +3253,21 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       const x = Math.floor(Math.random() * W);
       const y = Math.floor(Math.random() * H);
       const t = state.tiles[idx(x, y)];
-      if (kind === "dragon" ? t < T.MOUNTAIN : kind === "bird" ? t <= T.WATER : !spec.on(t)) continue;
-      state.animals.push({ kind, x, y, px: x, py: y, tx: x, ty: y, wait: 0, face: 1, hp: kind === "dragon" ? 12 : kind === "wolf" ? 4 : 1, cd: 0 });
+      if (kind === "dragon" ? t < T.MOUNTAIN : kind === "bird" ? t <= T.WATER : !spec.on(t))
+        continue;
+      state.animals.push({
+        kind,
+        x,
+        y,
+        px: x,
+        py: y,
+        tx: x,
+        ty: y,
+        wait: 0,
+        face: 1,
+        hp: kind === "dragon" ? 12 : kind === "wolf" ? 4 : 1,
+        cd: 0,
+      });
       return true;
     }
     return false;
@@ -2770,7 +3279,8 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       for (const kind of Object.keys(ANIMALS)) {
         const have = state.animals.filter((a) => a.kind === kind).length;
         if (have >= ANIMALS[kind].max) continue;
-        const chance = kind === "dragon" ? (state.cats.length >= 20 ? 0.08 : 0) : kind === "wolf" ? 0.5 : 0.8;
+        const chance =
+          kind === "dragon" ? (state.cats.length >= 20 ? 0.08 : 0) : kind === "wolf" ? 0.5 : 0.8;
         if (Math.random() < chance) spawnAnimal(kind);
       }
     }
@@ -2793,7 +3303,9 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       }
       // Волк ночью идёт на одинокого кота; дракон — на дома.
       if (a.kind === "wolf" && night && a.cd === 0) {
-        const prey = state.cats.find((c) => Math.abs(c.x - a.x) <= 4 && Math.abs(c.y - a.y) <= 3 && !c.warrior);
+        const prey = state.cats.find(
+          (c) => Math.abs(c.x - a.x) <= 4 && Math.abs(c.y - a.y) <= 3 && !c.warrior,
+        );
         if (prey) {
           if (Math.abs(prey.x - a.x) <= 1 && Math.abs(prey.y - a.y) <= 1) {
             prey.hp -= 1;
@@ -2810,7 +3322,14 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
             a.tx = prey.x;
             a.ty = prey.y;
             a.face = Math.sign(prey.x - a.x) || a.face;
-            if (a.x !== a.tx || a.y !== a.ty) { const nx = a.x + Math.sign(a.tx - a.x); const ny = a.y + Math.sign(a.ty - a.y); if (inside(nx, ny) && state.tiles[idx(nx, ny)] >= T.SAND) { a.x = nx; a.y = ny; } }
+            if (a.x !== a.tx || a.y !== a.ty) {
+              const nx = a.x + Math.sign(a.tx - a.x);
+              const ny = a.y + Math.sign(a.ty - a.y);
+              if (inside(nx, ny) && state.tiles[idx(nx, ny)] >= T.SAND) {
+                a.x = nx;
+                a.y = ny;
+              }
+            }
             continue;
           }
         }
@@ -2823,13 +3342,16 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
         a.target = h;
       }
       if (a.kind === "dragon" && a.target && a.x === a.target.x && a.y === a.target.y) {
-        if (!state.fires.some((f) => f.x === a.x && f.y === a.y)) state.fires.push({ x: a.x, y: a.y, ttl: 60 });
+        if (!state.fires.some((f) => f.x === a.x && f.y === a.y))
+          state.fires.push({ x: a.x, y: a.y, ttl: 60 });
         chronicle("dragon", a.target.race);
         a.target = null;
       }
       // Воины отбиваются: волк рядом с воином получает урон.
       if ((a.kind === "wolf" || a.kind === "dragon") && a.cd % 30 === 0) {
-        const guard = state.cats.find((c) => c.warrior && Math.abs(c.x - a.x) <= 2 && Math.abs(c.y - a.y) <= 2);
+        const guard = state.cats.find(
+          (c) => c.warrior && Math.abs(c.x - a.x) <= 2 && Math.abs(c.y - a.y) <= 2,
+        );
         if (guard) {
           a.hp -= 1;
           puff(a.x, a.y, "#e0242f", 3, "hit");
@@ -2886,7 +3408,9 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       // Спящий вулкан просыпается сам — примерно раз в три игровых дня.
       if (v.erupt <= 0 && state.tick % 300 === 0 && Math.random() < 300 / (DAY_TICKS * 3)) {
         v.erupt = VOLCANO_ERUPT_TICKS;
-        const near = state.homes.find((h) => h && Math.abs(h.x - v.x) < 12 && Math.abs(h.y - v.y) < 10);
+        const near = state.homes.find(
+          (h) => h && Math.abs(h.x - v.x) < 12 && Math.abs(h.y - v.y) < 10,
+        );
         chronicle("eruption", near ? near.race : null);
         state.flags.eruption = true;
       }
@@ -2894,10 +3418,17 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
         v.erupt -= 1;
         if (v.erupt % 6 === 0) {
           // Выплеск: лава у жерла и растекается вниз.
-          for (const [dx, dy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          for (const [dx, dy] of [
+            [0, 0],
+            [1, 0],
+            [-1, 0],
+            [0, 1],
+            [0, -1],
+          ]) {
             const x = v.x + dx;
             const y = v.y + dy;
-            if (inside(x, y) && (dx === 0 && dy === 0 ? true : Math.random() < 0.5)) state.lava.set(idx(x, y), { ttl: LAVA_TTL, flow: LAVA_FLOW });
+            if (inside(x, y) && (dx === 0 && dy === 0 ? true : Math.random() < 0.5))
+              state.lava.set(idx(x, y), { ttl: LAVA_TTL, flow: LAVA_FLOW });
           }
           puff(v.x, v.y, "#ff6a00", 3, "spark");
         }
@@ -2911,7 +3442,12 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
         const x = i % W;
         const y = (i / W) | 0;
         const cur = state.tiles[i];
-        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        for (const [dx, dy] of [
+          [1, 0],
+          [-1, 0],
+          [0, 1],
+          [0, -1],
+        ]) {
           const nx = x + dx;
           const ny = y + dy;
           if (!inside(nx, ny)) continue;
@@ -2924,7 +3460,8 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
           if (Math.random() < (t < cur ? 0.7 : 0.3)) spread.push([j, cell.flow - 1]);
         }
       }
-      for (const [j, flow] of spread) if (!state.lava.has(j)) state.lava.set(j, { ttl: LAVA_TTL, flow });
+      for (const [j, flow] of spread)
+        if (!state.lava.has(j)) state.lava.set(j, { ttl: LAVA_TTL, flow });
     }
     // Лава жжёт всё: лес, дома, котов, животных.
     for (const [i, cell] of state.lava) {
@@ -2938,7 +3475,9 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
         state.houses = state.houses.filter((h) => !(h.x === x && h.y === y));
         if (state.houses.length !== had) countPop();
         for (const c of [...state.cats]) if (c.x === x && c.y === y) killCat(c, null);
-        state.animals = state.animals.filter((a) => !(a.x === x && a.y === y) || a.kind === "bird" || a.kind === "dragon");
+        state.animals = state.animals.filter(
+          (a) => !(a.x === x && a.y === y) || a.kind === "bird" || a.kind === "dragon",
+        );
         bakeArea(x, y, x, y);
       }
       cell.ttl = ttl - 1;
@@ -2982,7 +3521,9 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
           state.houses = state.houses.filter((h) => !(h.x === x && h.y === y));
         }
       }
-      for (const e of edgeTrees) if (!state.fires.some((f) => f.x === e.x && f.y === e.y)) state.fires.push({ x: e.x, y: e.y, ttl: 60 });
+      for (const e of edgeTrees)
+        if (!state.fires.some((f) => f.x === e.x && f.y === e.y))
+          state.fires.push({ x: e.x, y: e.y, ttl: 60 });
       for (const c of [...state.cats]) {
         const dx = Math.abs(c.x - n.x);
         const dy = Math.abs(c.y - n.y);
@@ -2994,9 +3535,13 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
           c.wait = 0;
         }
       }
-      state.ships = state.ships.filter((sh) => Math.abs(sh.x - n.x) > R + 1 || Math.abs(sh.y - n.y) > R + 1);
+      state.ships = state.ships.filter(
+        (sh) => Math.abs(sh.x - n.x) > R + 1 || Math.abs(sh.y - n.y) > R + 1,
+      );
       state.craters.push({ x: n.x, y: n.y, r: R + 1, ttl: CRATER_NUKE_TICKS });
-      const near = state.homes.find((h) => h && Math.abs(h.x - n.x) < 12 && Math.abs(h.y - n.y) < 10);
+      const near = state.homes.find(
+        (h) => h && Math.abs(h.x - n.x) < 12 && Math.abs(h.y - n.y) < 10,
+      );
       puff(n.x, n.y, "#fff3a3", 40, "spark");
       puff(n.x, n.y, "#4a4643", 30, "dust");
       chronicle("nuke", near ? near.race : null);
@@ -3041,7 +3586,9 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
           }
         }
         state.craters.push({ x: m.x, y: m.y, r: 3, ttl: CRATER_METEOR_TICKS });
-        const near = state.homes.find((h) => h && Math.abs(h.x - m.x) < 8 && Math.abs(h.y - m.y) < 6);
+        const near = state.homes.find(
+          (h) => h && Math.abs(h.x - m.x) < 8 && Math.abs(h.y - m.y) < 6,
+        );
         puff(m.x, m.y, "#ffb347", 16, "spark");
         chronicle("meteor", near ? near.race : null);
         bakeArea(m.x - 2, m.y - 2, m.x + 2, m.y + 2);
@@ -3194,7 +3741,8 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       state.trees.delete(i);
       state.flowers.delete(i);
     }
-    if (t <= T.WATER || t === T.SNOW) state.houses = state.houses.filter((h) => !(h.x === x && h.y === y));
+    if (t <= T.WATER || t === T.SNOW)
+      state.houses = state.houses.filter((h) => !(h.x === x && h.y === y));
     // Столица под водой переезжает на ближайшую сушу своего народа.
     for (const v of state.villages) {
       if (v.x === x && v.y === y && !RACES[v.race].canStand(t)) {
@@ -3368,7 +3916,11 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       }
       case "plague": {
         let n = 0;
-        for (const c of state.cats) if (!c.sick && Math.abs(c.x - x) <= 2 && Math.abs(c.y - y) <= 2) { c.sick = true; n += 1; }
+        for (const c of state.cats)
+          if (!c.sick && Math.abs(c.x - x) <= 2 && Math.abs(c.y - y) <= 2) {
+            c.sick = true;
+            n += 1;
+          }
         if (n) chronicle("plague", state.cats.find((c) => c.sick)?.race ?? null);
         break;
       }
@@ -3412,18 +3964,21 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
         break;
       }
       case "meteor": {
-        if (!state.meteors.some((m) => Math.abs(m.x - x) < 3 && Math.abs(m.y - y) < 3)) state.meteors.push({ x, y, t: 0 });
+        if (!state.meteors.some((m) => Math.abs(m.x - x) < 3 && Math.abs(m.y - y) < 3))
+          state.meteors.push({ x, y, t: 0 });
         break;
       }
       case "nuke": {
         // Одна бомба на штрих: вторая рядом — та же воронка, только шум.
-        if (!state.nukes.some((n) => Math.abs(n.x - x) < 8 && Math.abs(n.y - y) < 8)) state.nukes.push({ x, y, t: 0 });
+        if (!state.nukes.some((n) => Math.abs(n.x - x) < 8 && Math.abs(n.y - y) < 8))
+          state.nukes.push({ x, y, t: 0 });
         break;
       }
       case "war": {
         if (stroke.kind === "war") break;
         const r2 = state.terr ? state.terr[idx(x, y)] : 255;
-        if (r2 === 255 || r2 === tool.race || state.pop[tool.race] === 0 || state.pop[r2] === 0) break;
+        if (r2 === 255 || r2 === tool.race || state.pop[tool.race] === 0 || state.pop[r2] === 0)
+          break;
         if (declareWar(tool.race, r2)) stroke.kind = "war";
         break;
       }
@@ -3555,7 +4110,10 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
         x: x * PX + 4,
         y: y * PX + 4,
         vx: Math.cos(a) * sp,
-        vy: kind === "heart" ? -0.3 - Math.random() * 0.3 : Math.sin(a) * sp - (kind === "dust" ? 0.2 : 0),
+        vy:
+          kind === "heart"
+            ? -0.3 - Math.random() * 0.3
+            : Math.sin(a) * sp - (kind === "dust" ? 0.2 : 0),
         ttl: kind === "heart" ? 40 : kind === "spark" ? 24 : 30,
         life: kind === "heart" ? 40 : kind === "spark" ? 24 : 30,
         color,
@@ -3606,7 +4164,14 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
         rect(ctx, "#141413", gx + 1, gy + 2, 1, 1);
         rect(ctx, "#141413", gx + 4, gy + 2, 1, 1);
       } else {
-        rect(ctx, p.color, Math.round(p.x), Math.round(p.y), p.kind === "dust" ? 2 : 1, p.kind === "dust" ? 2 : 1);
+        rect(
+          ctx,
+          p.color,
+          Math.round(p.x),
+          Math.round(p.y),
+          p.kind === "dust" ? 2 : 1,
+          p.kind === "dust" ? 2 : 1,
+        );
       }
     }
     ctx.globalAlpha = 1;
@@ -3749,8 +4314,22 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
   /** Башня будущего: 8 в ширину, 16 в высоту, с огнями и куполом. */
   function drawTower(g, race, bx, by) {
     const top = by - 8;
-    const body = race.id === "gnome" ? "#6f7d8a" : race.id === "orc" ? "#4a4a52" : race.id === "elf" ? "#4f7a6a" : "#8a97a8";
-    const glow = race.id === "orc" ? "#ff6a3d" : race.id === "elf" ? "#7dffb0" : race.id === "gnome" ? "#ffd166" : "#7fd4ff";
+    const body =
+      race.id === "gnome"
+        ? "#6f7d8a"
+        : race.id === "orc"
+          ? "#4a4a52"
+          : race.id === "elf"
+            ? "#4f7a6a"
+            : "#8a97a8";
+    const glow =
+      race.id === "orc"
+        ? "#ff6a3d"
+        : race.id === "elf"
+          ? "#7dffb0"
+          : race.id === "gnome"
+            ? "#ffd166"
+            : "#7fd4ff";
     rect(g, body, bx + 1, top + 4, 6, 12);
     rect(g, "#2b2f3a", bx + 1, top + 4, 1, 12);
     rect(g, "#c9d3df", bx + 6, top + 4, 1, 12);
@@ -3865,7 +4444,11 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     if (t === T.WATER || t === T.DEEP) {
       // Рябь: две светлые точки, в разных местах по клеткам.
       rect(tctx, t === T.WATER ? "#5b9fcc" : "#2a5f8c", x * PX + 1 + s * 2, y * PX + 2 + s, 2, 1);
-      const shore = tileAt(x + 1, y) >= T.SAND || tileAt(x - 1, y) >= T.SAND || tileAt(x, y + 1) >= T.SAND || tileAt(x, y - 1) >= T.SAND;
+      const shore =
+        tileAt(x + 1, y) >= T.SAND ||
+        tileAt(x - 1, y) >= T.SAND ||
+        tileAt(x, y + 1) >= T.SAND ||
+        tileAt(x, y - 1) >= T.SAND;
       if (shore && t === T.WATER) rect(tctx, "#a9d4ea", x * PX + 2, y * PX + 5, 3, 1);
     } else if (t === T.GRASS) {
       rect(tctx, "#6f9644", x * PX + 1 + s * 2, y * PX + 5 - s, 1, 2);
@@ -3904,8 +4487,6 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
         rect(tctx, "#dfe6ea", ox + 4, oy + peak + 2, 2, 1);
       }
       rect(tctx, snowy ? "#9fb1bd" : "#4a4844", ox + 1, oy + 7, 6, 1);
-    } else if (t === T.SNOW) {
-      rect(tctx, "#cfd7dd", x * PX + 2 + s * 2, y * PX + 4, 1, 1);
     }
     // Тень от гор ложится на соседей справа и снизу — рельеф читается объёмным.
     if (t < T.MOUNTAIN && t >= T.SAND) {
@@ -3939,8 +4520,10 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
         if (state.walls.has(i)) drawWall(tctx, x, y, state.walls.get(i));
       }
     }
-    for (const gr of state.graves) if (gr.x >= ax && gr.x <= bx && gr.y >= ay && gr.y <= by) drawGrave(tctx, gr);
-    for (const t of state.towers) if (t.x >= ax && t.x <= bx && t.y >= ay && t.y <= by + 1) drawTower2(tctx, t);
+    for (const gr of state.graves)
+      if (gr.x >= ax && gr.x <= bx && gr.y >= ay && gr.y <= by) drawGrave(tctx, gr);
+    for (const t of state.towers)
+      if (t.x >= ax && t.x <= bx && t.y >= ay && t.y <= by + 1) drawTower2(tctx, t);
     for (const v of state.villages) {
       const t = v.temple;
       if (t && t.x >= ax && t.x <= bx && t.y >= ay && t.y <= by + 2) drawTemple(tctx, v);
@@ -3953,7 +4536,8 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     const inArea = state.houses.filter((h) => h.x >= ax && h.x <= bx && h.y >= ay && h.y <= by + 2);
     inArea.sort((a, b) => a.y - b.y);
     for (const h of inArea) drawHouse(tctx, h);
-    for (const v of state.villages) if (v.x >= ax && v.x <= bx && v.y >= ay && v.y <= by + 1) drawFlag(tctx, v);
+    for (const v of state.villages)
+      if (v.x >= ax && v.x <= bx && v.y >= ay && v.y <= by + 1) drawFlag(tctx, v);
   }
 
   /**
@@ -4061,13 +4645,25 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     // Хвост машет: две фазы, у каждого кота своя.
     const wag = ((state.tick >> 3) + c.x) % 2;
     rect(ctx, race.dark, f > 0 ? bx - 1 : bx + 6, by + 1 + wag, 1, 2);
-    if (c.task && c.x === c.task.x && c.y === c.task.y && (c.task.kind === "chop" || c.task.kind === "mine")) {
+    if (
+      c.task &&
+      c.x === c.task.x &&
+      c.y === c.task.y &&
+      (c.task.kind === "chop" || c.task.kind === "mine")
+    ) {
       // Рубит или долбит: топор/кирка машут, щепки летят, дерево вздрагивает.
       const swing = (state.tick >> 2) % 2;
       const tool = c.task.kind === "chop" ? "#c9d3df" : "#8c9ba8";
       rect(ctx, "#5b3d22", f > 0 ? bx + 6 : bx - 1, by - 2 + swing, 1, 4);
       rect(ctx, tool, f > 0 ? bx + 6 : bx - 2, by - 3 + swing, 2, 1);
-      if (state.tick % 12 === 0) puff(c.task.x, c.task.y, c.task.kind === "chop" ? "#8a5a2b" : "#c9d3df", 1, c.task.kind === "chop" ? "dust" : "spark");
+      if (state.tick % 12 === 0)
+        puff(
+          c.task.x,
+          c.task.y,
+          c.task.kind === "chop" ? "#8a5a2b" : "#c9d3df",
+          1,
+          c.task.kind === "chop" ? "dust" : "spark",
+        );
       if (c.task.kind === "chop" && swing) {
         // Дерево вздрагивает от удара: перерисовываем крону со сдвигом.
         ctx.globalAlpha = 0.5;
@@ -4080,7 +4676,12 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       rect(ctx, "#141413", bx, by - 5, 6, 1);
       rect(ctx, "#e0a93b", bx, by - 5, done, 1);
     }
-    if (c.task && c.x === c.task.x && c.y === c.task.y && (c.task.kind === "build" || c.task.kind === "upgrade" || c.task.kind === "shipyard")) {
+    if (
+      c.task &&
+      c.x === c.task.x &&
+      c.y === c.task.y &&
+      (c.task.kind === "build" || c.task.kind === "upgrade" || c.task.kind === "shipyard")
+    ) {
       // Строит: молоток машет, под котом каркас будущего дома.
       const swing = (state.tick >> 2) % 2;
       rect(ctx, "#5b3d22", bx + 6, by - 2 + swing, 1, 3);
@@ -4103,7 +4704,14 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
         const ph = state.tick % 4;
         for (let i = 0; i < 4; i += 1) {
           const a = ((i + ph / 4) * Math.PI) / 2;
-          rect(ctx, "#c9b48a", Math.round(bx + 3 + Math.cos(a) * 5), Math.round(by + 2 + Math.sin(a) * 3), 2, 2);
+          rect(
+            ctx,
+            "#c9b48a",
+            Math.round(bx + 3 + Math.cos(a) * 5),
+            Math.round(by + 2 + Math.sin(a) * 3),
+            2,
+            2,
+          );
         }
         ctx.globalAlpha = 1;
         rect(ctx, "#fff3a3", bx + ((state.tick >> 1) % 6), by - 3, 1, 1);
@@ -4228,7 +4836,8 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     rect(ctx, "#8a97a8", bx - 4, by + 2, 16, 3);
     rect(ctx, "#c9d3df", bx - 1, by, 10, 2);
     rect(ctx, "#7fd4ff", bx + 2, by - 1, 4, 1);
-    for (let i = 0; i < 4; i += 1) rect(ctx, (state.tick >> 2) % 4 === i ? "#ffd23a" : "#e0242f", bx - 3 + i * 4, by + 5, 2, 1);
+    for (let i = 0; i < 4; i += 1)
+      rect(ctx, (state.tick >> 2) % 4 === i ? "#ffd23a" : "#e0242f", bx - 3 + i * 4, by + 5, 2, 1);
   }
   function drawPirate(p) {
     const bx = Math.round(p.x * PX);
@@ -4407,7 +5016,8 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     } else if (k === "snow") {
       ctx.fillStyle = "rgba(255,255,255,0.85)";
       for (let i = 0; i < 80; i += 1) {
-        const x = (i * 89 + Math.round(Math.sin((state.tick + i) / 20) * 6) + state.tick) % canvas.width;
+        const x =
+          (i * 89 + Math.round(Math.sin((state.tick + i) / 20) * 6) + state.tick) % canvas.width;
         const y = (i * 53 + state.tick * 2) % canvas.height;
         ctx.fillRect(x, y, 1, 1);
       }
@@ -4480,7 +5090,8 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       bakeAll();
     }
     ctx.save();
-    if (state.quake.ttl > 0) ctx.translate(Math.round((Math.random() - 0.5) * 6), Math.round((Math.random() - 0.5) * 6));
+    if (state.quake.ttl > 0)
+      ctx.translate(Math.round((Math.random() - 0.5) * 6), Math.round((Math.random() - 0.5) * 6));
     ctx.drawImage(terrain, 0, 0);
     drawWater();
     ctx.drawImage(seasonLayer, 0, 0);
@@ -4509,7 +5120,9 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
     for (const pr of state.projectiles) {
       const k = pr.t / pr.steps;
       const x = Math.round(pr.x + (pr.tx - pr.x) * k);
-      const y = Math.round(pr.y + (pr.ty - pr.y) * k - Math.sin(Math.PI * k) * (pr.kind === "bow" ? 6 : 0));
+      const y = Math.round(
+        pr.y + (pr.ty - pr.y) * k - Math.sin(Math.PI * k) * (pr.kind === "bow" ? 6 : 0),
+      );
       if (pr.kind === "blaster") {
         rect(ctx, "#7fd4ff", x - 1, y, 3, 1);
       } else {
@@ -4529,7 +5142,8 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
         ctx.fillRect(h.x * PX + 3, h.y * PX + (era === 0 ? 5 : era === 1 ? 0 : -3), 2, 2);
         if (era >= 1) ctx.fillRect(h.x * PX + 5, h.y * PX + (era === 1 ? -4 : -6), 1, 1);
       }
-      for (const sh of state.ships) ctx.fillRect(Math.round(sh.x * PX) + 4, Math.round(sh.y * PX) + 2, 1, 1);
+      for (const sh of state.ships)
+        ctx.fillRect(Math.round(sh.x * PX) + 4, Math.round(sh.y * PX) + 2, 1, 1);
       for (const f of state.fires) ctx.fillRect(f.x * PX + 2, f.y * PX + 2, 4, 4);
     }
     if (state.tsunami) drawTsunami(state.tsunami);
@@ -4539,13 +5153,17 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       ctx.strokeStyle = "rgba(255,255,255,0.85)";
       ctx.lineWidth = 1;
       const s = cursor.size;
-      ctx.strokeRect((cursor.x - s) * PX + 0.5, (cursor.y - s) * PX + 0.5, (s * 2 + 1) * PX - 1, (s * 2 + 1) * PX - 1);
+      ctx.strokeRect(
+        (cursor.x - s) * PX + 0.5,
+        (cursor.y - s) * PX + 0.5,
+        (s * 2 + 1) * PX - 1,
+        (s * 2 + 1) * PX - 1,
+      );
     }
   }
 
   /* ── Цикл ─────────────────────────────────────────────────────────────── */
 
-  let raf = 0;
   let last = 0;
   let running = false;
   let visible = true;
@@ -4604,7 +5222,7 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       if (visible) frame();
       if (state.tick % 90 === 0 || options.paused) hud();
     }
-    raf = requestAnimationFrame(loop);
+    requestAnimationFrame(loop);
   }
 
   loadDiscovered();
@@ -4622,7 +5240,7 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       visible = true;
       if (running) return;
       running = true;
-      raf = requestAnimationFrame(loop);
+      requestAnimationFrame(loop);
     },
     /** Вкладка ушла — остров живёт дальше, просто не рисуется. */
     stop() {
@@ -4682,7 +5300,7 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
           race: v.race,
           raceName: RACES[v.race].name,
           capital: state.homes[v.race] === v,
-          king: state.homes[v.race] === v ? state.kings[v.race]?.name ?? null : null,
+          king: state.homes[v.race] === v ? (state.kings[v.race]?.name ?? null) : null,
           pop: state.cats.filter((c) => c.v === vi).length,
           houses: state.houses.filter((h) => h.v === vi).length,
           wood: v.wood || 0,
@@ -4701,11 +5319,23 @@ export function createWorld({ seed, stats, canvas, onEvent, onRaces, onHud, onVi
       }
       if (!inside(x, y)) return null;
       const t = tileAt(x, y);
-      const names = ["Глубокое море", "Мелководье", "Песок", "Луга", "Лес", "Холмы", "Горы", "Снега"];
+      const names = [
+        "Глубокое море",
+        "Мелководье",
+        "Песок",
+        "Луга",
+        "Лес",
+        "Холмы",
+        "Горы",
+        "Снега",
+      ];
       return {
         kind: "tile",
-        name: state.trees.has(idx(x, y)) && t !== T.FOREST ? "Роща" : names[t] ?? "Земля",
-        owner: state.terr && state.terr[idx(x, y)] !== 255 ? RACES[state.terr[idx(x, y)]]?.name ?? null : null,
+        name: state.trees.has(idx(x, y)) && t !== T.FOREST ? "Роща" : (names[t] ?? "Земля"),
+        owner:
+          state.terr && state.terr[idx(x, y)] !== 255
+            ? (RACES[state.terr[idx(x, y)]]?.name ?? null)
+            : null,
       };
     },
     /** Экранные координаты → клетка. */

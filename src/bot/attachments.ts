@@ -56,8 +56,8 @@ export async function saveTelegramFile(
       local
         ? `Файл ${mb} МБ — больше 2 ГБ не отдаёт даже свой сервер Bot API`
         : `Файл ${mb} МБ. Облачный Bot API отдаёт ботам не больше 20 МБ — это ограничение ` +
-          `Telegram, а не бота. Снимается своим сервером Bot API: нужны api_id и api_hash ` +
-          `с my.telegram.org.`,
+            `Telegram, а не бота. Снимается своим сервером Bot API: нужны api_id и api_hash ` +
+            `с my.telegram.org.`,
     );
   }
   if (!file.file_path) {
@@ -75,7 +75,9 @@ export async function saveTelegramFile(
   const target = join(dir, name);
 
   const token = api.token;
-  const response = await fetchTelegramFile(`https://api.telegram.org/file/bot${token}/${file.file_path}`);
+  const response = await fetchTelegramFile(
+    `https://api.telegram.org/file/bot${token}/${file.file_path}`,
+  );
   if (!response.ok || !response.body) {
     throw new Error(`Не удалось скачать файл: HTTP ${response.status}`);
   }
