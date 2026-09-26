@@ -10,7 +10,14 @@ import type {
   PermissionBridgeHooks,
 } from "../agent/permissions.js";
 import { permissionKeyboard, questionKeyboard } from "./keyboards.js";
-import { describeToolDetailed, esc, toolIcon, TELEGRAM_LIMIT } from "../agent/render.js";
+import {
+  chunk,
+  describeToolDetailed,
+  esc,
+  layoutMarkdown,
+  prepareRichMarkdown,
+  toolIcon,
+} from "../agent/render.js";
 
 /** Игнорируем ошибки, которые ничего не значат для пользователя. */
 function isBenignEditError(error: unknown): boolean {
@@ -27,9 +34,6 @@ export class TelegramOutput implements ConversationOutput {
   #api: Api;
   #chatId: number;
   #statusMessageId: number | null = null;
-  #draftId: number | null = null;
-  #streamShown = "";
-  #lastStreamEdit = 0;
   #typingTimer: NodeJS.Timeout | null = null;
   /**
    * Читать ли следующий ответ вслух. Ставится на одну задачу: пришло голосовое —
@@ -37,9 +41,8 @@ export class TelegramOutput implements ConversationOutput {
    */
   voiceReply = false;
   /**
-   * Тихий режим для фоновых задач: без строки состояния и без черновиков.
-   * Две строки состояния в одном чате перебивают друг друга и читаются как
-   * мигание, а живой черновик фоновой задачи путается с ответом основной.
+   * Тихий режим для фоновых задач: без строки состояния. Две строки состояния
+   * в одном чате перебивают друг друга и читаются как мигание.
    */
   quiet = false;
   /**
@@ -129,63 +132,34 @@ export class TelegramOutput implements ConversationOutput {
   }
 
   /**
-   * Живой ответ через sendMessageDraft — штатный способ Telegram показывать
-   * текст, пока он генерируется. Правки черновика с одним и тем же draft_id
-   * клиент анимирует сам, поэтому текст проявляется плавно, а не рывками, как
-   * при редактировании обычного сообщения.
+   * Ответ агента как rich-сообщение: Telegram сам рисует заголовки, жирный,
+   * списки, таблицы, код и свёрнутые блоки <details>. Лимит 32 тысячи
+   * символов, а не 4096, поэтому длинный ответ приходит одним сообщением.
    *
-   * Черновик эфемерный: живёт тридцать секунд и в историю не попадает. Готовый
-   * ответ обязательно досылается отдельным sendMessage — иначе он просто
-   * исчезнет.
+   * Живой черновик (sendMessageDraft) убран намеренно: текст, проявляющийся
+   * по буквам и потом исчезающий, только отвлекал. Ответ приходит целиком,
+   * когда готов; признак жизни по ходу работы даёт строка состояния.
+   *
+   * Если Telegram разметку не принял (агент написал что-то, что парсер
+   * считает ошибкой), ответ не теряем: уходит обычным текстом, как раньше.
    */
-  async stream(text: string, force = false): Promise<void> {
-    if (this.quiet) return;
-
-    const trimmed = text.trimEnd();
-    if (!trimmed) return;
-
-    const now = Date.now();
-    // Чаще раза в секунду смысла нет: анимацию рисует клиент, а лимиты общие.
-    if (!force && now - this.#lastStreamEdit < 1000) return;
-    if (trimmed === this.#streamShown) return;
-
-    this.#lastStreamEdit = now;
-    this.#streamShown = trimmed;
-    await this.#draft(trimmed.slice(-TELEGRAM_LIMIT));
-  }
-
-  /** Пустой черновик — встроенная заглушка «Thinking…» у клиента. */
-  async startDraft(): Promise<void> {
-    if (this.quiet) return;
-
-    this.#streamShown = "";
-    this.#lastStreamEdit = 0;
-    await this.#draft("");
-  }
-
-  async #draft(text: string): Promise<void> {
-    // draft_id должен быть ненулевым и одинаковым на весь ответ: по нему
-    // клиент и понимает, что это продолжение того же черновика.
-    if (this.#draftId === null) this.#draftId = (Date.now() % 2_000_000_000) + 1;
+  async sendRich(markdown: string): Promise<number | undefined> {
+    const text = markdown.trim();
+    if (!text) return undefined;
     try {
-      await this.#api.raw.sendMessageDraft({
+      const message = await this.#api.raw.sendRichMessage({
         chat_id: this.#chatId,
-        draft_id: this.#draftId,
-        text,
+        rich_message: { markdown: prepareRichMarkdown(layoutMarkdown(text)) },
       });
+      this.#lastMessageId = message.message_id;
+      return message.message_id;
     } catch (error) {
-      // Старые клиенты и старые версии Bot API черновиков не знают — тогда
-      // просто ничего не показываем, вместо того чтобы валить сессию.
-      if (error instanceof GrammyError) return;
-      console.error(`[output:${this.#chatId}] draft:`, error);
+      const why = error instanceof GrammyError ? error.description : String(error);
+      console.error(`[output:${this.#chatId}] rich send failed, шлю текстом: ${why}`);
+      let last: number | undefined;
+      for (const piece of chunk(esc(text))) last = (await this.send(piece)) ?? last;
+      return last;
     }
-  }
-
-  /** Ответ дописан: следующий пойдёт новым черновиком. */
-  async endStream(): Promise<void> {
-    this.#draftId = null;
-    this.#streamShown = "";
-    this.#lastStreamEdit = 0;
   }
 
   /**

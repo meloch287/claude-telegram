@@ -17,6 +17,184 @@ export function pre(text: string, lang?: string): string {
 /** Telegram режет сообщения на 4096 символах; берём запас под разметку. */
 export const TELEGRAM_LIMIT = 3900;
 
+/** Rich-сообщение вмещает 32 768 символов; запас — под экранирование. */
+export const RICH_LIMIT = 30000;
+
+/**
+ * Markdown агента → Markdown, который Telegram поймёт как задумано.
+ *
+ * Rich Markdown Telegram считает текст между знаками доллара формулой LaTeX.
+ * Агент пишет доллары про деньги («$5 против $12»), и такая фраза уезжала бы
+ * формулой. Поэтому доллары вне кода экранируем; блоки и строки кода не
+ * трогаем — внутри них экранирование не действует и не нужно.
+ */
+/**
+ * Раскладка ответа перед отправкой.
+ *
+ * Модель, особенно в долгой сессии, пишет сплошной прозой: абзацы без
+ * заголовков и списков, и в Telegram такой ответ читается стеной. Здесь два
+ * дешёвых приёма, которые ничего не выдумывают за модель:
+ *  - перенос строки внутри абзаца становится настоящим переносом (Markdown
+ *    иначе склеивает соседние строки в одну);
+ *  - абзац, начинающийся с короткой темы перед тире или двоеточием
+ *    («Трекер — баг настоящий», «Проверки: 201 тест»), получает тему жирным.
+ * Блоки кода, списки, заголовки, таблицы и HTML не трогаем.
+ */
+export function layoutMarkdown(text: string): string {
+  return text
+    .split(/(```[\s\S]*?```)/)
+    .map((part, index) => (index % 2 === 1 ? part : layoutProse(part)))
+    .join("");
+}
+
+const STRUCTURED_LINE = /^\s*(#{1,6}\s|[-*+]\s|\d+[.)]\s|\||>|<|\[\^)/;
+const LEAD_IN = /^([^\n.!?:—*]{2,48}?)( — |: )/u;
+const HEADING = /^\s*#{1,6}\s/;
+const HTML_LINE = /^\s*<\/?(details|summary)/i;
+/**
+ * Пустой абзац между блоками. Telegram рисует абзацы rich-сообщения впритык,
+ * пустая строка в Markdown зазора не даёт (проверено 23.09.2026: блоки
+ * приходят как paragraph/paragraph без отступа). Абзац из одного неразрывного
+ * пробела сохраняется отдельным блоком и читается как пустая строка.
+ */
+const SPACER = "\u00a0";
+
+function layoutProse(text: string): string {
+  const blocks = text.split(/\n{2,}/).map(layoutBlock);
+  const out: string[] = [];
+  for (let i = 0; i < blocks.length; i++) {
+    const block = blocks[i]!;
+    out.push(block);
+    const next = blocks[i + 1];
+    if (next !== undefined && needsSpacer(block, next)) out.push(SPACER);
+  }
+  return out.join("\n\n");
+}
+
+/** Заголовки и теги свёрнутых блоков несут свой отступ; пустые края не трогаем. */
+function needsSpacer(before: string, after: string): boolean {
+  if (!before.trim() || !after.trim()) return false;
+  for (const block of [before, after]) {
+    if (HEADING.test(block) || HTML_LINE.test(block) || block.startsWith("---")) return false;
+  }
+  return true;
+}
+
+function layoutBlock(paragraph: string): string {
+  const lines = paragraph.split("\n");
+  if (lines.some((line) => STRUCTURED_LINE.test(line))) return paragraph;
+  const joined = lines.map((line) => line.trimEnd()).join("  \n");
+  const lead = LEAD_IN.exec(joined);
+  if (!lead) return joined;
+  // Подводка уже с эмодзи — второе не вешаем.
+  const marker = /^[\p{L}\p{N}«"]/u.test(lead[1]!) ? "🔹 " : "";
+  return joined.replace(LEAD_IN, `${marker}**$1**$2`);
+}
+
+export function prepareRichMarkdown(text: string): string {
+  return text
+    .split(/(```[\s\S]*?```|`[^`\n]*`)/)
+    .map((part, index) =>
+      index % 2 === 1
+        ? hideSecrets(part, "code")
+        : hideSecrets(part.replace(/\$/g, "\\$"), "prose"),
+    )
+    .join("");
+}
+
+/**
+ * Секреты в тексте. Вывод команд и ответы агента то и дело содержат токены,
+ * ключи и пароли — из .env, из логов, из curl. На скриншоте или в пересылке
+ * они утекают незаметно. В прозе секрет заворачивается в спойлер (нажал —
+ * увидел), в коде спойлер не рисуется, поэтому там середина заменяется
+ * многоточием. Список шаблонов намеренно короткий: ложные срабатывания на
+ * обычных словах раздражают сильнее, чем редкий пропуск.
+ */
+const SECRET_PATTERNS: { re: RegExp; keep?: number }[] = [
+  { re: /sk-ant-[A-Za-z0-9_-]{16,}/g },
+  { re: /\bgh[pousr]_[A-Za-z0-9]{20,}\b/g },
+  { re: /\bgithub_pat_[A-Za-z0-9_]{20,}\b/g },
+  { re: /\bxox[abprs]-[A-Za-z0-9-]{10,}\b/g },
+  { re: /\bAKIA[0-9A-Z]{16}\b/g },
+  { re: /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g },
+  { re: /\b\d{8,10}:[A-Za-z0-9_-]{35}\b/g },
+  { re: /(Bearer\s+)[A-Za-z0-9._~+/-]{16,}=*/g, keep: 1 },
+  {
+    re: /((?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key)\s*[=:]\s*["']?)([^\s"'&,;]{6,})/gi,
+    keep: 1,
+  },
+];
+
+export function hideSecrets(text: string, where: "prose" | "code"): string {
+  let out = text;
+  for (const { re, keep } of SECRET_PATTERNS) {
+    out = out.replace(re, (match, ...groups: unknown[]) => {
+      const prefix = keep ? String(groups[keep - 1] ?? "") : "";
+      const secret = match.slice(prefix.length);
+      return (
+        prefix + (where === "code" ? maskSecret(secret) : `<tg-spoiler>${secret}</tg-spoiler>`)
+      );
+    });
+  }
+  return out;
+}
+
+function maskSecret(secret: string): string {
+  if (secret.length <= 8) return "•".repeat(secret.length);
+  return `${secret.slice(0, 4)}…${secret.slice(-3)}`;
+}
+
+/** Свёрнутый блок Rich Markdown. Пустые строки вокруг тела обязательны. */
+export function details(summary: string, body: string, open = false): string {
+  return `<details${open ? " open" : ""}><summary>${summary}</summary>\n\n${body}\n\n</details>`;
+}
+
+/** Блок кода. Тройные кавычки внутри заменяем, иначе они закроют ограждение раньше времени. */
+export function fence(text: string, lang = ""): string {
+  return "```" + lang + "\n" + text.replace(/```/g, "ˋˋˋ") + "\n```";
+}
+
+/** Хвост длинного вывода: ошибки и итоги команд обычно в конце. */
+export function tail(text: string, limit: number): string {
+  return text.length <= limit ? text : `…(начало срезано)\n${text.slice(text.length - limit)}`;
+}
+
+function clip(text: string, limit: number): string {
+  return text.length <= limit ? text : `${text.slice(0, limit)}…`;
+}
+
+function mono(text: string): string {
+  return "`" + text.replace(/`/g, "ˋ") + "`";
+}
+
+/** Шаг задачи для чек-листа в журнале — то же, что describeToolShort, но в Markdown. */
+export function describeToolMarkdown(toolName: string, input: Record<string, unknown>): string {
+  const icon = toolIcon(toolName);
+  switch (toolName) {
+    case "Bash":
+      return `${icon} ${mono(clip((str(input, "command") ?? "").split("\n")[0] ?? "", 120))}`;
+    case "Read":
+    case "Write":
+    case "Edit":
+    case "NotebookEdit": {
+      const path = str(input, "file_path") ?? str(input, "notebook_path") ?? "";
+      return `${icon} ${toolName} ${mono(shortPath(path))}`;
+    }
+    case "Grep":
+      return `${icon} поиск ${mono(clip(str(input, "pattern") ?? "", 60))}`;
+    case "Glob":
+      return `${icon} ${mono(str(input, "pattern") ?? "")}`;
+    case "WebSearch":
+      return `${icon} ${clip(str(input, "query") ?? "", 80)}`;
+    case "WebFetch":
+      return `${icon} ${mono(clip(str(input, "url") ?? "", 80))}`;
+    case "Task":
+      return `${icon} субагент: ${clip(str(input, "description") ?? "", 60)}`;
+    default:
+      return `${icon} ${toolName}`;
+  }
+}
+
 export function truncate(text: string, limit = 600): string {
   if (text.length <= limit) return text;
   return `${text.slice(0, limit)}\n… (обрезано, ещё ${text.length - limit} символов)`;

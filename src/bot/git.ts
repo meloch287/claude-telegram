@@ -104,9 +104,20 @@ export async function status(repo: string): Promise<RepoStatus> {
   return { branch, entries, ahead, behind, remote };
 }
 
+export interface DiffEntry {
+  path: string;
+  added: number;
+  deleted: number;
+  binary: boolean;
+}
+
 export interface DiffSummary {
   /** Строки git diff --stat: файл и сколько в нём изменилось. */
   stat: string;
+  /** То же по файлам, числами — для таблицы. */
+  entries: DiffEntry[];
+  /** Новые файлы, которых git diff не показывает. */
+  untracked: string[];
   /** Сам дифф, обрезанный до разумного размера. */
   patch: string;
   truncated: boolean;
@@ -125,6 +136,21 @@ export async function diff(repo: string): Promise<DiffSummary> {
     .split("\n")
     .filter(Boolean);
 
+  const numstat = (await git(repo, ["diff", "HEAD", "--numstat"])).trim();
+  const entries: DiffEntry[] = numstat
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const [added = "", deleted = "", ...rest] = line.split("\t");
+      const binary = added === "-" || deleted === "-";
+      return {
+        path: rest.join("\t"),
+        added: binary ? 0 : Number(added),
+        deleted: binary ? 0 : Number(deleted),
+        binary,
+      };
+    });
+
   let patch = await git(repo, ["diff", "HEAD"]);
   const files = new Set(
     stat
@@ -142,7 +168,7 @@ export async function diff(repo: string): Promise<DiffSummary> {
     ? `${stat}${stat ? "\n" : ""}новых файлов: ${untracked.length} (${untracked.slice(0, 5).join(", ")}${untracked.length > 5 ? "…" : ""})`
     : stat;
 
-  return { stat: statWithUntracked, patch, truncated, files: files.size };
+  return { stat: statWithUntracked, entries, untracked, patch, truncated, files: files.size };
 }
 
 /**

@@ -20,6 +20,11 @@ import {
   esc,
   splitCodeBlocks,
   codeBlockFileName,
+  RICH_LIMIT,
+  describeToolMarkdown,
+  details,
+  fence,
+  tail,
 } from "./render.js";
 import { loadMcpServers } from "../mcp.js";
 import { snapshot, reportChanges, formatSize, type Snapshot } from "../bot/artifacts.js";
@@ -34,16 +39,12 @@ export interface ConversationOutput {
   status(html: string): Promise<void>;
   /** Убрать строку состояния (работа закончена). */
   clearStatus(finalHtml?: string): Promise<void>;
-  /** Дописать живой ответ. force — отрисовать немедленно, минуя троттлинг. */
-  stream(text: string, force?: boolean): Promise<void>;
-  /** Ответ закончен: следующий пойдёт новым черновиком. */
-  endStream(): Promise<void>;
+  /** Ответ агента: Markdown, который Telegram рисует сам (sendRichMessage). */
+  sendRich(markdown: string): Promise<number | undefined>;
   /** Прочитать ответ вслух, если о том просили. Необязательно и не мешает тексту. */
   speak?(text: string): Promise<void>;
   /** Задача закончена: можно подвесить кнопки к последнему сообщению. */
   finished?(): Promise<void>;
-  /** Пустой черновик: у клиента появляется встроенная заглушка «Thinking…». */
-  startDraft(): Promise<void>;
   /** Отдать файл с диска. */
   document(path: string, caption?: string, fileName?: string): Promise<void>;
   /** Отдать файлом текст, которого на диске нет. */
@@ -173,14 +174,63 @@ function buildEnv(credential: Credential): Record<string, string> {
   return env;
 }
 
+/** Пределы журнала: больше на телефоне всё равно не читают. */
+const MAX_STEPS = 40;
+const MAX_OUTPUTS = 8;
+const MAX_ERRORS = 5;
+const OUTPUT_LIMIT = 1200;
+
 const SYSTEM_APPEND = `
 Ты работаешь через Telegram-бота. Собеседник читает тебя с телефона.
 
 - Отвечай коротко. Один-два абзаца там, где в терминале написал бы десять.
 - Не вываливай большие куски кода в ответ: правь файлы инструментами, а в сообщении говори, что изменил.
-- Не рисуй ASCII-таблицы и деревья каталогов — в мобильном клиенте они разъезжаются.
-- Markdown-разметку не используй: сообщения уходят в Telegram как обычный текст.
 - Если задача длинная, коротко сообщай о ходе работы между шагами.
+
+# Оформление ответа
+
+Сообщения уходят в Telegram как Markdown, и Telegram рисует его сам: заголовки
+через #, **жирный**, списки, таблицы, код в обратных кавычках и свёрнутые блоки
+<details><summary>Название</summary> … </details>. Сплошной прозой не пиши:
+стена абзацев на телефоне не читается. Структуру выбирай сам под содержание,
+правило одно — всё, что длиннее трёх предложений, разбивай:
+
+- заголовок ## на каждый смысловой блок: что сделал, что нашёл, что проверил;
+- заголовки и названия свёрнутых блоков начинай с эмодзи по смыслу:
+  🔧 что сделал, 🔍 что нашёл, ✅ проверки, ⚠️ риски, ➡️ следующий шаг;
+- перечисления — списком, ключевые слова и цифры — жирным;
+- сравнения, параметры, «было/стало» и результаты проверок — таблицей,
+  а не абзацем;
+- команды, пути, имена файлов — в обратных кавычках;
+- подробности, нужные не всем (логи, разборы, длинные списки), — в свёрнутый
+  <details>, чтобы главное читалось без раскрытия;
+- деревья каталогов и ASCII-графику не рисуй.
+
+Итог законченной задачи оформляй карточкой:
+
+# <эмодзи по смыслу> <Название задачи в трёх-пяти словах>
+
+**Статус:** ✔ готово | ⚠ готово с оговорками | ✖ не вышло — полфразы, что это значит
+
+## 🧭 Итог
+
+Два-четыре предложения: что сделано и что важно знать.
+
+<details><summary>📋 Полный итог</summary>
+
+Что именно менял, где и почему — списком. **➡️ Следующий шаг**, если он есть.
+
+</details>
+
+<details><summary>🔬 Проверки и подробности</summary>
+
+Что проверял и чем — таблицей «проверка | итог»: команды, коды ответов, тесты. Что не проверял — тоже.
+
+</details>
+
+Между тегами details/summary и содержимым — пустая строка. Короткие ответы на
+вопросы карточкой не оформляй, но заголовки и списки используй и в них, если
+ответ длиннее пары предложений.
 
 # Карта проекта
 
@@ -226,10 +276,15 @@ export class Conversation {
   #sessionId: string | null = null;
   #busy = false;
   #activity: string[] = [];
-  #liveText = "";
-  #liveThinking = "";
   /** tool_use_id → имя инструмента: результаты приходят отдельными сообщениями. */
   #toolNames = new Map<string, string>();
+  /** tool_use_id → шаг в Markdown: им подписывается вывод в журнале. */
+  #toolLabels = new Map<string, string>();
+  /** Что делал агент за задачу — чек-лист в журнале. */
+  #steps: string[] = [];
+  /** Вывод команд и ошибки инструментов копятся и уходят одним свёрнутым блоком. */
+  #toolOutputs: { label: string; text: string }[] = [];
+  #toolErrors: { label: string; text: string }[] = [];
   #lastText: string | null = null;
   #resumeSessionId: string | null;
   #closed = false;
@@ -278,9 +333,11 @@ export class Conversation {
     if (!this.#query) this.#start();
     this.#busy = true;
     this.#activity = [];
-    this.#liveText = "";
-    this.#liveThinking = "";
     this.#toolNames.clear();
+    this.#toolLabels.clear();
+    this.#steps = [];
+    this.#toolOutputs = [];
+    this.#toolErrors = [];
     this.#lastText = text;
     // Снимок до работы: по разнице после результата видно, какие файлы
     // появились или изменились, и их можно вернуть в чат.
@@ -299,9 +356,6 @@ export class Conversation {
     this.#deps.output.startTyping();
     this.#lastActivity = Date.now();
     this.#watchStall();
-    // Пустой черновик рисует у клиента встроенную заглушку «Thinking…»,
-    // а дальше в него же плавно проявляется текст ответа.
-    await this.#deps.output.startDraft();
   }
 
   async interrupt(): Promise<void> {
@@ -454,15 +508,17 @@ export class Conversation {
           ? { allowDangerouslySkipPermissions: true }
           : {}),
         canUseTool,
-        hooks: { PreToolUse: [{ hooks: [dangerGuard] }] },
+        // Сторож необратимого отключается в .env (DANGER_GUARD=0): тогда бот
+        // не спрашивает вообще ничего, это осознанный выбор владельца.
+        ...(config.dangerGuard ? { hooks: { PreToolUse: [{ hooks: [dangerGuard] }] } } : {}),
         ...(resumeSessionId ? { resume: resumeSessionId } : {}),
         systemPrompt: { type: "preset", preset: "claude_code", append: SYSTEM_APPEND },
         // Скиллы, CLAUDE.md и правила проекта.
         settingSources: [...SETTING_SOURCES],
         mcpServers: loadMcpServers(),
-        // Без этого SDK отдаёт только готовые сообщения, и в чате тишина всё
-        // время, пока модель печатает.
-        includePartialMessages: true,
+        // Промежуточные куски текста не нужны: живой черновик убран, ответ
+        // уходит целиком, когда готов. Признак жизни даёт строка состояния.
+        includePartialMessages: false,
         // env заменяет окружение подпроцесса целиком, а не дополняет его,
         // поэтому process.env нужно расстелить руками — иначе не будет PATH.
         env: buildEnv(credential),
@@ -651,34 +707,6 @@ export class Conversation {
         return;
       }
 
-      case "stream_event": {
-        // Кусочки текста по мере генерации: из них и собирается живой ответ.
-        const event = message.event as {
-          type?: string;
-          delta?: { type?: string; text?: string; thinking?: string };
-        };
-        if (event.type !== "content_block_delta") return;
-
-        if (event.delta?.type === "text_delta") {
-          this.#liveText += event.delta.text ?? "";
-          await output.stream(this.#liveText);
-          return;
-        }
-
-        // Рассуждение до ответа. Раньше оно пропадало, и долгая пауза выглядела
-        // как зависший бот. В черновик оно идёт до первого куска ответа —
-        // ровно как в терминале, где видно, что модель думает.
-        if (event.delta?.type === "thinking_delta") {
-          this.#liveThinking += event.delta.thinking ?? "";
-          if (!this.#liveText) {
-            // Целиком рассуждение в чат не тащим: важен признак жизни и о чём
-            // сейчас мысль, а не весь поток.
-            await output.stream(`💭 ${this.#liveThinking.slice(-600)}`);
-          }
-        }
-        return;
-      }
-
       case "assistant": {
         const usage = (
           message as unknown as {
@@ -696,9 +724,6 @@ export class Conversation {
         for (const block of message.message.content) {
           if (block.type === "text" && block.text.trim()) {
             const full = block.text.trim();
-            // Черновик живёт тридцать секунд и в историю не попадает, поэтому
-            // готовый ответ обязательно досылаем обычным сообщением.
-            await output.endStream();
             let fileIndex = 0;
             for (const part of splitCodeBlocks(full)) {
               if (part.kind === "file") {
@@ -707,14 +732,20 @@ export class Conversation {
                 await output.documentFromText(part.body, name, `📄 <code>${esc(name)}</code>`);
                 continue;
               }
-              for (const piece of chunk(esc(part.body))) await output.send(piece);
+              // Rich-сообщение вмещает 32 тысячи символов: режем только совсем длинное.
+              for (const piece of chunk(part.body, RICH_LIMIT)) await output.sendRich(piece);
             }
-            this.#liveText = "";
             // Озвучка после текста, а не вместо: голос догоняет ответ, который
             // уже можно читать. Ошибка тут ответа не отменяет.
             if (output.speak) await output.speak(full).catch(() => undefined);
           } else if (block.type === "tool_use") {
             this.#toolNames.set(block.id, block.name);
+            const step = describeToolMarkdown(
+              block.name,
+              (block.input ?? {}) as Record<string, unknown>,
+            );
+            this.#toolLabels.set(block.id, step);
+            this.#steps.push(step);
             this.#activity.push(
               describeToolShort(block.name, (block.input ?? {}) as Record<string, unknown>),
             );
@@ -744,17 +775,16 @@ export class Conversation {
           const text = flattenToolResult(result.content);
           if (!text) continue;
 
+          const label =
+            (this.#toolLabels.get(result.tool_use_id ?? "") ?? toolName) || "инструмент";
+          // Вывод и ошибки не шлём сразу: раньше каждая команда улетала
+          // отдельным сообщением и чат превращался в ленту логов. Теперь всё
+          // копится и уходит в конце задачи одним журналом со свёрнутыми блоками.
           if (result.is_error) {
-            await output.send(
-              `⚠️ <b>${esc(toolName || "инструмент")}</b> вернул ошибку:\n${preBlock(text, 900)}`,
-            );
+            this.#toolErrors.push({ label, text });
             continue;
           }
-          // Вывод команд показываем: упавшие тесты и ошибки сборки иначе не
-          // доходят вовсе — остаётся только пересказ агента.
-          if (toolName === "Bash") {
-            await output.send(`🖥️ ${preBlock(text, 900)}`);
-          }
+          if (toolName === "Bash") this.#toolOutputs.push({ label, text });
         }
         return;
       }
@@ -790,9 +820,6 @@ export class Conversation {
         // Не ждём: пользователю важен ответ, а не свежесть счётчика.
         void this.refreshRateLimits();
 
-        // Кнопки под последним сообщением: на телефоне набрать «покажи дифф»
-        // дороже, чем нажать. Ошибка тут ответа не отменяет.
-        if (output.finished) await output.finished().catch(() => undefined);
         this.#deps.onUsage({ tokens: deltaTokens, costUsd: deltaCost });
 
         for (const denial of message.permission_denials ?? []) {
@@ -803,7 +830,18 @@ export class Conversation {
           message.subtype === "success"
             ? `✅ Готово · ${formatDuration(message.duration_ms)} · ${formatTokensShort(deltaTokens)}`
             : `⚠️ Прервано: ${esc(message.subtype)}`;
-        await output.clearStatus(summary);
+        // Журнал задачи заменяет строку состояния: итог плюс свёрнутые шаги,
+        // вывод команд и ошибки. Если показывать нечего — просто итог.
+        const journal = this.#journal(summary);
+        if (journal) {
+          await output.clearStatus();
+          await output.sendRich(journal);
+        } else {
+          await output.clearStatus(summary);
+        }
+        // Кнопки под последним сообщением: на телефоне набрать «покажи дифф»
+        // дороже, чем нажать. Ошибка тут ответа не отменяет.
+        if (output.finished) await output.finished().catch(() => undefined);
 
         if (message.subtype !== "success" && "result" in message && message.result) {
           await output.send(esc(String(message.result).slice(0, 1000)));
@@ -865,6 +903,40 @@ export class Conversation {
         `Ещё изменилось:\n${list.join("\n")}\n\nЗабрать: /file &lt;путь&gt;`,
       );
     }
+  }
+
+  /**
+   * Журнал задачи: итоговая строка и до трёх свёрнутых блоков — шаги
+   * чек-листом, вывод команд, ошибки инструментов. Возвращает null, если
+   * кроме итога показывать нечего.
+   */
+  #journal(summary: string): string | null {
+    const steps = this.#steps;
+    const outputs = this.#toolOutputs.slice(-MAX_OUTPUTS);
+    const errors = this.#toolErrors.slice(-MAX_ERRORS);
+    if (steps.length === 0 && outputs.length === 0 && errors.length === 0) return null;
+
+    const parts = [summary];
+    if (steps.length > 0) {
+      const shown = steps.slice(0, MAX_STEPS).map((step) => `- [x] ${step}`);
+      if (steps.length > MAX_STEPS) shown.push(`- …и ещё ${steps.length - MAX_STEPS}`);
+      parts.push(details(`☑️ Шаги (${steps.length})`, shown.join("\n")));
+    }
+    if (outputs.length > 0) {
+      const skipped = this.#toolOutputs.length - outputs.length;
+      const body = outputs
+        .map((o) => `**${o.label}**\n\n${fence(tail(o.text, OUTPUT_LIMIT))}`)
+        .join("\n\n");
+      const note = skipped > 0 ? `\n\n_…и ещё ${skipped} раньше_` : "";
+      parts.push(details(`🖥️ Вывод команд (${this.#toolOutputs.length})`, body + note));
+    }
+    if (errors.length > 0) {
+      const body = errors
+        .map((e) => `**${e.label}**\n\n${fence(tail(e.text, OUTPUT_LIMIT))}`)
+        .join("\n\n");
+      parts.push(details(`⚠️ Ошибки инструментов (${this.#toolErrors.length})`, body));
+    }
+    return parts.join("\n\n");
   }
 
   #lastRender = 0;

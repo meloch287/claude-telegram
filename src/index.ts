@@ -57,6 +57,7 @@ import {
   ensureSession,
   getSession,
   resetSession,
+  restartSessionsForChannelChange,
   switchProject,
   workspaceFor,
   backgroundTasks,
@@ -77,7 +78,7 @@ import { MODELS, commitKeyboard } from "./bot/keyboards.js";
 import { isScreenId, renderScreen, type ScreenId } from "./bot/screens.js";
 import { checkAchievements, renderUnlocked, unlockedIds } from "./achievements.js";
 import { ACHIEVEMENTS, CAT_LEVELS, catForTokens, formatTokens, nextCat } from "./cats.js";
-import { esc } from "./agent/render.js";
+import { esc, prepareRichMarkdown, details, fence } from "./agent/render.js";
 import { limitTitle, percentOf, toMillis, WINDOWS } from "./limits.js";
 import { subscriptionUsage } from "./subscription-usage.js";
 import { saveTelegramFile } from "./bot/attachments.js";
@@ -139,10 +140,12 @@ function telegramFetchOptions(): { agent: HttpsProxyAgent<string> } | undefined 
 const apiRoot = (process.env.TELEGRAM_API_ROOT ?? "").trim();
 
 const tgFetch = telegramFetchOptions();
-const bot = new Bot(
-  config.botToken,
-  tgFetch ? { client: { baseFetchConfig: tgFetch } } : undefined,
-);
+const bot = new Bot(config.botToken, {
+  client: {
+    ...(apiRoot ? { apiRoot } : {}),
+    ...(tgFetch ? { baseFetchConfig: tgFetch } : {}),
+  },
+});
 
 /**
  * Сеть до телеграма иногда отваливается на несколько секунд. Без повтора
@@ -590,7 +593,7 @@ bot.callbackQuery(/^rs:(.+)$/, async (ctx) => {
     project: chatRow?.project ?? "default",
     sessionId,
     title: chatRow?.title ?? null,
-    permissionMode: chatRow?.permission_mode ?? "default",
+    permissionMode: chatRow?.permission_mode ?? config.defaultPermissionMode,
   });
 
   await ctx.answerCallbackQuery("Вернулся в чат");
@@ -726,31 +729,61 @@ function describeStatus(state: RepoStatus, repo: string): string {
   return parts.join(" · ");
 }
 
+/** Rich-сообщение в ответ на команду; если Telegram разметку не принял — обычным текстом. */
+async function replyRich(ctx: Context, markdown: string): Promise<void> {
+  if (!ctx.chat) return;
+  try {
+    await ctx.api.raw.sendRichMessage({
+      chat_id: ctx.chat.id,
+      rich_message: { markdown: prepareRichMarkdown(markdown) },
+    });
+  } catch (error) {
+    console.error(`[rich] ${(error as Error).message}`);
+    await ctx.reply(markdown.replace(/<[^>]+>/g, "").slice(0, 3900));
+  }
+}
+
+/** Столько диффа помещается в сообщение, чтобы его ещё читали; остальное файлом. */
+const DIFF_IN_MESSAGE = 6000;
+
 async function showDiff(ctx: CommandContext<Context> | Context): Promise<void> {
   const repo = await resolveRepo(ctx);
   if (!repo) return;
 
   try {
     const state = await status(repo);
+    const arrows = `${state.ahead ? ` ↑${state.ahead}` : ""}${state.behind ? ` ↓${state.behind}` : ""}`;
+    const head = `## 🔀 Дифф · \`${basename(repo)}\` · ветка \`${state.branch}\`${arrows}`;
     if (state.entries.length === 0) {
-      await ctx.reply(`${describeStatus(state, repo)}\n\nЧисто: менять нечего.`, {
-        parse_mode: "HTML",
-      });
+      await replyRich(ctx, `${head}\n\nЧисто: менять нечего.`);
       return;
     }
 
     const summary = await gitDiff(repo);
-    const head = `${describeStatus(state, repo)}\n\n<b>Изменено файлов: ${summary.files}</b>`;
-    const stat = summary.stat ? `\n<pre>${esc(summary.stat)}</pre>` : "";
-    await ctx.reply(head + stat, { parse_mode: "HTML" });
+    const cell = (path: string) => "`" + path.replace(/\|/g, "\\|").replace(/`/g, "ˋ") + "`";
+    const rows = summary.entries.map(
+      (e) => `| ${cell(e.path)} | ${e.binary ? "бинарный" : `+${e.added} −${e.deleted}`} |`,
+    );
+    for (const path of summary.untracked) rows.push(`| ${cell(path)} | новый |`);
+    const more = rows.length > 40 ? `\n| …и ещё ${rows.length - 40} | |` : "";
+    const table =
+      rows.length > 0
+        ? `| Файл | Изменения |\n|:-----|----------:|\n${rows.slice(0, 40).join("\n")}${more}`
+        : "";
 
-    // Сам дифф отправляем файлом: в сообщении он и не поместится, и читаться
-    // на телефоне будет плохо, а файл открывается просмотрщиком.
-    if (summary.patch.trim()) {
-      const note = summary.truncated ? " (обрезан)" : "";
+    const patch = summary.patch.trim();
+    const cut = patch.length > DIFF_IN_MESSAGE || summary.truncated;
+    const block = patch
+      ? `\n\n${details(`📄 Патч${cut ? " (начало)" : ""}`, fence(patch.slice(0, DIFF_IN_MESSAGE), "diff"))}`
+      : "";
+    await replyRich(ctx, `${head}\n\n**Изменено файлов: ${summary.files}**\n\n${table}${block}`);
+
+    // Полный дифф файлом, только если в сообщение он не влез: файл открывается
+    // просмотрщиком и читается лучше, чем километр в чате.
+    if (cut) {
       await ctx.replyWithDocument(
         new InputFile(Buffer.from(summary.patch, "utf8"), `${basename(repo)}.diff`),
-        { caption: `Полный дифф${note}` },
+        { caption: summary.truncated ? "Полный дифф (обрезан до 12 КБ)" : "Полный дифф" },
       );
     }
   } catch (error) {
@@ -922,7 +955,7 @@ bot.command("rename", async (ctx) => {
     project: chatRow?.project ?? "default",
     sessionId,
     title: title.slice(0, 80),
-    permissionMode: chatRow?.permission_mode ?? "default",
+    permissionMode: chatRow?.permission_mode ?? config.defaultPermissionMode,
   });
 
   await ctx.reply(`✏️ Теперь этот чат называется <b>${esc(title.slice(0, 80))}</b>.`, {
@@ -1848,7 +1881,7 @@ bot.on("message:text", async (ctx) => {
       project: chatRow?.project ?? "default",
       sessionId: chatRow?.session_id ?? null,
       title: text.slice(0, 60),
-      permissionMode: chatRow?.permission_mode ?? "default",
+      permissionMode: chatRow?.permission_mode ?? config.defaultPermissionMode,
     });
     await ctx.reply(`💬 Новый чат: <b>${esc(text.slice(0, 60))}</b>`, { parse_mode: "HTML" });
   }
@@ -1957,6 +1990,12 @@ if (choice.active) {
 startChannelWatch(parsePool(config.proxyPool), {
   requireCountry: config.proxyRequireCountry || undefined,
   onChange: (next, previous) => {
+    // Живые агенты держат адрес прокси, выданный им при запуске, и после
+    // смены канала продолжали бы биться в мёртвый. Переподнимаем их.
+    if (next) {
+      const restarted = restartSessionsForChannelChange();
+      if (restarted > 0) console.log(`🔁 Сессий переподнято после смены канала: ${restarted}`);
+    }
     const owner = config.allowedUserIds[0];
     if (owner === undefined) return;
     const was = previous ? describeChannel(previous) : "неизвестно";

@@ -60,6 +60,18 @@ export const config = {
   miniappPort: Number(optional("MINIAPP_PORT", "8788")),
   miniappUrl: optional("MINIAPP_URL", ""),
   permissionTimeoutMs: Number(optional("PERMISSION_TIMEOUT_MIN", "30")) * 60_000,
+  /**
+   * Режим разрешений для новых чатов: default (спрашивать), bypassPermissions
+   * (без вопросов), plan. Владелец, которому карточки только мешают, ставит
+   * bypassPermissions — и бот ничего не спрашивает с первого сообщения.
+   */
+  defaultPermissionMode: optional("DEFAULT_PERMISSION_MODE", "default"),
+  /**
+   * Сторож необратимого (src/agent/guard.ts): переспрашивает про rm вне
+   * проекта, sudo, force-push и прочее даже в режиме без вопросов. DANGER_GUARD=0
+   * выключает и его — тогда бот не спрашивает вообще ничего.
+   */
+  dangerGuard: optional("DANGER_GUARD", "1") !== "0",
   /** Пул прокси через запятую. Порядок задаёт приоритет. */
   proxyPool: optional("PROXY_POOL", ""),
   /** Код страны, которую ожидаем от выхода: DE и т.п. Пусто — не проверять. */

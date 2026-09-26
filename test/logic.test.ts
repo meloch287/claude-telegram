@@ -1247,3 +1247,65 @@ test("висящие запросы чата видны сторожу", async (
   await pending;
   assert.equal(permissions.hasPending(4242), false, "ответили — ждать больше нечего");
 });
+import {
+  describeToolMarkdown,
+  fence,
+  hideSecrets,
+  layoutMarkdown,
+  prepareRichMarkdown,
+} from "../src/agent/render.js";
+
+test("rich markdown: доллары вне кода экранируются, в коде — нет", () => {
+  const src = "Цена $5 и `$HOME` и\n```sh\necho $PATH\n```\nитого $12";
+  const out = prepareRichMarkdown(src);
+  assert.equal(out, "Цена \\$5 и `$HOME` и\n```sh\necho $PATH\n```\nитого \\$12");
+});
+
+test("раскладка: отступ между абзацами, перенос строки и подводка с эмодзи", () => {
+  const src =
+    "Разобрал всё. Сборка 1.1.30: готова.\n\nТрекер — баг настоящий.\nПричина в датах.\n\n✅ Проверки: 201 тест.";
+  assert.equal(
+    layoutMarkdown(src),
+    "Разобрал всё. Сборка 1.1.30: готова.\n\n\u00a0\n\n🔹 **Трекер** — баг настоящий.  \nПричина в датах.\n\n\u00a0\n\n**✅ Проверки**: 201 тест.",
+  );
+});
+
+test("раскладка: заголовки, списки, таблицы, details и код не ломаются", () => {
+  const src =
+    "## Итог\n\n- пункт: раз\n- пункт: два\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n<details><summary>Ещё</summary>\n\nТекст.\n\n</details>\n\n```sh\necho a: b\nls\n```";
+  assert.equal(
+    layoutMarkdown(src),
+    "## Итог\n\n- пункт: раз\n- пункт: два\n\n\u00a0\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n<details><summary>Ещё</summary>\n\nТекст.\n\n</details>\n\n```sh\necho a: b\nls\n```",
+  );
+});
+
+test("секреты: в прозе спойлер, в коде маска, обычные слова не трогаются", () => {
+  const key = "sk-ant-api03-" + "x".repeat(40);
+  assert.equal(
+    hideSecrets(`ключ ${key} готов`, "prose"),
+    `ключ <tg-spoiler>${key}</tg-spoiler> готов`,
+  );
+  assert.equal(hideSecrets(`KEY=${key}`, "code"), "KEY=sk-a…xxx");
+  assert.equal(hideSecrets("password: hunter22", "code"), "password: •••••••• ".trim());
+  assert.equal(
+    hideSecrets("токен протух, пароль не подошёл", "prose"),
+    "токен протух, пароль не подошёл",
+  );
+  assert.equal(
+    prepareRichMarkdown(`цена $5, ключ \`${key}\` и ${key}`),
+    `цена \\$5, ключ \`sk-a…xxx\` и <tg-spoiler>${key}</tg-spoiler>`,
+  );
+});
+
+test("ограждение кода не ломается тройными кавычками внутри", () => {
+  assert.equal(fence("a\n```\nb", "sh"), "```sh\na\nˋˋˋ\nb\n```");
+});
+
+test("шаг задачи в Markdown: команда одной строкой в моноширинном", () => {
+  const step = describeToolMarkdown("Bash", { command: "npm test -- --watch\necho done" });
+  assert.equal(step.endsWith("`npm test -- --watch`"), true);
+  assert.equal(
+    describeToolMarkdown("Edit", { file_path: "/a/b/c/d/e.ts" }).endsWith("`…/c/d/e.ts`"),
+    true,
+  );
+});
