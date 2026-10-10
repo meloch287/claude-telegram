@@ -118,7 +118,15 @@ export async function bridgeTurnBody(req, pathname, target) {
     const info = await fetch(`${target}/api/v1/threads/${encodeURIComponent(thread)}`, { signal: AbortSignal.timeout(5000) }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
     bridge = info?.providerId === "acp-tgclaude";
   }
-  return bridge && fitBridgePermission(body) ? Buffer.from(JSON.stringify(body)) : raw;
+  if (!bridge) return raw;
+  let changed = fitBridgePermission(body);
+  // Режима в запросе нет — bb возьмёт его из прошлого хода (у чатов от «Claude Code» это
+  // auto) и отклонит. Явный full главнее прошлого хода.
+  if (thread && body && typeof body === "object" && !Array.isArray(body) && body.permissionMode === undefined && /\/(?:send|compact|edit-message)$/.test(pathname)) {
+    body.permissionMode = "full";
+    changed = true;
+  }
+  return changed ? Buffer.from(JSON.stringify(body)) : raw;
 }
 
 export function createWebGateway({ auth, runtime, allowed, usage, avatar=async()=>null, beforeMutation = async () => {} }) {

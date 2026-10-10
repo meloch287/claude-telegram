@@ -23,6 +23,10 @@ test("неподходящий режим для Claude бота станови�
     assert.equal(created.execution.permissionMode, "full", "новая ветка Claude бота");
     const ok = { execution: { providerId: "acp-tgclaude", permissionMode: "accept-edits" } };
     assert.deepEqual(JSON.parse(await bridgeTurnBody(reqOf(ok), "/api/v1/threads", target)), ok);
+    const bare = JSON.parse(await bridgeTurnBody(reqOf({ input: [{ type: "text", text: "без режима" }] }), "/api/v1/threads/thr_claude/send", target));
+    assert.equal(bare.permissionMode, "full", "режима нет — явный full, иначе bb возьмёт auto из прошлого хода");
+    const bareGpt = JSON.parse(await bridgeTurnBody(reqOf({ input: [] }), "/api/v1/threads/thr_gpt/send", target));
+    assert.equal(bareGpt.permissionMode, undefined);
     assert.ok(BRIDGE_TURN.test("/api/v1/threads/thr_x/retry"));
     assert.ok(!BRIDGE_TURN.test("/api/v1/threads/thr_x/archive"));
     assert.equal(fitBridgePermission({ a: [{ permissionMode: "full" }] }), false);

@@ -138,6 +138,14 @@ def sync(uid, home, work, payload):
             moved = db.execute("update project_execution_defaults set provider_id=?,model='default',permission_mode=case when permission_mode in ('accept-edits','full') then permission_mode else 'full' end,updated_at=? where provider_id='claude-code'",
                                (BRIDGE, int(time.time() * 1000))).rowcount
             result['changed'] += moved
+        if payload.get('provider') == BRIDGE:
+            # Прошлые ходы чатов, пришедших от «Claude Code», записаны с режимом auto: bb берёт
+            # режим из последнего хода (повтор, очередь) и отклоняет сообщение. Исправляем запись.
+            fixed = db.execute("""update events set data=json_set(data,'$.execution.permissionMode','full')
+                where type in ('client/turn/requested','client/thread/start','client/turn/start') and thread_id in (select id from threads where provider_id=?)
+                and json_extract(data,'$.execution.permissionMode') is not null
+                and json_extract(data,'$.execution.permissionMode') not in ('accept-edits','full')""", (BRIDGE,)).rowcount
+            result['changed'] += fixed
         ids = [i for i in payload.get('ids', []) if ID.match(str(i))]
         if payload.get('complete'):
             for link in db.execute('select * from claude_telegram_links').fetchall():

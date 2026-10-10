@@ -99,6 +99,20 @@ class ProjectDefaults(unittest.TestCase):
             row = db.execute("select provider_id,model,permission_mode,reasoning_level from project_execution_defaults").fetchone()
             self.assertEqual(row, (cbs.BRIDGE, 'default', 'full', 'xhigh'), 'режим auto Claude бота не принимает — стал full')
 
+    def test_last_turn_permission_of_bridge_threads_becomes_full(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home, work, db = bb(Path(tmp))
+            db.execute("insert into environments(id,project_id,host_id,path,status,created_at,updated_at) values('e1','prj','hst',?,'ready',1,1)", (str(work) + '/p',))
+            for tid, provider in (('thr_b', cbs.BRIDGE), ('thr_g', 'codex')):
+                db.execute("insert into threads(id,project_id,environment_id,provider_id,title,status,latest_attention_at,created_at,updated_at) values(?,'prj','e1',?,'t','idle',1,1,1)", (tid, provider))
+                data = json.dumps({'initiator': 'user', 'input': [{'type': 'text', 'text': 'x'}], 'execution': {'permissionMode': 'auto', 'model': 'm'}})
+                db.execute("insert into events(id,thread_id,environment_id,scope_kind,turn_id,sequence,type,data,created_at) values(?,?,'e1','turn','t1',1,'client/turn/requested',?,1)", ('ev_' + tid, tid, data))
+            db.commit()
+            cbs.sync('5', home, work, payload([]))
+            mode = lambda tid: json.loads(db.execute('select data from events where thread_id=?', (tid,)).fetchone()[0])['execution']['permissionMode']
+            self.assertEqual(mode('thr_b'), 'full', 'прошлый ход Claude бота — full: иначе bb отклоняет новое сообщение')
+            self.assertEqual(mode('thr_g'), 'auto', 'GPT не трогаем')
+
 
 if __name__ == '__main__':
     unittest.main()
