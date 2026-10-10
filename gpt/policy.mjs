@@ -1,10 +1,17 @@
 import path from "node:path";
 
-export const MODELS = Object.freeze([
+// Живой список: обновляется из каталога Codex (gpt-models.mjs). Массив меняется на
+// месте, поэтому все, кто его импортировал, сразу видят новые модели.
+export const MODELS = [
   ["gpt-6-sol", "☀️ GPT-6 Sol"],
   ["gpt-6-luna", "🌙 GPT-6 Luna"],
   ["gpt-6-astra", "✨ GPT-6 Astra"],
-]);
+];
+export function setModels(list) {
+  const valid = list.filter(([id, label]) => typeof id === "string" && typeof label === "string");
+  if (!valid.length) return;
+  MODELS.splice(0, MODELS.length, ...valid);
+}
 export function userId(value) {
   if (!Number.isSafeInteger(value) || value <= 0) throw new Error("Invalid Telegram user ID");
   return String(value);

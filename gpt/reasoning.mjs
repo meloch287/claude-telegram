@@ -7,7 +7,18 @@ export const EFFORTS = Object.freeze([
   ["max", "🏔 Max — максимум"],
   ["ultra", "🚀 Ultra — предельный"],
 ]);
+// Уровни из каталога Codex (gpt-models.mjs) главнее встроенного правила.
+const liveEfforts = new Map();
+export function setModelEfforts(entries) {
+  liveEfforts.clear();
+  for (const [model, levels] of entries) if (Array.isArray(levels) && levels.length) liveEfforts.set(model, new Set(levels));
+}
 export function effortsFor(model) {
+  const live = liveEfforts.get(model);
+  if (live) {
+    const known = EFFORTS.filter(([id]) => live.has(id));
+    if (known.length) return known;
+  }
   return model === "gpt-6-luna" ? EFFORTS.slice(0, 5) : EFFORTS;
 }
 export function effortId(value, model) {

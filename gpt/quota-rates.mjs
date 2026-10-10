@@ -8,9 +8,19 @@ export const QUOTA_RATES = Object.freeze({
   "gpt-6-luna": { input: 10, cached: 1, output: 50 },
   "gpt-6-astra": { input: 1000, cached: 100, output: 5000 },
 });
+/**
+ * Новые модели приходят из каталога Codex раньше, чем их коэффициенты: берём
+ * коэффициенты той же линейки (sol/luna/astra), а незнакомую — по самой дорогой,
+ * чтобы квота не занижалась.
+ */
+export function ratesFor(model) {
+  if (QUOTA_RATES[model]) return QUOTA_RATES[model];
+  const family = /luna/i.test(model) ? "gpt-6-luna" : /sol/i.test(model) ? "gpt-6-sol" : "gpt-6-astra";
+  return QUOTA_RATES[family];
+}
 export function priceUsage(model, value) {
   const u = normalizeUsage(value),
-    r = QUOTA_RATES[model];
+    r = ratesFor(model);
   if (!r) throw new Error("Для модели не настроены коэффициенты квоты");
   const fresh = u.input_tokens - u.cached_input_tokens;
   const ticks = fresh * r.input + u.cached_input_tokens * r.cached + u.output_tokens * r.output;

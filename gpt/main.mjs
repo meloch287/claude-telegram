@@ -8,6 +8,7 @@ import {createTeamService} from './team-service.mjs';
 import {configureTeam,configureClaudeBridge} from './inference-gateway.mjs';
 import {createClaudeBridgeHandler} from './claude-bb-bridge.mjs';
 import {engineAllowed,engineClosedText} from '../dist/engine-access.js';
+import {gptModels} from './gpt-models.mjs';
 import {outgoingFiles,FILE_DELIVERY_PROMPT} from "../dist/bot/delivery.js";
 import {telegramMedia} from "./telegram-media.mjs";
 import {videoPreview} from "../dist/bot/media.js";
@@ -111,6 +112,9 @@ const team=createTeamService({space:teamSpace,allowed,models:uid=>modelId(legacy
  charge:(uid,engine,usage,jobId,id)=>{if(engine==='gpt')store.recordMeteredUsage(uid,usage,modelId(legacy.getOrCreateUser(uid).model||'gpt-6-sol'),'team:'+id,Date.now(),jobId);else legacy.recordUsage(uid,usage.tokens,usage.costUsd,'claude')}
 });
 configureTeam(team.handler);
+// Каталог моделей GPT из Codex: новые модели появляются без правок кода.
+gptModels.refresh();
+setInterval(()=>{try{if(gptModels.refresh())console.log('[gpt-models] каталог обновлён')}catch(e){console.error('[gpt-models]',e.message)}},10*60_000).unref();
 configureClaudeBridge(createClaudeBridgeHandler({identify:teamSpace.identify}));
 const inFlightUpdates = new Map();
 const busy = new Map(),

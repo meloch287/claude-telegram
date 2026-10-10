@@ -1,3 +1,4 @@
+import { gptModels } from "./gpt-models.mjs";
 import {createHash} from "node:crypto";
 import {teamContext} from "./team-space.mjs";
 import { GITHUB_CONTEXT } from "./github.mjs";
@@ -123,7 +124,9 @@ export function createWebRuntime({ auth, allowed, settings, credential = () => n
     if (await ready(target.url)) return bootstrap(uid, target);
     const user = settings(uid);
     const config = `model = "${user.model || "gpt-6-sol"}"\nmodel_reasoning_effort = "${user.effort || "medium"}"\nmodel_catalog_json = "/tmp/bb-models.json"\napproval_policy = "never"\nsandbox_mode = "danger-full-access"\nmodel_provider = "owner_gateway"\n[model_providers.owner_gateway]\nname = "GPT subscription"\nbase_url = "http://172.30.0.1:8790/v1"\nwire_api = "responses"\nenv_key = "GPT_BROKER_TOKEN"\nsupports_websockets = false\n`;
-    const catalog = await readFile(new URL("./bb-models.json", import.meta.url));
+    // Каталог моделей — свежий из Codex, если есть (gpt-models.mjs), иначе встроенный.
+    const live = gptModels.catalogJson();
+    const catalog = live ? Buffer.from(live) : await readFile(new URL("./bb-models.json", import.meta.url));
     await new Promise((resolve, reject) => {
       const child = spawn(
         "docker",
