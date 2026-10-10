@@ -132,6 +132,12 @@ def sync(uid, home, work, payload):
     result = {'ready': True, 'threads': [], 'removed': [], 'changed': 0, 'marked': [], 'native': []}
     with db:
         mark(db, payload.get('mark', []), result)
+        if payload.get('provider') == BRIDGE and db.execute("select 1 from sqlite_master where name='project_execution_defaults'").fetchone():
+            # Настройки проекта, запомненные от «Claude Code» (режим auto и т.п.), Claude бота
+            # не принимает — новые сообщения отклонялись. Переводим их на мост.
+            moved = db.execute("update project_execution_defaults set provider_id=?,model='default',permission_mode=case when permission_mode in ('accept-edits','full') then permission_mode else 'full' end,updated_at=? where provider_id='claude-code'",
+                               (BRIDGE, int(time.time() * 1000))).rowcount
+            result['changed'] += moved
         ids = [i for i in payload.get('ids', []) if ID.match(str(i))]
         if payload.get('complete'):
             for link in db.execute('select * from claude_telegram_links').fetchall():

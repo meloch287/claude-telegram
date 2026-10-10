@@ -87,5 +87,18 @@ class Adoption(unittest.TestCase):
             self.assertEqual(db.execute("select count(*) from events where thread_id='thr_native1'").fetchone()[0], after, 'повторная сверка ничего не добавляет')
 
 
+class ProjectDefaults(unittest.TestCase):
+    def test_claude_code_defaults_move_to_bridge(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home, work, db = bb(Path(tmp))
+            if not db.execute("select 1 from sqlite_master where name='project_execution_defaults'").fetchone():
+                db.execute('create table project_execution_defaults(project_id text primary key,provider_id text not null,model text not null,service_tier text not null,reasoning_level text not null,permission_mode text not null,updated_at integer not null)')
+            db.execute("insert into project_execution_defaults values('prj','claude-code','claude-opus-5-5','default','xhigh','auto',1)")
+            db.commit()
+            cbs.sync('5', home, work, payload([]))
+            row = db.execute("select provider_id,model,permission_mode,reasoning_level from project_execution_defaults").fetchone()
+            self.assertEqual(row, (cbs.BRIDGE, 'default', 'full', 'xhigh'), 'режим auto Claude бота не принимает — стал full')
+
+
 if __name__ == '__main__':
     unittest.main()

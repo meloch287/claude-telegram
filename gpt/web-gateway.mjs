@@ -80,6 +80,47 @@ export function brandBridgeProviders(list) {
   });
 }
 
+/**
+ * Режим разрешений для Claude бота. bb пускает к ACP-агенту только accept-edits и
+ * full, а интерфейс шлёт режим, запомненный от «Claude Code» (например auto), —
+ * и сообщение отклоняется. Для Claude бота этот режим ничего не значит (разрешения
+ * ведёт бот), поэтому неподходящий заменяем на full.
+ */
+const BRIDGE_PERMISSIONS = new Set(["accept-edits", "full"]);
+export const BRIDGE_TURN = /^\/api\/v1\/threads(?:\/fork|\/([^/]+)\/(?:send|retry|compact|edit-message))?$/;
+export function fitBridgePermission(value) {
+  let changed = false;
+  const walk = (node) => {
+    if (Array.isArray(node)) return node.forEach(walk);
+    if (!node || typeof node !== "object") return;
+    for (const [key, child] of Object.entries(node)) {
+      if (key === "permissionMode" && typeof child === "string" && !BRIDGE_PERMISSIONS.has(child)) { node[key] = "full"; changed = true; }
+      else walk(child);
+    }
+  };
+  walk(value);
+  return changed;
+}
+export async function bridgeTurnBody(req, pathname, target) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > 64 * 1024 * 1024) throw Object.assign(new Error("Слишком большой запрос"), { status: 413 });
+    chunks.push(chunk);
+  }
+  const raw = Buffer.concat(chunks);
+  let body;
+  try { body = JSON.parse(raw.toString()); } catch { return raw; }
+  let bridge = raw.includes('"acp-tgclaude"');
+  const thread = BRIDGE_TURN.exec(pathname)?.[1];
+  if (!bridge && thread) {
+    const info = await fetch(`${target}/api/v1/threads/${encodeURIComponent(thread)}`, { signal: AbortSignal.timeout(5000) }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    bridge = info?.providerId === "acp-tgclaude";
+  }
+  return bridge && fitBridgePermission(body) ? Buffer.from(JSON.stringify(body)) : raw;
+}
+
 export function createWebGateway({ auth, runtime, allowed, usage, avatar=async()=>null, beforeMutation = async () => {} }) {
   const sockets = new Map();
   function track(uid, socket) {
@@ -216,9 +257,15 @@ export function createWebGateway({ auth, runtime, allowed, usage, avatar=async()
         const release = await beforeMutation(uid, req.method, new URL(requestPath, "http://localhost").pathname);
         if (release) res.once("close", release);
       }
+      const body = req.method === "POST" && BRIDGE_TURN.test(routeUrl.pathname) && (req.headers["content-type"] || "").includes("json")
+        ? await bridgeTurnBody(req, routeUrl.pathname, target).catch((error) => { reply(res, error.status || 400, error.message); return false; })
+        : null;
+      if (body === false) return;
+      const forwardHeaders = proxyHeaders(req, target);
+      if (body) { delete forwardHeaders["transfer-encoding"]; forwardHeaders["content-length"] = String(body.length); }
       const upstream = request(
         target + requestPath,
-        { method: req.method, headers: proxyHeaders(req, target) },
+        { method: req.method, headers: forwardHeaders },
         (response) => {
           const headers = {
             ...response.headers,
@@ -285,7 +332,8 @@ export function createWebGateway({ auth, runtime, allowed, usage, avatar=async()
         else res.destroy();
       });
       res.on("close", () => upstream.destroy());
-      req.pipe(upstream);
+      if (body) upstream.end(body);
+      else req.pipe(upstream);
     } catch (error) {
       if (!res.headersSent) reply(res, 503, publicWebError(error));
       else res.destroy();
