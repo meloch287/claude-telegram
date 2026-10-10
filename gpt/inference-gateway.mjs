@@ -155,7 +155,7 @@ export function inferenceHandler() {
             authorization: "Bearer " + auth.accessToken,
             "chatgpt-account-id": auth.accountId,
             originator: "codex_cli_rs",
-            "user-agent": "codex_cli_rs/0.159.3",
+            "user-agent": "codex_cli_rs/0.162.1",
             session_id: ticket.id,
           },
           body: payload,

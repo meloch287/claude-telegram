@@ -39,7 +39,7 @@ export function relativeFile(value) {
   if (p === ".." || p.startsWith("../")) throw new Error("Путь выходит за пределы проекта");
   return p;
 }
-export function workerArgs(uid, base, image = "ai-worker:0.159.3-bb0.45.0-r33-claude") {
+export function workerArgs(uid, base, image = "ai-worker:0.162.1-bb0.45.0-r33-claude") {
   const id = userId(uid);
   if (!path.isAbsolute(base)) throw new Error("Tenant root must be absolute");
   return [

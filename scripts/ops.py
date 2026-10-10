@@ -181,6 +181,7 @@ def problems():
         if unit.startswith('ai-') and unit.endswith(('.service', '.timer')):
             found.append(f'упал юнит {unit}')
     found += sync_problems()
+    found += image_problems()
     backup_at = load_state().get('backup', {}).get('at')
     if backup_at and time.time() - backup_at > 36 * 3600:
         found.append('ночной бэкап не делался больше полутора суток')
@@ -205,6 +206,32 @@ def sync_problems(lines=None):
         if len(texts) >= 3:
             log(f'синхронизация с bb у {uid}: {texts[-1][:300]}')
     return [f'синхронизация чатов с bb падает у {uid} (подробности: journalctl -u ai-gpt-backend | grep {uid})' for uid, texts in sorted(errors.items()) if len(texts) >= 3]
+
+
+IMAGE_IN_CODE = {'gpt/web-runtime.mjs': r'BB_IMAGE = "(ai-worker:[^"]+)"', 'gpt/policy.mjs': r'image = "(ai-worker:[^"]+)"'}
+
+
+def image_problems(containers=None):
+    """Образ в коде и у контейнеров должен совпадать — иначе /web отвечает «обновление не завершено»."""
+    images = {}
+    for rel, pattern in IMAGE_IN_CODE.items():
+        try:
+            match = re.search(pattern, (APP / rel).read_text())
+        except OSError:
+            match = None
+        images[rel] = match.group(1) if match else None
+    found = []
+    if len(set(images.values())) != 1 or None in images.values():
+        found.append('образ контейнеров в коде разошёлся: ' + ', '.join(f'{k} → {v}' for k, v in images.items()))
+        return found
+    want = next(iter(images.values()))
+    if containers is None:
+        out = run(['docker', 'ps', '--filter', 'label=ai-bot.managed=v1', '--format', '{{.Names}} {{.Image}}'], timeout=30)
+        containers = [line.split() for line in out.stdout.splitlines() if line.startswith('ai-user-')] if out.returncode == 0 else []
+    stale = sorted(name for name, image in containers if image != want)
+    if stale:
+        found.append(f'контейнеры не на образе из кода ({want}): {", ".join(stale)} — у них не откроется /web')
+    return found
 
 
 def watchdog():

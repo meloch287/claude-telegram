@@ -6,7 +6,7 @@ import { docker, ensureWorker } from "./worker.mjs";
 import { issueInference } from "./inference-gateway.mjs";
 import { readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
-export const BB_IMAGE = "ai-worker:0.159.3-bb0.45.0-r33-claude";
+export const BB_IMAGE = "ai-worker:0.162.1-bb0.45.0-r33-claude";
 
 // BB and its Codex children run as UID 1000 inside the EXISTING user worker.
 // No extra mounts, published ports, Docker socket, or owner credentials.

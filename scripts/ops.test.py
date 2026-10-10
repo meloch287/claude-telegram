@@ -93,6 +93,23 @@ class SyncErrors(unittest.TestCase):
             self.assertEqual(found, ops.sync_problems([line] * 5), 'текст стабильный — без повторных тревог')
 
 
+class Images(unittest.TestCase):
+    def test_code_and_containers_must_agree(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'app' / 'gpt').mkdir(parents=True)
+            (root / 'app/gpt/web-runtime.mjs').write_text('export const BB_IMAGE = "ai-worker:0.162.1-bb";\n')
+            (root / 'app/gpt/policy.mjs').write_text('function workerArgs(uid, base, image = "ai-worker:0.162.1-bb") {}\n')
+            ops = load(root)
+            self.assertEqual(ops.image_problems([['ai-user-1', 'ai-worker:0.162.1-bb']]), [])
+            stale = ops.image_problems([['ai-user-1', 'ai-worker:0.162.1-bb'], ['ai-user-2', 'ai-worker:0.159.3-bb']])
+            self.assertEqual(len(stale), 1)
+            self.assertIn('ai-user-2', stale[0])
+            # ровно сегодняшний сбой: в web-runtime вернули старый образ
+            (root / 'app/gpt/web-runtime.mjs').write_text('export const BB_IMAGE = "ai-worker:0.159.3-bb";\n')
+            self.assertIn('разошёлся', ops.image_problems([['ai-user-1', 'ai-worker:0.162.1-bb']])[0])
+
+
 class Backup(unittest.TestCase):
     def test_database_snapshot_is_consistent(self):
         with tempfile.TemporaryDirectory() as tmp:
