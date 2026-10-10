@@ -7,6 +7,10 @@ process.env.ENCRYPTION_KEY ??= Buffer.alloc(32, 7).toString("base64");
 process.env.DATA_DIR ??= "./data/test";
 process.env.WORKSPACE_ROOT ??= "./workspaces/test";
 
+// Модули бота пишут подсказки через console.log. В stdout теста их строки изредка
+// разрывают служебный поток раннера («Unable to deserialize cloned data») — шлём в stderr.
+console.log = console.error;
+
 const { encrypt, decrypt, maskKey, verifyInitData } = await import("../src/crypto.js");
 const { MessageQueue } = await import("../src/agent/queue.js");
 const { catForTokens, nextCat, catProgress, CAT_LEVELS } = await import("../src/cats.js");
