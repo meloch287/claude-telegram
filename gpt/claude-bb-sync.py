@@ -54,6 +54,61 @@ def remove(db, bid):
     return True
 
 
+def bb_messages(db, bid):
+    """Реплики треда bb, написанные в браузере (без скрытых вставок agent-only)."""
+    out = []
+    for ev in db.execute("select * from events where thread_id=? and id not like 'evt_tc%' and type in ('client/turn/requested','item/completed') order by sequence", (bid,)):
+        data = json.loads(ev['data'])
+        if ev['type'] == 'client/turn/requested' and data.get('initiator') == 'user':
+            body = '\n'.join(x.get('text', '') for x in data.get('input', []) if x.get('type') == 'text' and x.get('visibility') != 'agent-only')
+            if body.strip():
+                out.append({'role': 'user', 'body': body, 'at': ev['created_at']})
+        elif ev['item_kind'] == 'agentMessage':
+            body = (data.get('item') or {}).get('text')
+            if body:
+                out.append({'role': 'assistant', 'body': body, 'at': ev['created_at']})
+    return out
+
+
+def discover(db, limit):
+    """Claude-диалоги, начатые в bb на «Claude Code» контейнера: бот перенесёт их к себе."""
+    found = []
+    if limit <= 0:
+        return found
+    for t in db.execute("""select id,title,title_fallback,status from threads where provider_id='claude-code' and deleted_at is null and archived_at is null
+                           and parent_thread_id is null and id not like 'thr_tc%' and id not in (select bb_id from claude_telegram_links)
+                           and id not in (select bb_id from claude_telegram_adopted) order by updated_at desc""").fetchall():
+        if t['status'] in ACTIVE:
+            continue
+        messages = bb_messages(db, t['id'])
+        if not any(m['role'] == 'user' for m in messages):
+            continue
+        found.append({'bb_id': t['id'], 'title': t['title'] or t['title_fallback'] or 'Диалог Claude из bb', 'messages': messages[-400:]})
+        if len(found) >= limit:
+            break
+    return found
+
+
+def mark(db, items, result):
+    """Тред bb привязан к диалогу бота: дальше он идёт через мост, история не дублируется."""
+    for item in items:
+        bid, sid = str(item.get('bb_id', '')), str(item.get('session', ''))
+        if not ID.match(sid) or not re.fullmatch(r'[A-Za-z0-9_-]{6,80}', bid):
+            raise ValueError('Invalid adoption')
+        thread = db.execute('select * from threads where id=?', (bid,)).fetchone()
+        if not thread or thread['deleted_at'] is not None or thread['provider_id'] not in ('claude-code', BRIDGE):
+            continue
+        if db.execute('select 1 from claude_telegram_adopted where bb_id=?', (bid,)).fetchone():
+            continue
+        seq = db.execute('select coalesce(max(sequence),0) from events where thread_id=?', (bid,)).fetchone()[0] + 1
+        now = int(time.time() * 1000)
+        db.execute('insert into events(id,thread_id,environment_id,scope_kind,turn_id,provider_thread_id,sequence,type,item_id,item_kind,data,created_at) values(?,?,?,?,?,?,?,?,?,?,?,?)',
+                   ('evt_ad' + uuid.uuid4().hex, bid, thread['environment_id'], 'thread', None, sid, seq, 'thread/identity', None, None, json.dumps({'providerThreadId': sid}), now))
+        db.execute('update threads set provider_id=?,model_override=NULL where id=?', (BRIDGE, bid))
+        db.execute('insert into claude_telegram_adopted(bb_id,session_id) values(?,?)', (bid, sid))
+        result['marked'].append(bid)
+
+
 def sync(uid, home, work, payload):
     if not re.fullmatch(r'[1-9][0-9]*', str(uid)):
         raise ValueError('Invalid tenant')
@@ -71,9 +126,12 @@ def sync(uid, home, work, payload):
         return {'ready': False}
     db.execute('create table if not exists claude_telegram_links(session_id text primary key,bb_id text unique not null,last_title text not null)')
     db.execute('create table if not exists claude_telegram_imports(source_id text primary key,bb_id text not null)')
+    # Треды bb, перенесённые в бота: история уже есть в bb, из Telegram её не дублируем.
+    db.execute('create table if not exists claude_telegram_adopted(bb_id text primary key,session_id text unique not null)')
     db.commit()
-    result = {'ready': True, 'threads': [], 'removed': [], 'changed': 0}
+    result = {'ready': True, 'threads': [], 'removed': [], 'changed': 0, 'marked': [], 'native': []}
     with db:
+        mark(db, payload.get('mark', []), result)
         ids = [i for i in payload.get('ids', []) if ID.match(str(i))]
         if payload.get('complete'):
             for link in db.execute('select * from claude_telegram_links').fetchall():
@@ -110,11 +168,22 @@ def sync(uid, home, work, payload):
             title = str(row.get('title') or 'Диалог Claude')[:120]
             if not thread:
                 created = int(row.get('createdAt') or now)
-                db.execute('insert into environments(id,project_id,host_id,path,status,created_at,updated_at,provider_owns_path) values(?,?,?,?,?,?,?,0)',
-                           (eid, source['project_id'], source['host_id'], str(workspace), 'ready', created, now))
+                # Старые отметки «уже перенесено» без самих событий — иначе зеркало вернётся пустым.
+                if not db.execute('select 1 from events where thread_id=? limit 1', (bid,)).fetchone():
+                    db.execute('delete from claude_telegram_imports where bb_id=?', (bid,))
+                # Тред могли удалить в bb, а окружение осталось: берём его, иначе вставка
+                # падала на уникальности пути и синхронизация вставала для всех диалогов.
+                env = db.execute('select id from environments where id=? or (project_id=? and host_id=? and path=?)',
+                                 (eid, source['project_id'], source['host_id'], str(workspace))).fetchone()
+                if env:
+                    eid = env['id']
+                    db.execute("update environments set status='ready',updated_at=? where id=?", (now, eid))
+                else:
+                    db.execute('insert into environments(id,project_id,host_id,path,status,created_at,updated_at,provider_owns_path) values(?,?,?,?,?,?,?,0)',
+                               (eid, source['project_id'], source['host_id'], str(workspace), 'ready', created, now))
                 db.execute('insert into threads(id,project_id,environment_id,provider_id,title,title_fallback,status,latest_attention_at,created_at,updated_at,model_override,visibility) values(?,?,?,?,?,?,?,?,?,?,?,?)',
                            (bid, source['project_id'], eid, provider, title, title, 'idle', created, created, created, None if provider == BRIDGE else MODEL, 'visible'))
-                db.execute('insert into claude_telegram_links(session_id,bb_id,last_title) values(?,?,?)', (sid, bid, title))
+                db.execute('insert into claude_telegram_links(session_id,bb_id,last_title) values(?,?,?) on conflict(session_id) do update set bb_id=excluded.bb_id,last_title=excluded.last_title', (sid, bid, title))
                 result['changed'] += 1
             elif link['last_title'] != title:
                 # Переименование в bb главнее: меняем название, только если его не трогали.
@@ -151,6 +220,11 @@ def sync(uid, home, work, payload):
             if provider == BRIDGE:
                 event('thread/identity', {'providerThreadId': sid}, now, key=f'{sid}:identity:{BRIDGE}')
             messages = row.get('messages', [])
+            if db.execute('select 1 from claude_telegram_adopted where bb_id=?', (bid,)).fetchone():
+                # Перенесённый тред: вся переписка уже в bb, служебный ход переноса не показываем.
+                for message in messages:
+                    db.execute('insert or ignore into claude_telegram_imports(source_id,bb_id) values(?,?)', (f"{sid}:{message['key']}", bid))
+                messages = []
             for message in messages:
                 key = f"{sid}:{message['key']}"
                 at = int(message.get('at') or now)
@@ -186,6 +260,7 @@ def sync(uid, home, work, payload):
             updated = int(row.get('updatedAt') or now)
             db.execute('update threads set updated_at=max(updated_at,?),latest_attention_at=max(latest_attention_at,?) where id=?', (updated, updated, bid))
             result['threads'].append({'id': sid, 'bb_id': bid, 'status': 'idle'})
+        result['native'] = discover(db, int(payload.get('adopt') or 0))
     db.close()
     return result
 

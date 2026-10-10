@@ -218,7 +218,9 @@ export class TelegramOutput implements ConversationOutput {
   async #setStatus(html: string): Promise<void> {
     if (this.quiet) return;
 
-    const text = html;
+    // Telegram режет сообщения длиннее 4096 символов (MESSAGE_TOO_LONG): длинный
+    // журнал шагов показываем хвостом и без разметки — свежие шаги важнее.
+    const text = html.length <= 4000 ? html : "…" + esc(stripTags(html).slice(-3500));
     const reply_markup = new InlineKeyboard().text("⏹ Стоп", "claude:stop");
     if (this.#statusMessageId === null) {
       const message = await this.#api.sendMessage(this.#chatId, text, {parse_mode: "HTML", reply_markup, link_preview_options: {is_disabled: true}});

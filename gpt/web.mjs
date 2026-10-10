@@ -9,6 +9,9 @@ import { createEngineWeb } from "./engine-web.mjs";
 import { workerFor } from "../dist/agent/isolation.js";
 import { config as botConfig } from "../dist/config.js";
 import { join } from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+const execFileAsync = promisify(execFile);
 import { createWebAuth } from "./web-auth.mjs";
 import { createWebRuntime } from "./web-runtime.mjs";
 import { createWebGateway, publicWebError } from "./web-gateway.mjs";
@@ -58,6 +61,21 @@ export function setupWeb({
   });
   const engineWeb = createEngineWeb({ endpoint: (uid) => runtime.endpoint(uid) });
   const claudeMirror = createClaudeMirror({ workerFor, workspaceRoot: botConfig.workspaceRoot, endpoint: (uid) => runtime.endpoint(uid) });
+  // Диалоги из bb попадают в бота и без открытия bb: раз в 10 минут сверяем тех,
+  // у кого контейнер и так запущен (спящие не будим).
+  const backgroundSync = setInterval(async () => {
+    let names = [];
+    try {
+      names = (await execFileAsync("docker", ["ps", "--filter", "label=ai-bot.managed=v1", "--format", "{{.Names}}"], { timeout: 20_000 })).stdout.split(/\s+/);
+    } catch { return; }
+    for (const name of names) {
+      const uid = Number(/^ai-user-(\d+)$/.exec(name)?.[1]);
+      if (!uid || !webAllowed(uid)) continue;
+      await claudeMirror.sync(uid).catch((error) => console.error("[claude-bb]", uid, error.message));
+      await dialogs.sync(uid).catch((error) => console.error("[bb-sync]", uid, error.message));
+    }
+  }, 10 * 60_000);
+  backgroundSync.unref();
   const dialogs = createDialogSync({
     snapshot: store.webSnapshot,
     apply: store.applyWebSync,

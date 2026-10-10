@@ -4,6 +4,7 @@
 // перечитываются только изменившиеся диалоги.
 import { readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
+import { request as httpRequest } from "node:http";
 import { createHash } from "node:crypto";
 import { ensureWorker } from "./worker.mjs";
 
@@ -48,7 +49,26 @@ function run(command, args, input, options = {}) {
   });
 }
 
-export function createClaudeMirror({ workerFor, workspaceRoot, endpoint, exportAs = run, inContainer = run, ensure = ensureWorker, now = Date.now, request = fetch }) {
+/** Перенос Claude-диалога из bb в бота: ai-bot делает это по своему сокету (bb-bridge, /adopt). */
+export function adoptInBot(uid, body, socket = process.env.CLAUDE_BB_SOCKET || "/opt/ai-bot/data/claude-bb.sock") {
+  return new Promise((resolve, reject) => {
+    const req = httpRequest({ socketPath: socket, path: `/v1/${uid}/adopt`, method: "POST", headers: { "content-type": "application/json" }, timeout: 300_000 }, (res) => {
+      let text = "";
+      res.on("data", (c) => { text += c; });
+      res.on("end", () => {
+        let data = {};
+        try { data = JSON.parse(text); } catch {}
+        if (res.statusCode === 200 && data.sessionId) resolve(data.sessionId);
+        else reject(Error(data.error || `перенос не удался (${res.statusCode})`));
+      });
+    });
+    req.on("timeout", () => req.destroy(Error("перенос не ответил за 5 минут")));
+    req.on("error", reject);
+    req.end(JSON.stringify(body));
+  });
+}
+
+export function createClaudeMirror({ workerFor, workspaceRoot, endpoint, exportAs = run, inContainer = run, ensure = ensureWorker, now = Date.now, request = fetch, adopt = adoptInBot }) {
   const state = new Map(); // uid → { at, known: Map<id, mtime> }
   const active = new Map();
   const bridged = new Map(); // uid → хэш агента, с которым мост уже настроен
@@ -91,7 +111,18 @@ export function createClaudeMirror({ workerFor, workspaceRoot, endpoint, exportA
     const fresh = memo.provider !== provider ? await exportAs("python3", [exportScript, worker.home, `${workspaceRoot}/${uid}`], { known: {} }, {
       uid: worker.uid, gid: worker.gid, cwd: worker.home, env: { PATH: "/usr/bin:/bin", HOME: worker.home, LANG: "C.UTF-8" },
     }) : rows;
-    const result = await inContainer("docker", ["exec", "-i", name, "python3", "-c", syncScript, String(uid), "/home/agent", `/app/workspaces/${uid}`], { sessions: fresh.filter((r) => !r.unchanged), ids: fresh.map((r) => r.id), complete: true, provider });
+    const result = await inContainer("docker", ["exec", "-i", name, "python3", "-c", syncScript, String(uid), "/home/agent", `/app/workspaces/${uid}`], { sessions: fresh.filter((r) => !r.unchanged), ids: fresh.map((r) => r.id), complete: true, provider, adopt: provider === BRIDGE_PROVIDER ? 2 : 0 });
+    // Диалоги, начатые в bb на «Claude Code» контейнера: бот забирает их к себе (по два за раз).
+    const marks = [];
+    for (const native of result?.native ?? []) {
+      try {
+        const session = await adopt(uid, { origin: native.bb_id, title: native.title, history: native.messages });
+        marks.push({ bb_id: native.bb_id, session });
+      } catch (error) { console.error("[claude-bb] перенос", uid, native.bb_id, error.message); }
+    }
+    if (marks.length) {
+      await inContainer("docker", ["exec", "-i", name, "python3", "-c", syncScript, String(uid), "/home/agent", `/app/workspaces/${uid}`], { mark: marks, sessions: [], ids: [], complete: false, provider });
+    }
     state.set(uid, { ...memo, at: now() });
     if (result?.ready) {
       memo.provider = provider;
@@ -101,6 +132,8 @@ export function createClaudeMirror({ workerFor, workspaceRoot, endpoint, exportA
       for (const r of fresh) if (!busy.has(r.id) && (r.unchanged ? memo.known.has(r.id) : true)) known.set(r.id, r.mtime);
       state.set(uid, { at: now(), full: memo.full, known, provider });
     }
+    // Новые диалоги бота — в следующую же сверку и полностью: так тред bb свяжется с ними.
+    if (marks.length) state.set(uid, { ...state.get(uid), at: 0, known: new Map() });
     return result;
   }
 

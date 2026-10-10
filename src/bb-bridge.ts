@@ -25,6 +25,7 @@ import { TelegramOutput } from "./bot/output.js";
 import { getSession, releaseIdleSession } from "./bot/session.js";
 import { bbAcquire, bbHolds, bbRelease, bbStop } from "./bb-locks.js";
 import { engineAllowed, engineClosedText } from "./engine-access.js";
+import { adoptBbDialog, parseAdopt } from "./bb-adopt.js";
 import { claudePreferences } from "./claude-settings.js";
 import { config } from "./config.js";
 import {
@@ -156,7 +157,10 @@ export interface BridgeDeps {
   createConversation?: (deps: ConstructorParameters<typeof Conversation>[0]) => Conversation;
   prepare?: typeof prepareDialog;
   create?: typeof createDialog;
+  adopt?: typeof adoptBbDialog;
 }
+/** Один перенос на тред bb за раз: повторный запрос ждёт первый, а не создаёт второй диалог. */
+const adopting = new Map<string, Promise<string>>();
 
 async function runTurn(deps: BridgeDeps, userId: number, sessionId: string, text: string, res: ServerResponse): Promise<void> {
   const record = dialogRecord(userId, sessionId);
@@ -236,6 +240,22 @@ export function createBbBridgeHandler(deps: BridgeDeps) {
   return async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     try {
       if (req.method !== "POST") throw new BridgeError(405, "Нужен POST");
+      const adoptMatch = /^\/v1\/(\d{1,15})\/adopt$/.exec(req.url ?? "");
+      if (adoptMatch) {
+        // Перенос Claude-диалога, начатого в bb на «Claude Code» контейнера (зовёт ai-gpt-backend).
+        const userId = Number(adoptMatch[1]);
+        if (!Number.isSafeInteger(userId) || userId <= 0) throw new BridgeError(400, "Неверный пользователь");
+        if (!engineAllowed("claude", userId)) throw new BridgeError(403, engineClosedText("claude"));
+        if (!credentialFor(userId)) throw new BridgeError(403, "Claude не подключён");
+        const request = parseAdopt(await readJson(req));
+        const key = `${userId}:${request.origin}`;
+        const job = adopting.get(key) ?? (deps.adopt ?? adoptBbDialog)(userId, request).finally(() => adopting.delete(key));
+        adopting.set(key, job);
+        const sessionId = await job;
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ sessionId }));
+        return;
+      }
       const match = /^\/v1\/(\d{1,15})\/(?:(new)|([0-9a-f-]{36})\/(check|turn|cancel))$/.exec(req.url ?? "");
       if (!match) throw new BridgeError(404, "Неизвестный адрес");
       const userId = Number(match[1]);

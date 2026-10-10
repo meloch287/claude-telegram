@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync, renameSync, existsSync, constan
 import { join } from "node:path";
 import { config } from "../config.js";
 import { prepareWorkspace, workerFor } from "./isolation.js";
-export interface DialogRecord { id: string; project: string; title: string; started: boolean; deleted?: boolean }
+export interface DialogRecord { id: string; project: string; title: string; started: boolean; deleted?: boolean; /** тред bb, из которого перенесён диалог */ origin?: string }
 function file(uid: number) {
   if (!Number.isSafeInteger(uid) || uid <= 0) throw Error("Недоступный профиль");
   const root = join(config.dataDir, "claude-dialogs"); mkdirSync(root, { recursive: true, mode: 0o700 });
@@ -13,7 +13,7 @@ export function dialogRecords(uid: number): DialogRecord[] {
   const path = file(uid); return existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : [];
 }
 export function dialogRecord(uid: number, id: string): DialogRecord | undefined { return dialogRecords(uid).find(r => r.id === id && !r.deleted); }
-export function updateDialog(uid: number, id: string, patch: Partial<Pick<DialogRecord, "started" | "title" | "deleted">>): void {
+export function updateDialog(uid: number, id: string, patch: Partial<Pick<DialogRecord, "started" | "title" | "deleted" | "origin">>): void {
   const rows = dialogRecords(uid), row = rows.find(r => r.id === id);
   if (!row) throw Error("Диалог не найден"); Object.assign(row, patch); save(uid, rows);
 }

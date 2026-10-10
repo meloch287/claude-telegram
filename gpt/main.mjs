@@ -316,6 +316,8 @@ configureDeletion(
   () => scheduler.wake(),
 );
 async function showChats(ctx, offset = 0) {
+  // Диалоги, начатые в bb, — сразу в списке: сверка с bb, но не дольше 4 секунд.
+  if (offset === 0) await Promise.race([web.sync(ctx.from.id).catch(() => {}), new Promise((r) => setTimeout(r, 4000).unref())]);
   const rows = store.listThreads(ctx.from.id, offset),
     kb = new InlineKeyboard();
   for (const row of rows.slice(0, 10))
