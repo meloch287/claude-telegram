@@ -1,7 +1,8 @@
 import { taskState } from "../bot/task-state.js";
 import { gptStorage } from "../engine.js";
 import {claudeTeamContext,cancelClaudeTeam} from "../team-context.js";
-import {claudeQuota, claimUsageFetch} from "../db.js";
+import {claudeQuota} from "../db.js";
+import {refreshClaudeUsage} from "../claude-usage.js";
 import {outgoingFiles,deliveryPath,FILE_DELIVERY_PROMPT} from '../bot/delivery.js';
 import {execFile as deliveryExec} from 'node:child_process';
 import {promisify as deliveryPromisify} from 'node:util';
@@ -452,45 +453,14 @@ export class Conversation {
    * а не упадёт.
    */
   async refreshRateLimits(force = false): Promise<void> {
-    if (!this.#query) return;
+    // Экспериментальный /usage SDK ходит в тот же эндпоинт лимитов, который Anthropic
+    // закрывает 429 на час. Лимиты берём из заголовков крошечного запроса
+    // (claude-usage.ts) с общим интервалом для бота и bb.
+    if (this.#deps.createQuery) return;
     const now = Date.now();
-    // Запрос ходит в claude.ai, а result приходит на каждую задачу: без
-    // промежутка получилось бы по обращению на каждое сообщение.
     if (!force && now - this.#lastRateLimitFetch < RATE_LIMIT_REFRESH_MS) return;
     this.#lastRateLimitFetch = now;
-
-    const holder = this.#query as unknown as Record<string, unknown>;
-    const method = holder["usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET"];
-    if (typeof method !== "function") return;
-    // Тот же общий интервал, что у мини-аппа и bb: иначе Anthropic отвечает 429.
-    if (!this.#deps.createQuery && !claimUsageFetch(this.#deps.userId)) return;
-
-    try {
-      const response = await (method as () => Promise<unknown>).call(this.#query);
-      const data = response as {
-        rate_limits_available?: boolean;
-        rate_limits?: Record<
-          string,
-          { utilization?: number | null; resets_at?: string | null } | null
-        > | null;
-      };
-      // По API-ключу лимиты плана не действуют, и показывать нечего.
-      if (data.rate_limits_available === false || !data.rate_limits) return;
-
-      for (const [limitType, window] of Object.entries(data.rate_limits)) {
-        if (!window) continue;
-        const utilization = typeof window.utilization === "number" ? window.utilization : undefined;
-        const parsed = window.resets_at ? Date.parse(window.resets_at) : Number.NaN;
-        const resetsAt = Number.isFinite(parsed) ? parsed : undefined;
-        // Пустое окно писать незачем: строка без числа и без срока ничего не
-        // говорит, а место в списке занимает.
-        if (utilization === undefined && resetsAt === undefined) continue;
-        this.#deps.onRateLimit({ limitType, utilization, resetsAt });
-      }
-    } catch {
-      // Экспериментальный метод, да ещё и по сети. Не ответил — покажем то,
-      // что уже лежит в базе.
-    }
+    await refreshClaudeUsage(this.#deps.userId).catch(() => undefined);
   }
 
   async setModel(model: string): Promise<void> {

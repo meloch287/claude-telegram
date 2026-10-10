@@ -22,6 +22,9 @@ r.after = db.claimUsageFetch(uid, t + 5 * 60_000 + 1);
 db.delayUsageFetch(uid, 368, t + 5 * 60_000 + 2);
 r.duringPause = db.claimUsageFetch(uid, t + 5 * 60_000 + 9 * 60_000);
 r.afterPause = db.claimUsageFetch(uid, t + 5 * 60_000 + 11 * 60_000);
+const usage = await import(new URL(process.env.DIST + "/claude-usage.js", "file://").href);
+const h = new Map(Object.entries({ "anthropic-ratelimit-unified-5h-utilization": "0.7", "anthropic-ratelimit-unified-5h-reset": "1791637200", "anthropic-ratelimit-unified-7d-utilization": "0.26", "anthropic-ratelimit-unified-7d-reset": "1791957600" }));
+r.headers = usage.limitsFromHeaders({ get: (k) => h.get(k) ?? null });
 process.stdout.write(JSON.stringify(r));
 `;
 
@@ -38,6 +41,10 @@ test("Claude limits keep known values and fetch rarely", () => {
     assert.equal(r.kept.status, "allowed");
     assert.deepEqual([r.first, r.again, r.after], [true, false, true], "не чаще раза в 5 минут");
     assert.deepEqual([r.duringPause, r.afterPause], [false, true], "пауза после 429 — минимум 10 минут");
+    assert.deepEqual(r.headers, [
+      { limitType: "five_hour", utilization: 70, resetsAt: 1791637200000 },
+      { limitType: "seven_day", utilization: 26, resetsAt: 1791957600000 },
+    ], "проценты и сброс из заголовков ответа");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

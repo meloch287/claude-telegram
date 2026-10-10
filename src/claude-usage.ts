@@ -1,62 +1,49 @@
 import {fetch,ProxyAgent} from "undici";
-import {query} from "@anthropic-ai/claude-agent-sdk";
 import {credentialFor,listRateLimits,recordRateLimit,getModeData,claimUsageFetch,delayUsageFetch} from "./db.js";
-import {credentialEnv} from "./auth.js";
 import {activeProxyUrl} from "./proxy.js";
-import {spawnWorker,workerFor} from "./agent/isolation.js";
 import {limitTitle,toMillis} from "./limits.js";
 const refreshing=new Map<number,Promise<void>>(),checked=new Map<number,number>(),failures=new Map<number,string>();
+/**
+ * Лимиты подписки Claude. Отдельный эндпоинт /api/oauth/usage у Anthropic почти
+ * всегда отвечает 429 (закрывается на час), зато каждый ответ /v1/messages несёт
+ * заголовки anthropic-ratelimit-unified-*: процент и сброс пятичасового и недельного
+ * окна. Поэтому спрашиваем крошечным запросом к Haiku (1 токен) — не чаще раза в
+ * 5 минут на человека, общий интервал для бота и bb (usage_fetch_gate).
+ */
+const PROBE_MODEL="claude-haiku-4-5-20251001";
+export function limitsFromHeaders(headers:{get(name:string):string|null}):{limitType:string;utilization:number;resetsAt?:number}[]{
+  const out:{limitType:string;utilization:number;resetsAt?:number}[]=[];
+  for(const [suffix,limitType] of [["5h","five_hour"],["7d","seven_day"],["7d_opus","seven_day_opus"],["7d_sonnet","seven_day_sonnet"]] as const){
+    const raw=headers.get(`anthropic-ratelimit-unified-${suffix}-utilization`);
+    if(raw===null||raw==="")continue;
+    const value=Number(raw);if(!Number.isFinite(value))continue;
+    const reset=Number(headers.get(`anthropic-ratelimit-unified-${suffix}-reset`));
+    // В заголовках доля (0.7), в статистике проценты (70).
+    out.push({limitType,utilization:Math.round(value*1000)/10,...(Number.isFinite(reset)&&reset>0?{resetsAt:reset*1000}:{})});
+  }
+  return out;
+}
 export async function refreshClaudeUsage(uid:number,options:{httpOnly?:boolean}={}):Promise<void>{
   if(Date.now()-(checked.get(uid)||0)<60000){const failure=failures.get(uid);if(failure)throw Error(failure);return;}
   if(refreshing.has(uid))return refreshing.get(uid);
   const job=(async()=>{
-    const credential=credentialFor(uid),proxy=activeProxyUrl()||(options.httpOnly?process.env.TELEGRAM_PROXY||"":"");
+    const credential=credentialFor(uid),proxy=activeProxyUrl()||process.env.TELEGRAM_PROXY||"";
     if(!credential||!proxy)throw Error("Claude или обязательный прокси недоступен");
-    // Общий для бота и bb интервал: чаще Anthropic отвечает 429 и надолго закрывает лимиты.
+    if(credential.kind!=="subscription"){checked.set(uid,Date.now());failures.delete(uid);return;} // у API-ключа нет лимитов плана
     if(!claimUsageFetch(uid)){checked.set(uid,Date.now());failures.delete(uid);return;}
-    const tooOften=(r:{status:number;headers:{get(name:string):string|null}})=>{if(r.status===429)delayUsageFetch(uid,Number(r.headers.get("retry-after"))||null);};
-    if(options.httpOnly){
-      const agent=new ProxyAgent(proxy);
-      try{
-        const r=await fetch("https://api.anthropic.com/api/oauth/usage",{headers:{Authorization:`Bearer ${credential.secret}`,"anthropic-beta":"oauth-2025-04-20"},dispatcher:agent,signal:AbortSignal.timeout(8000)});
-        if(!r.ok){tooOften(r);await r.body?.cancel();throw Error(r.status===429?"Anthropic попросил реже спрашивать лимиты — показаны последние известные":"Подписка пока не предоставила свежие лимиты");}
-        const limits=await r.json() as Record<string,{utilization?:number|null;resets_at?:string|null}|null>;
-        for(const [type,row] of Object.entries(limits)){
-          if(!row||typeof row.utilization!=="number")continue;
-          const reset=row.resets_at?Date.parse(row.resets_at):NaN;
-          recordRateLimit(uid,{limitType:type,utilization:row.utilization,...(Number.isFinite(reset)?{resetsAt:reset}:{})});
-        }
-        checked.set(uid,Date.now());failures.delete(uid);
-      }catch(error){checked.set(uid,Date.now());failures.set(uid,"Свежие лимиты Claude временно недоступны");throw error;}finally{await agent.close();}
-      return;
-    }
-    const worker=workerFor(uid),abort=new AbortController();
-    let finish:(()=>void)|undefined;
-    const prompt={async *[Symbol.asyncIterator](){await new Promise<void>(r=>{finish=r;});}};
-    const q=query({prompt,options:{cwd:worker.home,persistSession:false,settingSources:["user"],abortController:abort,
-      env:{PATH:"/usr/local/bin:/usr/bin:/bin",HOME:worker.home,USER:worker.name,LANG:"C.UTF-8",HTTP_PROXY:proxy,HTTPS_PROXY:proxy,NO_PROXY:"localhost,127.0.0.1",...credentialEnv(credential)},
-      spawnClaudeCodeProcess:options=>spawnWorker(uid,options)}});
-    const timer=setTimeout(()=>abort.abort(),15000);
+    const agent=new ProxyAgent(proxy);
     try{
-      const data=await q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({skipBehaviors:true});
-      let limits:Record<string,unknown>|null=data.rate_limits;
-      if(!data.rate_limits_available||!limits){
-        const agent=new ProxyAgent(proxy);
-        try{
-          const r=await fetch("https://api.anthropic.com/api/oauth/usage",{headers:{Authorization:`Bearer ${credential.secret}`,"anthropic-beta":"oauth-2025-04-20"},dispatcher:agent,signal:AbortSignal.timeout(8000)});
-          if(!r.ok){tooOften(r);await r.body?.cancel();throw Error(r.status===429?"Anthropic попросил реже спрашивать лимиты — показаны последние известные":"Подписка не предоставила лимиты");}
-          limits=await r.json() as Record<string,unknown>;
-        }finally{await agent.close();}
-      }
-      for(const [type,value] of Object.entries(limits)){
-        if(!value||typeof value!=="object"||!("utilization" in value))continue;
-        const row=value as {utilization?:number|null;resets_at?:string|null};
-        if(typeof row.utilization!=="number")continue;
-        const reset=row.resets_at?Date.parse(row.resets_at):NaN;
-        recordRateLimit(uid,{limitType:type,utilization:row.utilization,...(Number.isFinite(reset)?{resetsAt:reset}:{})});
-      }
+      const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",dispatcher:agent,signal:AbortSignal.timeout(15000),
+        headers:{"content-type":"application/json","anthropic-version":"2023-06-01","anthropic-beta":"oauth-2025-04-20",...(credential.kind==="subscription"?{Authorization:`Bearer ${credential.secret}`}:{"x-api-key":credential.secret})},
+        body:JSON.stringify({model:PROBE_MODEL,max_tokens:1,messages:[{role:"user",content:"."}]})});
+      const limits=limitsFromHeaders(r.headers);
+      await r.body?.cancel();
+      if(r.status===429)delayUsageFetch(uid,Number(r.headers.get("retry-after"))||null);
+      if(!limits.length)throw Error(r.status===429?"Лимит подписки исчерпан — показаны последние известные цифры":"Подписка не прислала лимиты");
+      for(const limit of limits)recordRateLimit(uid,limit);
       checked.set(uid,Date.now());failures.delete(uid);
-    }catch(error){checked.set(uid,Date.now());failures.set(uid,error instanceof Error?error.message:"Лимиты недоступны");throw error;}finally{clearTimeout(timer);finish?.();q.close();}
+    }catch(error){checked.set(uid,Date.now());failures.set(uid,error instanceof Error?error.message:"Лимиты недоступны");throw error;}
+    finally{await agent.close();}
   })().finally(()=>refreshing.delete(uid));
   refreshing.set(uid,job);return job;
 }
