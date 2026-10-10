@@ -58,6 +58,7 @@ import { transcribe, transcriptionConfigured } from "../dist/bot/voice.js";
 import { MODELS, modelId, projectName } from "./policy.mjs";
 import * as workers from "./worker.mjs";
 import * as store from "./store.mjs";
+import { createLimitWarnings } from "./limit-warnings.mjs";
 import { extraApi, setRevokeHandler, setInviteBotUsername, setWebLinkHandler } from "./api.mjs";
 
 // Controller credentials and database never enter the user containers.
@@ -1088,6 +1089,15 @@ if (!dispatchMode) startMiniAppServer();
 const teamRefresh=async()=>{for(const uid of new Set([owner,...config.allowedUserIds,...store.managedUserIds()]))if(allowed(uid)&&!store.userDeletion(uid)&&!shuttingDown)await teamSpace.refresh(uid).then(()=>web.syncClaudeUsage?.(uid)).catch(()=>console.warn('Team history refresh pending:',uid));};
 let teamRefreshing=false;const refreshTeams=async()=>{if(teamRefreshing)return;teamRefreshing=true;try{await teamRefresh()}finally{teamRefreshing=false}};
 const teamTimer=setInterval(()=>void refreshTeams(),300000);teamTimer.unref();void refreshTeams();
+// Предупреждение на 80% личного недельного лимита GPT и Claude — раз в неделю подписки.
+const checkLimits = createLimitWarnings({
+  db: store.database,
+  users: () => [...new Set([...config.allowedUserIds, ...store.managedUserIds()])].filter((uid) => uid !== owner && allowed(uid) && !store.userDeletion(uid)),
+  shares: (uid) => ({ gpt: store.percentLedger.quota(uid), claude: legacy.claudeQuota.get(uid).subscription }),
+  send: (uid, text) => bot.api.sendMessage(uid, text),
+});
+const limitTimer = setInterval(() => void checkLimits().catch((e) => console.error("[limit-warnings]", e.message)), 300000);
+limitTimer.unref();
 void subscriptionMonitor.get().then(store.syncQuotaReset);
 if (!dispatchMode) scheduleDailyBackups();
 let storageSweepRunning = false;

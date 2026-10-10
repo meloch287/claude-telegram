@@ -7,8 +7,8 @@ import { config } from "../config.js";
 import { verifyInitData } from "../crypto.js";
 import { getChat, getOrCreateUser, isGptUserAllowed, saveChat } from "../db.js";
 import { engineFor, setEngine, gptApi } from "../engine.js";
-import { claudeState, refreshClaudeModels, saveClaudePreferences } from "../claude-settings.js";
-import { getSession, reloadClaudeSettings } from "../bot/session.js";
+import { claudePreferences, claudeState, refreshClaudeModels, saveClaudePreferences } from "../claude-settings.js";
+import { CACHE_RESET_NOTICE, claudeCacheWarm, getSession, reloadClaudeSettings } from "../bot/session.js";
 import { activeProxyUrl } from "../proxy.js";
 
 function reply(res: ServerResponse, status: number, data: unknown) {
@@ -94,13 +94,15 @@ export async function handleModesApi(req: IncomingMessage, res: ServerResponse):
       const current = claudeState(uid);
       const selected = current.models.find(m => m.value === (preferences.model ?? current.model) || m.resolvedModel === preferences.model);
       if ((permissionMode ?? getChat(uid)?.permission_mode) === "auto" && !selected?.supportsAutoMode) throw Error("Эта модель не поддерживает автоматическую проверку. Сначала выбери другой режим работы.");
+      const before = claudePreferences(uid), warm = claudeCacheWarm(uid);
       const value = saveClaudePreferences(uid, preferences);
+      const notice = warm && (value.model !== before.model || value.effort !== before.effort) ? CACHE_RESET_NOTICE : undefined;
       if (permissionMode !== undefined) {
         const chat = getChat(uid);
         saveChat({ chatId: uid, userId: uid, project: chat?.project ?? "default", sessionId: chat?.session_id ?? null, title: chat?.title ?? null, permissionMode: String(permissionMode) });
       }
       await reloadClaudeSettings(uid);
-      reply(res, 200, { ...value, permissionMode: getChat(uid)?.permission_mode ?? config.defaultPermissionMode }); return true;
+      reply(res, 200, { ...value, permissionMode: getChat(uid)?.permission_mode ?? config.defaultPermissionMode, ...(notice ? { notice } : {}) }); return true;
     }
     reply(res, 404, { error: "Не найдено" });
   } catch (error) {

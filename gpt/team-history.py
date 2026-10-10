@@ -39,7 +39,9 @@ def bb(home):
  if not file.exists():return []
  db=sqlite3.connect('file:'+str(file)+'?mode=ro',uri=True,timeout=5);db.row_factory=sqlite3.Row
  chats=[]
- for row in db.execute("select id,provider_id,title,updated_at from threads where deleted_at is null and storage_deleted_at is null and id not like 'thr_tg%' and id not like 'thr_tc%' order by updated_at desc limit 500"):
+ # Усыновлённые ботом диалоги bb уже есть в истории Telegram — не дублируем.
+ linked=" and id not in (select bb_id from gpt_telegram_links)" if db.execute("select 1 from sqlite_master where name='gpt_telegram_links'").fetchone() else ""
+ for row in db.execute("select id,provider_id,title,updated_at from threads where deleted_at is null and storage_deleted_at is null and id not like 'thr_tg%' and id not like 'thr_tc%'"+linked+" order by updated_at desc limit 500"):
   engine='Claude_BOT' if 'claude' in row['provider_id'] else 'GPT_BOT' if 'codex' in row['provider_id'] else None
   if not engine:continue
   messages=[]

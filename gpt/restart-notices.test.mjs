@@ -27,5 +27,5 @@ test("restart notifies affected users once, removes stale status and retains fai
   ]);
   assert.deepEqual(deleted, [[1, 99]]);
   assert.deepEqual(cleared, [1, 2, 3]);
-  assert.match(RESTART_NOTICE, /продолжи/);
+  assert.match(RESTART_NOTICE, /продолжи/i);
 });

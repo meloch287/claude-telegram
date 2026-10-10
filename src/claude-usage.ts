@@ -56,11 +56,13 @@ export async function claudeUsage(uid:number,options:{httpOnly?:boolean}={}){
     const row=known.get(type);
     const resetsAt=row?.resets_at?toMillis(row.resets_at):null;
     // Окно уже сбросилось после последнего замера — значит, израсходовано 0%.
-    const used=resetsAt!==null&&resetsAt<Date.now()&&row?.utilization!=null?0:row?.utilization??null;
+    // Больше 100% Anthropic присылает, когда окно уже перебрано: шкала «из 100» с числом 116 только путает.
+    const raw=resetsAt!==null&&resetsAt<Date.now()&&row?.utilization!=null?0:row?.utilization??null;
+    const used=raw===null?null:Math.min(100,raw);
     return {type,title:limitTitle(type),used,resetsAt:resetsAt!==null&&resetsAt<Date.now()?null:resetsAt,seenAt:row?.seen_at??null};
   }),today:getModeData("claude").since(uid,Date.now()-Date.parse(new Date().toISOString().slice(0,10))),week:getModeData("claude").since(uid,7*86400000)};
 }
 export async function claudeUsageText(uid:number):Promise<string>{
   const data=await claudeUsage(uid);
-  return ["Claude · Лимиты",...data.windows.map(w=>`${w.title}: ${w.used===null?"нет данных":Math.round(w.used)+"% использовано"}${w.resetsAt?" · сброс "+new Date(w.resetsAt).toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}):""}`),`Расход через бота за 7 дней: ${data.week.tokens.toLocaleString("ru-RU")} токенов`,...(data.stale?[data.notice+". Показаны последние полученные данные."]:[])].join("\n\n");
+  return ["Claude · Лимиты",...data.windows.map(w=>`${w.title}: ${w.used===null?"нет данных":w.used>=100?"исчерпано":Math.round(w.used)+"% использовано"}${w.resetsAt?" · сброс "+new Date(w.resetsAt).toLocaleString("ru-RU",{timeZone:"Europe/Moscow",day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})+" МСК":""}`),`Расход через бота за 7 дней: ${data.week.tokens.toLocaleString("ru-RU")} токенов`,...(data.stale?[data.notice+". Показаны последние полученные данные."]:[])].join("\n\n");
 }

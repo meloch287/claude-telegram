@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { constants, openSync, closeSync, fstatSync, fchownSync, fchmodSync, realpathSync } from "node:fs";
 import { resolve, dirname, basename } from "node:path";
 import type { SpawnOptions, SpawnedProcess } from "@anthropic-ai/claude-agent-sdk";
+import { requestWorker, workerMap } from "../claude-workers.js";
 
 export interface WorkerIdentity {
   uid: number;
@@ -11,13 +12,11 @@ export interface WorkerIdentity {
 }
 
 export function workerFor(userId: number): WorkerIdentity {
-  const entry = (process.env.CLAUDE_WORKER_UID_MAP ?? "")
-    .split(",")
-    .map((s) => s.trim())
-    .find((s) => s.startsWith(`${userId}:`));
-  const uid = entry ? Number(entry.split(":")[1]) : NaN;
-  if (!Number.isSafeInteger(uid) || uid < 1000) {
-    throw new Error(`Для пользователя ${userId} не создан изолированный Claude Code.`);
+  const uid = workerMap().get(userId);
+  if (uid === undefined) {
+    // Служба ai-bot-claude-workers создаст исполнителя за несколько секунд.
+    requestWorker(userId);
+    throw new Error("Claude Code для тебя ещё готовится. Попробуй через минуту.");
   }
   return {
     uid,

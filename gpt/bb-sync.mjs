@@ -51,6 +51,7 @@ export function createDialogSync({
   settings,
   runningTelegram,
   endpoint,
+  adoptBudget = () => 0,
   execute = run,
 }) {
   const active = new Map(),
@@ -72,6 +73,8 @@ export function createDialogSync({
         threads,
         complete: true,
         model: settings(uid).model || "gpt-6-sol",
+        // Сколько GPT-диалогов, созданных в bb, можно забрать в бота (лимит диалогов).
+        adopt: adoptBudget(uid),
       });
       apply(uid, result);
       cache.set(uid, { at: Date.now(), result });
@@ -84,6 +87,10 @@ export function createDialogSync({
     } finally {
       active.delete(uid);
     }
+  }
+  /** id диалога бота по треду bb: зеркало thr_tg… или усыновлённый тред bb. */
+  function dialogFor(uid, bbId) {
+    return telegramThreadId(bbId) || cache.get(uid)?.result?.threads?.find((t) => t.bb_id === bbId)?.id || null;
   }
   async function api(uid, path, method = "POST") {
     const target = await endpoint(uid);
@@ -114,7 +121,8 @@ export function createDialogSync({
     },
     async beforeWeb(uid, path) {
       const match = /^\/api\/v1\/threads\/([^/]+)\/(?:send|retry|compact|edit-message)$/.exec(path);
-      const id = match && telegramThreadId(match[1]);
+      if (match && !telegramThreadId(match[1]) && !cache.has(uid)) await sync(uid);
+      const id = match && dialogFor(uid, match[1]);
       if (!id) return;
       if (runningTelegram(uid, id))
         throw Error(
@@ -145,7 +153,8 @@ export function createDialogSync({
         )
       )
         throw Error("В bb работает другой диалог. Сначала останови его.");
-      for (const id of ids) await api(uid, `/threads/${bbThreadId(id)}/stop`);
+      for (const id of ids)
+        await api(uid, `/threads/${result?.threads?.find((t) => t.id === id)?.bb_id || bbThreadId(id)}/stop`);
     },
     nativeCount: (uid) => cache.get(uid)?.result?.native_count,
   };

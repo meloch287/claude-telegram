@@ -186,7 +186,13 @@ test("проекты: пустое имя превращается в default", 
   assert.equal(sanitizeProject("///"), "default");
 });
 
-test("проекты: рабочая папка всегда внутри каталога пользователя", () => {
+test("проекты: рабочая папка всегда внутри каталога пользователя", (t) => {
+  // Нужен исполнитель Claude для 777: берём текущего пользователя (папку создаёт он сам).
+  const uid = process.getuid?.() ?? 0;
+  if (uid < 1000) return t.skip("под root исполнителя для теста не подобрать");
+  const saved = process.env.CLAUDE_WORKER_UID_MAP;
+  process.env.CLAUDE_WORKER_UID_MAP = `${saved ? saved + "," : ""}777:${uid}`;
+  t.after(() => { if (saved === undefined) delete process.env.CLAUDE_WORKER_UID_MAP; else process.env.CLAUDE_WORKER_UID_MAP = saved; });
   const dir = workspaceFor(777, "../../../tmp/evil");
   assert.ok(dir.includes(`${777}`), `путь должен остаться в папке пользователя: ${dir}`);
   assert.ok(!dir.includes(".."), `в пути не должно быть переходов вверх: ${dir}`);
@@ -488,7 +494,10 @@ test("сломанный конфиг MCP не роняет бота", async () 
   assert.deepEqual(loadMcpServers(join(dir, "нет.json"), {}), {});
 });
 
-test("настоящий mcp.json проекта валиден", async () => {
+test("настоящий mcp.json проекта валиден", async (t) => {
+  const { existsSync } = await import("node:fs");
+  // Файл живёт на сервере рядом с .env; в копии исходников (GitHub) его может не быть.
+  if (!existsSync("mcp.json")) return t.skip("mcp.json нет в этой копии");
   const { loadMcpServers } = await import("../src/mcp.js");
   const servers = loadMcpServers("mcp.json", {});
   const names = Object.keys(servers).sort();
@@ -608,7 +617,8 @@ test("разделение статистики: импорт отделяетс
     `,
   );
 
-  const out = execFileSync("npx", ["tsx", script], { encoding: "utf8" });
+  // Без IPC-сервера tsx: вложенный «npx tsx» конфликтовал с внешним и обрывал весь файл тестов.
+  const out = execFileSync(process.execPath, ["--import", "tsx", script], { encoding: "utf8" });
   const result = JSON.parse(out.trim().split("\n").pop() ?? "{}");
   rmSync(dir, { recursive: true, force: true });
 
@@ -703,7 +713,10 @@ test("разрешения: ответ пользователя доходит �
 
 test("разрешения: молчание пользователя заканчивается отказом, а не тишиной", async () => {
   const { hooks, seen } = makeHooks();
+  // Таймер запроса — unref (не держит бота при выключении); в тесте цикл держим сами.
+  const keepAlive = setTimeout(() => {}, 5000);
   const decision = await permissions.requestDecision({ ...request({ timeoutMs: 30 }), hooks });
+  clearTimeout(keepAlive);
   assert.equal(decision.kind, "deny", "по таймауту должен быть отказ");
   assert.match(decision.message ?? "", /вовремя/, "причина должна быть внятной");
   assert.equal(seen.timedOut, 1, "пользователю сообщают, что запрос протух");
@@ -871,7 +884,8 @@ test("расход за окно: считает только то, что по�
     `,
   );
 
-  const out = execFileSync("npx", ["tsx", script], { encoding: "utf8" });
+  // Без IPC-сервера tsx: вложенный «npx tsx» конфликтовал с внешним и обрывал весь файл тестов.
+  const out = execFileSync(process.execPath, ["--import", "tsx", script], { encoding: "utf8" });
   const result = JSON.parse(out.trim().split("\n").pop() ?? "{}");
   rmSync(dir, { recursive: true, force: true });
 
@@ -883,66 +897,15 @@ test("расход за окно: считает только то, что по�
 
 // Расход подписки считается по транскриптам: своя таблица знает только то,
 // что прошло через бота, и не считает кэш — а подписка тратится на всё.
-test("расход подписки: берёт кэш и отсекает то, что вне окна", async () => {
-  const { mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync } = await import("node:fs");
-  const { join } = await import("node:path");
-  const { tmpdir } = await import("node:os");
-  const { execFileSync } = await import("node:child_process");
-  const { fileURLToPath } = await import("node:url");
-
-  const home = mkdtempSync(join(tmpdir(), "дом-"));
-  const projects = join(home, ".claude", "projects", "проба");
-  mkdirSync(projects, { recursive: true });
-
-  const line = (minutesAgo, usage) =>
-    JSON.stringify({
-      timestamp: new Date(Date.now() - minutesAgo * 60_000).toISOString(),
-      message: { usage },
-    });
-
-  const свежий = join(projects, "свежий.jsonl");
-  writeFileSync(
-    свежий,
-    [
-      line(10, { input_tokens: 100, output_tokens: 50, cache_read_input_tokens: 900 }),
-      line(600, { input_tokens: 7000, output_tokens: 7000 }), // вне пятичасового окна
-      "не json вовсе",
-      JSON.stringify({ message: { usage: { input_tokens: 5 } } }), // без времени
-    ].join("\n"),
-  );
-
-  // Файл, не менявшийся с начала окна, не читается вовсе — на этом вся экономия.
-  const старый = join(projects, "старый.jsonl");
-  writeFileSync(старый, line(10, { input_tokens: 999999, output_tokens: 999999 }));
-  const давно = Date.now() / 1000 - 40 * 3600;
-  utimesSync(старый, давно, давно);
-
-  const modulePath = fileURLToPath(new URL("../src/subscription-usage.ts", import.meta.url));
-  const script = join(home, "проба.mjs");
-  writeFileSync(
-    script,
-    `
-    process.env.HOME = ${JSON.stringify(home)};
-    const m = await import(${JSON.stringify(modulePath)});
-    console.log(JSON.stringify(m.subscriptionUsage(5 * 3600 * 1000)));
-    `,
-  );
-
-  const out = execFileSync("npx", ["tsx", script], {
-    encoding: "utf8",
-    env: { ...process.env, HOME: home },
-  });
-  const result = JSON.parse(out.trim().split("\n").pop() ?? "{}");
-  rmSync(home, { recursive: true, force: true });
-
-  assert.equal(result.tokens, 1050, "кэш идёт в счёт подписки наравне с input и output");
-  assert.equal(result.tokensWithoutCache, 150, "без кэша остаются только input и output");
-  assert.equal(result.replies, 1, "записи вне окна и без времени не считаются");
-  assert.equal(result.filesScanned, 1, "файл старее окна не читается вовсе");
+test("расход подписки: считается по базе бота, без человека — ноль", async () => {
+  // Раньше расход читался из транскриптов Claude Code; теперь — из учёта бота (usageSince).
+  const { subscriptionUsage } = await import("../src/subscription-usage.ts");
+  assert.deepEqual(subscriptionUsage(5 * 3600 * 1000), { tokens: 0, tokensWithoutCache: 0, replies: 0, filesScanned: 0 });
+  const mine = subscriptionUsage(5 * 3600 * 1000, 424242);
+  assert.equal(mine.tokens, mine.tokensWithoutCache);
+  assert.ok(Number.isFinite(mine.tokens));
 });
 
-// Процент считается от заданного потолка. Ошибка здесь молча врёт человеку
-// про то, сколько у него осталось, — поэтому границы проверяются отдельно.
 test("процент от потолка: границы и отсутствие потолка", async () => {
   const { percentOf } = await import("../src/limits.js");
 
@@ -996,7 +959,8 @@ test("доступ: выдача из чата, отзыв, неотзываем
     `,
   );
 
-  const out = execFileSync("npx", ["tsx", script], { encoding: "utf8" });
+  // Без IPC-сервера tsx: вложенный «npx tsx» конфликтовал с внешним и обрывал весь файл тестов.
+  const out = execFileSync(process.execPath, ["--import", "tsx", script], { encoding: "utf8" });
   const r = JSON.parse(out.trim().split("\n").pop() ?? "{}");
   rmSync(dir, { recursive: true, force: true });
 
@@ -1060,7 +1024,8 @@ test("кооп: свой ключ, ключ пригласившего, цепо
     `,
   );
 
-  const out = execFileSync("npx", ["tsx", script], { encoding: "utf8" });
+  // Без IPC-сервера tsx: вложенный «npx tsx» конфликтовал с внешним и обрывал весь файл тестов.
+  const out = execFileSync(process.execPath, ["--import", "tsx", script], { encoding: "utf8" });
   const r = JSON.parse(out.trim().split("\n").pop() ?? "{}");
   rmSync(dir, { recursive: true, force: true });
 
@@ -1119,7 +1084,8 @@ test("кооп: собирается вокруг плательщика, чуж
     `,
   );
 
-  const out = execFileSync("npx", ["tsx", script], { encoding: "utf8" });
+  // Без IPC-сервера tsx: вложенный «npx tsx» конфликтовал с внешним и обрывал весь файл тестов.
+  const out = execFileSync(process.execPath, ["--import", "tsx", script], { encoding: "utf8" });
   const r = JSON.parse(out.trim().split("\n").pop() ?? "{}");
   rmSync(dir, { recursive: true, force: true });
 
@@ -1203,7 +1169,8 @@ test("квоты: только приглашённым, ноль снимает
     `,
   );
 
-  const out = execFileSync("npx", ["tsx", script], { encoding: "utf8" });
+  // Без IPC-сервера tsx: вложенный «npx tsx» конфликтовал с внешним и обрывал весь файл тестов.
+  const out = execFileSync(process.execPath, ["--import", "tsx", script], { encoding: "utf8" });
   const r = JSON.parse(out.trim().split("\n").pop() ?? "{}");
   rmSync(dir, { recursive: true, force: true });
 
@@ -1266,7 +1233,7 @@ test("раскладка: отступ между абзацами, перено
     "Разобрал всё. Сборка 1.1.30: готова.\n\nТрекер — баг настоящий.\nПричина в датах.\n\n✅ Проверки: 201 тест.";
   assert.equal(
     layoutMarkdown(src),
-    "Разобрал всё. Сборка 1.1.30: готова.\n\n\u00a0\n\n🔹 **Трекер** — баг настоящий.  \nПричина в датах.\n\n\u00a0\n\n**✅ Проверки**: 201 тест.",
+    "Разобрал всё. Сборка 1.1.30: готова.\n\n\u00a0\n\nТрекер — баг настоящий.\n\nПричина в датах.\n\n\u00a0\n\n✅ Проверки: 201 тест.",
   );
 });
 
@@ -1275,7 +1242,7 @@ test("раскладка: заголовки, списки, таблицы, deta
     "## Итог\n\n- пункт: раз\n- пункт: два\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n<details><summary>Ещё</summary>\n\nТекст.\n\n</details>\n\n```sh\necho a: b\nls\n```";
   assert.equal(
     layoutMarkdown(src),
-    "## Итог\n\n- пункт: раз\n- пункт: два\n\n\u00a0\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n<details><summary>Ещё</summary>\n\nТекст.\n\n</details>\n\n```sh\necho a: b\nls\n```",
+    "## Итог\n\n- пункт: раз\n- пункт: два\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n<details><summary>Ещё</summary>\n\nТекст.\n\n</details>\n\n```sh\necho a: b\nls\n```",
   );
 });
 

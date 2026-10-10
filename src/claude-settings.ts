@@ -35,8 +35,18 @@ try {
 } catch { }
 const catalogs = new Map<number, { models: ModelInfo[]; checkedAt: number }>();
 const refreshing = new Map<number, Promise<ModelInfo[]>>();
+/**
+ * Уровень Max пользователям бота не показываем: по замерам Anthropic он почти
+ * не лучше XHigh, а думает вдвое дольше и съедает лимит. Сохранённый Max
+ * превращается в «Авто» (claudePreferences отбрасывает неподдерживаемый уровень).
+ */
+const hiddenEfforts = new Set(["max"]);
+function withoutHiddenEfforts(models: ModelInfo[]): ModelInfo[] {
+  return models.map(m => m.supportedEffortLevels ? { ...m, supportedEffortLevels: m.supportedEffortLevels.filter(level => !hiddenEfforts.has(level)) } : m);
+}
+const installedModels = withoutHiddenEfforts(INSTALLED_CLAUDE_MODELS);
 export function claudeModels(uid: number): ModelInfo[] {
-  return catalogs.get(uid)?.models ?? INSTALLED_CLAUDE_MODELS;
+  return catalogs.get(uid)?.models ?? installedModels;
 }
 export async function refreshClaudeModels(uid: number): Promise<ModelInfo[]> {
   const existing = catalogs.get(uid);
@@ -57,8 +67,9 @@ export async function refreshClaudeModels(uid: number): Promise<ModelInfo[]> {
     try {
       const models = await instance.supportedModels();
       if (!models.length) throw Error("Claude Code не вернул список моделей");
-      catalogs.set(uid, { models, checkedAt: Date.now() });
-      return models;
+      const visible = withoutHiddenEfforts(models);
+      catalogs.set(uid, { models: visible, checkedAt: Date.now() });
+      return visible;
     } finally { clearTimeout(timer); finish?.(); instance.close(); }
   })().finally(() => refreshing.delete(uid));
   refreshing.set(uid, job);
@@ -99,8 +110,10 @@ export function claudeOrchestrationAvailable(uid: number): boolean {
 export function claudeRuntimeOptions(uid: number): Pick<Options, "model" | "effort" | "thinking" | "settings"> {
   const value = claudePreferences(uid), model = claudeModels(uid).find(m => m.value === value.model);
   return {
-    // Флаг сессии, а не effort: выбранная глубина остаётся как есть (при «Авто» Claude Code берёт xhigh).
-    ...(value.orchestration && claudeOrchestrationAvailable(uid) ? { settings: { ultracode: true } } : {}),
+    // Субагенты по умолчанию держат кэш 5 минут: после паузы весь их контекст пишется
+    // в кэш заново (запись ~12× дороже чтения). Час — как у основного диалога.
+    // Ultracode — флаг сессии, а не effort: глубина остаётся как есть (при «Авто» Claude Code берёт xhigh).
+    settings: { subagentPromptCacheTtl: "1h", ...(value.orchestration && claudeOrchestrationAvailable(uid) ? { ultracode: true } : {}) },
     ...(value.model !== "default" ? { model: value.model } : {}),
     ...(value.effort && value.thinking !== "disabled" ? { effort: value.effort } : {}),
     ...(value.thinking === "disabled" ? { thinking: { type: "disabled" as const } } : value.thinking === "enabled" ? { thinking: model?.supportsAdaptiveThinking ? { type: "adaptive" as const } : { type: "enabled" as const } } : {}),

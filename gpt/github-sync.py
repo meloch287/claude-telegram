@@ -20,9 +20,20 @@ def read_secure(path, owners, limit=32768):
     finally:os.close(fd)
 
 
+def worker_mapping():
+    """Исполнители Claude: data/claude-workers.json (служба ai-bot-claude-workers) и .env, .env главнее."""
+    mapping={}
+    try:
+     import json
+     raw=json.load(open(os.environ.get('CLAUDE_WORKERS_FILE','/opt/ai-bot/data/claude-workers.json')))
+     mapping={str(k):str(v) for k,v in raw.items() if re.fullmatch(r'[1-9][0-9]*',str(k)) and isinstance(v,int)}
+    except (OSError,ValueError,AttributeError):pass
+    mapping.update(x.split(':') for x in os.environ.get('CLAUDE_WORKER_UID_MAP','').split(',') if x)
+    return mapping
+
 def sync(uid, tenant_root='/opt/ai-bot/tenants', claude_root='/var/lib/ai-claude'):
     if not re.fullmatch(r'[1-9][0-9]*',uid):raise ValueError('Invalid user')
-    mapping=dict(entry.split(':') for entry in os.environ.get('CLAUDE_WORKER_UID_MAP','').split(',') if entry)
+    mapping=worker_mapping()
     worker=int(mapping.get(uid,'0'))
     if worker<1000 or sum(int(v)==worker for v in mapping.values())!=1:raise ValueError('Invalid worker')
     source=Path(tenant_root)/uid/'home'

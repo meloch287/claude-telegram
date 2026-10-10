@@ -137,7 +137,7 @@
   }
   async function save(patch){
     if(working||engineSync)return;busy(true);setSaved('saving');let ok=false;
-    try{const path=state.engine==='claude'?'/api/miniapp/claude':'/api/gpt/preferences';await api(path,patch);state=await api('/api/miniapp/state');ok=true;haptic('notificationOccurred','success');}
+    try{const path=state.engine==='claude'?'/api/miniapp/claude':'/api/gpt/preferences';const result=await api(path,patch);state=await api('/api/miniapp/state');ok=true;haptic('notificationOccurred','success');if(result?.notice)notify(result.notice);}
     catch(error){notify(error.message);haptic('notificationOccurred','error');}
     finally{busy(false);setSaved(ok?'saved':'idle');await redraw();}
   }

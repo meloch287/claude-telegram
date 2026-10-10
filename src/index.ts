@@ -17,7 +17,7 @@ import { ADMIN_ID, isAdmin } from "./admin.js";
 import { getModeData } from "./db.js";
 import { catForMode } from "./cats.js";
 import { claudePreferences, claudeModels, claudeModelLabel, refreshClaudeModels, saveClaudePreferences } from "./claude-settings.js";
-import { reloadClaudeSettings } from "./bot/session.js";
+import { CACHE_RESET_NOTICE, claudeCacheWarm, reloadClaudeSettings } from "./bot/session.js";
 import {
   Bot,
   GrammyError,
@@ -123,6 +123,7 @@ import {
 } from "./proxy.js";
 import { startFileLog, tailLog } from "./log.js";
 import { engineFor, setEngine, gptReady, forwardToGpt, type Engine } from "./engine.js";
+import { requestWorker } from "./claude-workers.js";
 import { runningTasks, clearRunning } from "./db.js";
 import { startBbBridge } from "./bb-bridge.js";
 import { engineAllowed, engineClosedText } from "./engine-access.js";
@@ -227,6 +228,18 @@ setExtraApiHandler(toolsMenu.api);
 /** Один токен и один поток Telegram updates для обоих движков. */
 bot.use(async (ctx, next) => {
   const userId = ctx.from?.id;
+  // Приглашение гасит GPT-часть (invites.mjs), а новичка ещё нет в списке доступа:
+  // без этой ветки его встречал отказ ниже и ссылка не срабатывала.
+  if (userId !== undefined && ctx.chat?.type === "private" && !isAllowed(userId) && /^\/start(?:@\w+)?\s+invite_\S+\s*$/.test(ctx.message?.text ?? "")) {
+    try {
+      await forwardToGpt(ctx.update);
+      if (isAllowed(userId)) requestWorker(userId);
+    } catch (error) {
+      console.error("[invite] GPT dispatch failed:", error);
+      await ctx.reply("Не получилось принять приглашение. Попробуй открыть ссылку ещё раз через минуту.").catch(() => {});
+    }
+    return;
+  }
   if (userId === undefined || ctx.chat?.type !== "private" || !isAllowed(userId)) {
     await next();
     return;
@@ -779,9 +792,10 @@ bot.command("model", async (ctx) => {
   if (raw) {
     if (getSession(ctx.chat.id)?.conversation.busy) { await ctx.reply("Дождись завершения задачи или нажми /stop."); return; }
     try {
+      const before = claudePreferences(ctx.from!.id).model, warm = claudeCacheWarm(ctx.chat.id);
       const value = saveClaudePreferences(ctx.from!.id, { model: raw });
       await reloadClaudeSettings(ctx.chat.id);
-      await ctx.reply(`Модель Claude: ${value.model}`);
+      await ctx.reply(`Модель Claude: ${value.model}${warm && value.model !== before ? "\n\n" + CACHE_RESET_NOTICE : ""}`);
     } catch (error) { await ctx.reply(error instanceof Error ? error.message : "Не удалось выбрать модель"); }
     return;
   }
@@ -1488,9 +1502,11 @@ bot.callbackQuery(/^(md|ce):(.+)$/, async (ctx) => {
   const kind = ctx.match[1], raw = ctx.match[2] ?? "default", userId = ctx.from.id;
   try {
     const patch = kind === "md" ? { model: raw } : { effort: raw === "default" ? null : raw };
-    saveClaudePreferences(userId, patch);
+    const before = claudePreferences(userId), warm = claudeCacheWarm(ctx.chat!.id);
+    const after = saveClaudePreferences(userId, patch);
     await reloadClaudeSettings(ctx.chat!.id);
-    await ctx.answerCallbackQuery("Настройки Claude сохранены");
+    const resetsCache = warm && (after.model !== before.model || after.effort !== before.effort);
+    await ctx.answerCallbackQuery(resetsCache ? { text: CACHE_RESET_NOTICE, show_alert: true } : "Настройки Claude сохранены");
     const view = renderScreen(kind === "md" ? "model" : "thinking", { userId, chatId: ctx.chat!.id });
     await ctx.editMessageReplyMarkup({ reply_markup: view.keyboard }).catch(() => undefined);
   } catch (error) { await ctx.answerCallbackQuery(error instanceof Error ? error.message : "Не удалось сохранить"); }

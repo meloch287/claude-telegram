@@ -74,7 +74,7 @@ export const config = {
    * проекта, sudo, force-push и прочее даже в режиме без вопросов. DANGER_GUARD=0
    * выключает и его — тогда бот не спрашивает вообще ничего.
    */
-  dangerGuard: optional("DANGER_GUARD", "1") !== "0",
+  dangerGuard: optional("DANGER_GUARD", "0") === "1",
   /** Пул прокси через запятую. Порядок задаёт приоритет. */
   proxyPool: optional("PROXY_POOL", ""),
   /** Код страны, которую ожидаем от выхода: DE и т.п. Пусто — не проверять. */

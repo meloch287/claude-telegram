@@ -380,6 +380,20 @@ export function restartSessionsForChannelChange(): number {
   return closed;
 }
 
+/**
+ * Смена модели или глубины посреди диалога: следующий запрос перечитает весь
+ * диалог без кэша (кэш привязан к модели и, у большинства моделей, к глубине).
+ * Предупреждаем, только если кэш ещё тёплый: диалог открыт или был занят меньше
+ * часа назад (основной диалог держит кэш час). Вызывать до reloadClaudeSettings.
+ */
+export const CACHE_RESET_NOTICE = "⚠️ Диалог уже идёт: следующий ответ перечитает его целиком без кэша и съест больше лимита. Чтобы не тратить, меняй модель и глубину перед /new.";
+export function claudeCacheWarm(chatId: number, now = Date.now()): boolean {
+  const live = sessions.get(chatId);
+  if (live && !live.conversation.closed && live.conversation.sessionId) return true;
+  const chat = getChat(chatId);
+  return !!chat?.session_id && now - chat.updated_at < 3600_000;
+}
+
 export async function reloadClaudeSettings(chatId: number): Promise<void> {
   const session = sessions.get(chatId);
   if (!session) return;

@@ -75,6 +75,21 @@ function quota(value, limit, label, exceeded, isDialog = false) {
   else if (limit === null) cell.append(node("span", "quota-caption", "без лимита"));
   return cell;
 }
+const percent = (value) => value === null || value === undefined || !Number.isFinite(Number(value)) ? "—" : `${(Math.round(Number(value) * 10) / 10).toLocaleString("ru-RU")}%`;
+/** Доля человека в недельном лимите общих подписок: GPT и Claude в одной ячейке. */
+function weekShares(user) {
+  const gpt = user.quota?.subscription, claude = user.claude?.subscription;
+  const exceeded = !!(gpt?.exceeded || user.quota?.exceeded || claude?.exceeded || user.claude?.exceeded);
+  const cell = node("span", `user-quota${exceeded ? " exceeded" : ""}`);
+  cell.append(node("span", "quota-label", "Неделя подписки"));
+  for (const [name, share] of [["GPT", gpt], ["Claude", claude]]) {
+    const line = node("span", "quota-value", `${name} ${percent(share?.used)}`);
+    line.append(node("small", "", share?.limit === null || share?.limit === undefined ? " · без лимита" : ` / ${percent(share.limit)}`));
+    cell.append(line);
+  }
+  if (exceeded) cell.append(node("span", "quota-caption", "Задачи приостановлены"));
+  return cell;
+}
 function renderUsers() {
   const search = el("user-search").value.trim().toLocaleLowerCase("ru-RU");
   const filter = el("user-filter").value;
@@ -149,18 +164,7 @@ function renderUsers() {
     arrow.append(path);
     button.append(
       identity,
-      quota(
-        user.quota?.subscription?.used ?? user.quota?.daily.used ?? user.tokensToday,
-        user.quota?.subscription ? user.quota.subscription.limit : user.tokenLimit,
-        user.quota?.subscription
-          ? "Оценка Pro за неделю, %"
-          : user.quotaMode === "weighted"
-            ? "Единицы сегодня"
-            : "Токены сегодня",
-        user.quota
-          ? user.quota.exceeded
-          : user.tokenLimit !== null && user.tokensToday >= user.tokenLimit,
-      ),
+      weekShares(user),
       quota(
         user.dialogs,
         user.dialogLimit,
@@ -226,10 +230,11 @@ function selectLimitEngine(engine,animate=true){
 for(const mode of ['gpt','claude'])el('limits-'+mode).onclick=()=>selectLimitEngine(mode);
 function editUser(user = null) {
   editingUser = user;
-  el('claude-daily').value=user?.claude?.daily?.limit??'';
-  el('claude-weekly').value=user?.claude?.weekly?.limit??'';
-  el('claude-daily').disabled=el('claude-weekly').disabled=!!user?.owner;
-  el('claude-quota-usage').textContent=user?.claude?`Сегодня: ${new Intl.NumberFormat("ru-RU").format(user.claude.daily.used)} · За 7 дней: ${new Intl.NumberFormat("ru-RU").format(user.claude.weekly.used)}`:'';
+  el('claude-percent').value=user?.owner?'':user?(user.claude?.subscription?.limit??''):10;
+  el('claude-percent').disabled=!!user?.owner;
+  el('claude-percent').placeholder=user?.owner?'Без личного лимита':'Без ограничения';
+  const share=user?.claude?.subscription;
+  el('claude-quota-usage').textContent=share?`Claude за неделю: ≈${percent(share.used)} / ${share.limit===null?'без личного ограничения':percent(share.limit)} · ${new Intl.NumberFormat("ru-RU").format(share.tokens)} токенов`:'';
   selectLimitEngine(limitEngine,false);
   el("user-heading").textContent = user ? displayName(user) : "Новый пользователь";
   el("user-subtitle").textContent = user?.owner
@@ -290,7 +295,7 @@ el("user-form").onsubmit = async (event) => {
       note: el("user-name").value,
       ...(editingUser?.owner ? {} : { percentLimit: Number(el("user-percent").value) }),
       dialogLimit: limit("user-dialogs"),
-      claude:{daily:limit("claude-daily"),weekly:limit("claude-weekly")},
+      ...(editingUser?.owner ? {} : { claude: { percent: limit("claude-percent"), daily: null, weekly: null } }),
       allowed: true,
     });
     await closeDialog(el("user-detail"));

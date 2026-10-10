@@ -633,11 +633,13 @@ export function recordRateLimit(
     );
     return;
   }
+  // Событие Claude Code несёт долю из заголовка (0.86), в таблице — проценты (86).
+  // Без перевода доля и проценты перемешивались: «1%» вместо 86.
   stmts.upsertLimit.run(
     userId,
     limit.limitType,
     limit.status,
-    limit.utilization ?? null,
+    limit.utilization == null ? null : Math.round(limit.utilization * 1000) / 10,
     limit.resetsAt ?? null,
     Date.now(),
   );

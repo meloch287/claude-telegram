@@ -98,14 +98,20 @@ export interface DangerGuardOptions {
   hooks: PermissionBridgeHooks;
   /** Текущий режим разрешений. В обычных режимах спрашивает canUseTool. */
   currentMode: () => string;
+  /** Спрашивать ли про необратимое в режиме «без вопросов» (DANGER_GUARD=1). */
+  askOnDanger: boolean;
 }
+
+/** Ответ модели, если в режиме «без вопросов» она решила уточнить у человека. */
+export const NO_QUESTIONS_REASON =
+  "Включён режим «без вопросов»: человека не спрашивай. Выбери самый разумный вариант сам, продолжай работу и в итоге коротко скажи, что выбрал.";
 
 /**
  * Хук PreToolUse. В обычных режимах молчит и пропускает решение дальше — иначе
  * пользователь получал бы две карточки на одно действие.
  */
 export function createDangerGuard(options: DangerGuardOptions) {
-  const { chatId, timeoutMs, hooks, currentMode } = options;
+  const { chatId, timeoutMs, hooks, currentMode, askOnDanger } = options;
 
   return async function preToolUse(
     input: unknown,
@@ -119,6 +125,12 @@ export function createDangerGuard(options: DangerGuardOptions) {
     // Спрашиваем только там, где карточек не будет: в остальных режимах
     // canUseTool сделает это сам и лучше — у него есть «всегда разрешать».
     if (currentMode() !== "bypassPermissions") return {};
+
+    // «Без вопросов» — значит вообще без вопросов: ни карточек, ни уточнений кнопками.
+    if (toolName === "AskUserQuestion") {
+      return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: NO_QUESTIONS_REASON } };
+    }
+    if (!askOnDanger) return {};
 
     const danger = findDanger(toolName, toolInput);
     if (!danger) return {};

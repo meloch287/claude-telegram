@@ -513,6 +513,7 @@ export class Conversation {
       timeoutMs: permissionTimeoutMs,
       hooks: output.permissionHooks,
       currentMode: () => this.#deps.permissionMode,
+      askOnDanger: config.dangerGuard,
     });
 
     this.#query = (this.#deps.createQuery ?? query)({
@@ -530,9 +531,9 @@ export class Conversation {
           ? { allowDangerouslySkipPermissions: true }
           : {}),
         canUseTool,
-        // Сторож необратимого отключается в .env (DANGER_GUARD=0): тогда бот
-        // не спрашивает вообще ничего, это осознанный выбор владельца.
-        ...(config.dangerGuard ? { hooks: { PreToolUse: [{ hooks: [dangerGuard] }] } } : {}),
+        // Хук нужен режиму «без вопросов»: гасит уточняющие вопросы (AskUserQuestion).
+        // Спрашивать про необратимое он будет, только если в .env DANGER_GUARD=1.
+        hooks: { PreToolUse: [{ hooks: [dangerGuard] }] },
         ...(resumeSessionId ? { resume: resumeSessionId } : this.#deps.initialSessionId ? { sessionId: this.#deps.initialSessionId } : {}),
         systemPrompt: { type: "preset", preset: "claude_code", append: SYSTEM_APPEND + "\nСоздавай файлы, репозитории, зависимости, сборки и временные данные внутри текущей рабочей папки этого диалога. У каждого диалога отдельная папка; при удалении диалога она удаляется целиком. Общую историю и файлы других диалогов используй как справочные данные.\n" + FILE_DELIVERY_PROMPT + "\n" + claudeTeamContext(userId) },
         // Скиллы, CLAUDE.md и правила проекта.

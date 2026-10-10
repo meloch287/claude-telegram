@@ -1,6 +1,10 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {DatabaseSync} from 'node:sqlite';
-import {createClaudeQuota} from '../dist/claude-quota.js';import {outgoingFiles,deliveryPath} from '../dist/bot/delivery.js';
-import {createTeamService,validateTeamRequest} from './team-service.mjs';
+import {mkdtempSync} from 'node:fs';import {tmpdir} from 'node:os';import {join} from 'node:path';import {randomBytes} from 'node:crypto';
+// Модули бота читают конфиг при импорте: без окружения файл не загружался вовсе.
+const dir=mkdtempSync(join(tmpdir(),'team-test-'));
+process.env.BOT_TOKEN??='1:test';process.env.ENCRYPTION_KEY??=randomBytes(32).toString('base64');process.env.DATA_DIR??=dir;process.env.WORKSPACE_ROOT??=join(dir,'w');
+const {createClaudeQuota}=await import('../dist/claude-quota.js');const {outgoingFiles,deliveryPath}=await import('../dist/bot/delivery.js');
+const {createTeamService,validateTeamRequest}=await import('./team-service.mjs');
 test('file delivery: markers, old file links, shared files and escape protection',()=>{
  assert.deepEqual(outgoingFiles('Готово\n[[file:отчёт.pdf]]\n[[file:отчёт.pdf]]\n[Картинка](sandbox:/app/test/a.png)'),{visible:'Готово\n\n\n[Картинка](sandbox:/app/test/a.png)',files:['отчёт.pdf','/app/test/a.png']});
  assert.equal(deliveryPath('/a/u','/a/shared','shared:Shared/x.png').path,'/a/shared/Shared/x.png');

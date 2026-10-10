@@ -64,6 +64,11 @@ export function setupWeb({
     settings: (uid) => legacy.getOrCreateUser(uid),
     runningTelegram,
     endpoint: runtime.endpoint,
+    // GPT-диалоги из bb забираем в бота, пока не упираемся в лимит диалогов.
+    adoptBudget: (uid) => {
+      const limit = store.userPolicy(uid).dialog_limit;
+      return Math.max(0, Math.min(20, limit === null ? 20 : limit - store.threadCount(uid)));
+    },
   });
   async function checkDialogs(uid, creating = false) {
     const limit = store.userPolicy(uid).dialog_limit;

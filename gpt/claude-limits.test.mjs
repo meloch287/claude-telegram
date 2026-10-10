@@ -25,6 +25,12 @@ r.afterPause = db.claimUsageFetch(uid, t + 5 * 60_000 + 11 * 60_000);
 const usage = await import(new URL(process.env.DIST + "/claude-usage.js", "file://").href);
 const h = new Map(Object.entries({ "anthropic-ratelimit-unified-5h-utilization": "0.7", "anthropic-ratelimit-unified-5h-reset": "1791637200", "anthropic-ratelimit-unified-7d-utilization": "0.26", "anthropic-ratelimit-unified-7d-reset": "1791957600" }));
 r.headers = usage.limitsFromHeaders({ get: (k) => h.get(k) ?? null });
+// событие Claude Code несёт долю, в таблице — проценты
+db.recordRateLimit(uid, { limitType: "seven_day", status: "allowed", utilization: 0.86, resetsAt: 1791957600 });
+r.event = db.listRateLimits(uid).find((x) => x.limit_type === "seven_day").utilization;
+// перебор окна: больше 100% не показываем; сброс — по Москве
+db.recordRateLimit(uid, { limitType: "five_hour", utilization: 116, resetsAt: 4102488000000 });
+r.text = await usage.claudeUsageText(uid);
 process.stdout.write(JSON.stringify(r));
 `;
 
@@ -45,6 +51,9 @@ test("Claude limits keep known values and fetch rarely", () => {
       { limitType: "five_hour", utilization: 70, resetsAt: 1791637200000 },
       { limitType: "seven_day", utilization: 26, resetsAt: 1791957600000 },
     ], "проценты и сброс из заголовков ответа");
+    assert.equal(r.event, 86, "доля из события переводится в проценты");
+    assert.match(r.text, /Пятичасовое окно: исчерпано · сброс 01\.01, 15:00 МСК/);
+    assert.match(r.text, /Недельный лимит: 86% использовано · сброс 14\.10, 09:00 МСК/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

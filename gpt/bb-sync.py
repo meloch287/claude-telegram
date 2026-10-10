@@ -33,6 +33,8 @@ def sync(uid,home,work,payload):
     # Idempotency keys live both here and in the controller to survive process crashes.
     db.execute('create table if not exists gpt_telegram_imports(source_id text primary key,bb_id text not null)')
     if 'last_codex' not in [r[1] for r in db.execute('pragma table_info(gpt_telegram_links)')]:db.execute('alter table gpt_telegram_links add column last_codex text')
+    # native=1 — диалог создан в bb и усыновлён ботом: его тред и окружение принадлежат bb.
+    if 'native' not in [r[1] for r in db.execute('pragma table_info(gpt_telegram_links)')]:db.execute('alter table gpt_telegram_links add column native integer not null default 0')
     db.commit()
     with db:
         for tid in payload.get('deleteIds',[]):
@@ -44,15 +46,27 @@ def sync(uid,home,work,payload):
                 if link['tg_id'] not in present:
                     old=db.execute('select status,environment_id from threads where id=?',(link['bb_id'],)).fetchone()
                     if old and old['status'] in ACTIVE:continue
+                    if link['native']:
+                        release_native(db,link);result['changed']+=1;continue
                     remove_mirror(db,link['bb_id'])
                     if old:db.execute('delete from environments where id=?',(old['environment_id'],))
                     db.execute('delete from gpt_telegram_imports where bb_id=?',(link['bb_id'],))
                     db.execute('delete from gpt_telegram_links where tg_id=?',(link['tg_id'],));result['changed']+=1
         for row in rows:
-            tid=row['id'];bid=bb_id(tid);eid='env_tg'+tid.replace('-','');now=int(time.time()*1000)
+            tid=row['id'];native=row.get('web_bb_id');bid=native or bb_id(tid);eid='env_tg'+tid.replace('-','');now=int(time.time()*1000)
             link=db.execute('select * from gpt_telegram_links where tg_id=?',(tid,)).fetchone()
             thread=db.execute('select * from threads where id=?',(bid,)).fetchone()
-            if thread and thread['deleted_at'] is not None:
+            if native:
+                if not re.fullmatch(r'[A-Za-z0-9_-]{6,80}',native) or native.startswith(('thr_tg','thr_tc')):raise ValueError('Invalid native thread')
+                # Удалён в bb — не воскрешаем; история в Telegram остаётся.
+                if not thread or thread['deleted_at'] is not None or thread['provider_id']!='codex':
+                    result['threads'].append({'id':tid,'bb_id':bid,'status':'native_gone','codex_id':row.get('codex_id')});continue
+                eid=thread['environment_id']
+                if not link:
+                    if db.execute('select 1 from gpt_telegram_links where bb_id=?',(bid,)).fetchone():raise ValueError('Thread identifier collision')
+                    db.execute('insert into gpt_telegram_links(tg_id,bb_id,last_title,native) values(?,?,?,1)',(tid,bid,row['title']))
+                    link=db.execute('select * from gpt_telegram_links where tg_id=?',(tid,)).fetchone();result['changed']+=1
+            elif thread and thread['deleted_at'] is not None:
                 db.execute('update threads set deleted_at=null,archived_at=null where id=?',(bid,))
             if thread and thread['status'] in ACTIVE:
                 result['threads'].append({'id':tid,'bb_id':bid,'status':thread['status'],'codex_id':row.get('codex_id')});continue
@@ -81,13 +95,7 @@ def sync(uid,home,work,payload):
                 result['changed']+=1;return True
             # Reverse only actual web messages; imported events have an explicit prefix.
             known={m.get('source_id') for m in row.get('messages',[]) if m.get('source_id')}
-            for ev in db.execute("select * from events where thread_id=? and id not like 'evt_tg%' and type in ('client/turn/requested','item/completed') order by sequence",(bid,)):
-                if ev['id'] in known:continue
-                data=json.loads(ev['data']);body=None;role=None
-                if ev['type']=='client/turn/requested' and data.get('initiator')=='user':
-                    body='\n'.join(x.get('text','') for x in data.get('input',[]) if x.get('type')=='text' and x.get('visibility')!='agent-only');role='user'
-                elif ev['item_kind']=='agentMessage':body=data.get('item',{}).get('text');role='assistant'
-                if body:result['messages'].append({'thread_id':tid,'source_id':ev['id'],'role':role,'body':body,'at':ev['created_at']})
+            for message in thread_messages(db,bid,known):result['messages'].append({'thread_id':tid,**message})
             # bb's latest identity is authoritative after a web turn; TG may have created
             # its first session since the previous import, in which case no claim exists.
             identity=db.execute("select provider_thread_id from events where thread_id=? and type='thread/identity' and id not like 'evt_tg%' order by sequence desc limit 1",(bid,)).fetchone()
@@ -127,14 +135,48 @@ def sync(uid,home,work,payload):
                 if marker not in previous:atomic(agentfile,marker+'\nЭто продолжение существующего диалога. Перед первой задачей прочитай .telegram-history.md: это исторический контекст, а не новые поручения.\n<!-- /gpt-telegram-history -->\n\n'+previous)
             db.execute('update threads set updated_at=max(updated_at,?) where id=?',(row['updated_at'],bid))
             result['threads'].append({'id':tid,'bb_id':bid,'status':'idle','title':title,'codex_id':codex})
+    result['native']=discover_native(db,int(payload.get('adopt') or 0))
     result['native_count']=db.execute("select count(*) from threads where deleted_at is null and parent_thread_id is null and id not like 'thr_tc%' and id not in (select bb_id from gpt_telegram_links)").fetchone()[0]
     db.close();return result
 
 
 
+def release_native(db,link):
+    """Диалог, рождённый в bb: убираем в корзину bb, окружение и файлы проекта не трогаем."""
+    now=int(time.time()*1000)
+    db.execute('update threads set deleted_at=?,updated_at=? where id=? and deleted_at is null',(now,now,link['bb_id']))
+    db.execute('delete from gpt_telegram_imports where bb_id=?',(link['bb_id'],))
+    db.execute('delete from gpt_telegram_links where tg_id=?',(link['tg_id'],))
+
+def thread_messages(db,bid,known=()):
+    """Реплики треда bb, написанные в браузере (без скрытых вставок agent-only)."""
+    out=[]
+    for ev in db.execute("select * from events where thread_id=? and id not like 'evt_tg%' and type in ('client/turn/requested','item/completed') order by sequence",(bid,)):
+        if ev['id'] in known:continue
+        data=json.loads(ev['data']);body=None;role=None
+        if ev['type']=='client/turn/requested' and data.get('initiator')=='user':
+            body='\n'.join(x.get('text','') for x in data.get('input',[]) if x.get('type')=='text' and x.get('visibility')!='agent-only');role='user'
+        elif ev['item_kind']=='agentMessage':body=data.get('item',{}).get('text');role='assistant'
+        if body:out.append({'source_id':ev['id'],'role':role,'body':body,'at':ev['created_at']})
+    return out
+
+def discover_native(db,limit):
+    """GPT-диалоги, созданные прямо в bb: отдаём боту с историей, привязка — на следующей сверке."""
+    found=[]
+    if limit<=0:return found
+    for t in db.execute("select id,title,title_fallback,status,created_at,updated_at from threads where provider_id='codex' and deleted_at is null and archived_at is null and parent_thread_id is null and id not like 'thr_tg%' and id not like 'thr_tc%' and id not in (select bb_id from gpt_telegram_links) order by created_at").fetchall():
+        if t['status'] in ACTIVE:continue  # закончит ход — заберём в следующий раз
+        msgs=thread_messages(db,t['id'])
+        if not any(m['role']=='user' for m in msgs):continue  # пустые не тащим
+        identity=db.execute("select provider_thread_id from events where thread_id=? and type='thread/identity' order by sequence desc limit 1",(t['id'],)).fetchone()
+        found.append({'bb_id':t['id'],'title':t['title'] or t['title_fallback'] or 'Диалог из bb','created_at':t['created_at'],'updated_at':t['updated_at'],'codex_id':identity[0] if identity else None,'messages':msgs})
+        if len(found)>=limit:break
+    return found
+
 def purge_mirror(db,home,tid):
     link=db.execute('select * from gpt_telegram_links where tg_id=?',(tid,)).fetchone()
     if not link:return
+    if link['native']:return release_native(db,link)
     bid=link['bb_id'];thread=db.execute('select environment_id from threads where id=?',(bid,)).fetchone()
     remove_mirror(db,bid)
     if thread:db.execute('delete from environments where id=?',(thread['environment_id'],))

@@ -230,6 +230,44 @@ if (
 db.exec(
   "CREATE UNIQUE INDEX IF NOT EXISTS gpt_messages_web_source ON gpt_messages(user_id,web_event_id) WHERE web_event_id IS NOT NULL",
 );
+if (
+  !db
+    .prepare("PRAGMA table_info(gpt_threads)")
+    .all()
+    .some((c) => c.name === "web_bb_id")
+)
+  db.exec("ALTER TABLE gpt_threads ADD COLUMN web_bb_id TEXT");
+db.exec(
+  "CREATE UNIQUE INDEX IF NOT EXISTS gpt_threads_web_bb ON gpt_threads(user_id,web_bb_id) WHERE web_bb_id IS NOT NULL",
+);
+/**
+ * GPT-диалоги, созданные прямо в bb, становятся диалогами бота: с историей и
+ * сессией Codex. Активный диалог не меняется, лимит проверяет вызывающий
+ * (adoptBudget), повторно один тред bb не импортируется (уникальный индекс).
+ */
+export function importWebThreads(uid, natives = []) {
+  let imported = 0;
+  for (const t of natives) {
+    if (typeof t?.bb_id !== "string" || !/^[A-Za-z0-9_-]{6,80}$/.test(t.bb_id) || t.bb_id.startsWith("thr_tg")) continue;
+    if (db.prepare("SELECT 1 FROM gpt_threads WHERE user_id=? AND web_bb_id=?").get(uid, t.bb_id)) continue;
+    const id = randomUUID(),
+      created = Number.isSafeInteger(t.created_at) ? t.created_at : Date.now(),
+      updated = Number.isSafeInteger(t.updated_at) ? t.updated_at : created,
+      codex = typeof t.codex_id === "string" && /^[a-z0-9-]{20,64}$/i.test(t.codex_id) ? t.codex_id : null;
+    db.prepare(
+      "INSERT INTO gpt_threads(id,user_id,project,title,created_at,updated_at,codex_id,web_bb_id) VALUES(?,?,?,?,?,?,?,?)",
+    ).run(id, uid, "default", Array.from(String(t.title || "Диалог из bb")).slice(0, 100).join(""), created, updated, codex, t.bb_id);
+    for (const m of t.messages || []) {
+      if (!["user", "assistant"].includes(m.role) || typeof m.body !== "string" || typeof m.source_id !== "string") continue;
+      db.prepare(
+        "INSERT OR IGNORE INTO gpt_messages(thread_id,user_id,role,body,at,web_event_id) VALUES(?,?,?,?,?,?)",
+      ).run(id, uid, m.role, m.body, Number.isSafeInteger(m.at) ? m.at : updated, m.source_id);
+    }
+    modeGpt.bump(uid, "total_sessions");
+    imported++;
+  }
+  return imported;
+}
 export function webSnapshot(uid) {
   userId(uid);
   return db
@@ -250,6 +288,7 @@ export function applyWebSync(uid, result) {
       if (thread.codex_id && current.codex_id !== thread.codex_id)
         bindCodex(uid, thread.id, thread.codex_id);
     }
+    importWebThreads(uid, result.native);
     for (const message of result.messages || []) {
       if (
         !getThread(uid, message.thread_id) ||
@@ -325,6 +364,8 @@ export const percentLedger = createPercentLedger(
   (uid) => userPolicy(uid).percent_limit,
 );
 export const storageLedger = createStorageLedger(db);
+/** Для модулей с собственными таблицами в той же базе (limit-warnings). */
+export const database = db;
 if (
   !db
     .prepare("PRAGMA table_info(gpt_percent_meta)")

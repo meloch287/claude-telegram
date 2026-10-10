@@ -18,7 +18,9 @@ export function usageSnapshot({ hosts, gpt, claude, quota, claudeQuota }, filter
     providers.push(provider('codex-personal', 'codex', 'GPT · мой лимит', [window(`Неделя · ≈${personal.used.toFixed(2)}% из ${personal.limit}% подписки`, personal.limit === 0 ? 100 : personal.used / personal.limit * 100, personal.resetsAt)], false, true));
   if (claude) {
     providers.push(provider('claude-shared', 'claude-code', 'Claude Code', (claude.windows || []).filter(w => Number.isFinite(w.used)).map(w => window(w.title, w.used, w.resetsAt)), claude.stale));
-    const windows = [['Сутки', claudeQuota?.daily], ['7 дней', claudeQuota?.weekly]].filter(([, w]) => w && Number.isFinite(w.limit) && Number.isFinite(w.used)).map(([label, w]) => window(`${label} · ${w.used.toLocaleString('ru-RU')} / ${w.limit.toLocaleString('ru-RU')} токенов`, w.limit === 0 ? 100 : w.used / w.limit * 100, w.resetsAt));
+    const share = claudeQuota?.subscription;
+    const windows = share && Number.isFinite(share.limit) && Number.isFinite(share.used) ? [window(`Неделя · ≈${share.used}% из ${share.limit}% подписки`, share.limit === 0 ? 100 : share.used / share.limit * 100, share.resetsAt)] : [];
+    windows.push(...[['Сутки', claudeQuota?.daily], ['7 дней', claudeQuota?.weekly]].filter(([, w]) => w && Number.isFinite(w.limit) && Number.isFinite(w.used)).map(([label, w]) => window(`${label} · ${w.used.toLocaleString('ru-RU')} / ${w.limit.toLocaleString('ru-RU')} токенов`, w.limit === 0 ? 100 : w.used / w.limit * 100, w.resetsAt)));
     if (windows.length) providers.push(provider('claude-personal', 'claude-code', 'Claude · мой лимит', windows, false, true));
   }
   return { machines: hosts.filter(h => !filter.machineIds || filter.machineIds.includes(h.id)).map(h => ({

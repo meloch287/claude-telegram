@@ -5,11 +5,11 @@
     <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
     <meta name="color-scheme" content="light dark" />
     <title>Админка · AI Bot</title>
-    <link rel="stylesheet" href="./chats.css?v=20261010-engines1" />
+    <link rel="stylesheet" href="./chats.css?v=20261010-percent1" />
     <link rel="stylesheet" href="./loading.css?v=20261009-ui1" />
     <script src="./telegram-web-app.js"></script>
     <script src="./entry.js?v=20261009-unified1"></script>
-    <script type="module" src="./chats.js?v=20261010-engines1"></script>
+    <script type="module" src="./chats.js?v=20261010-percent2"></script>
   <link rel="stylesheet" href="./motion.css?v=20261009-smooth2"><script src="./motion.js?v=20261009-ui1"></script></head>
   <body data-section="admin">
     <div class="page-loader" role="status" aria-label="Загрузка">
@@ -126,7 +126,7 @@
         <button id="admin-retry" class="secondary-button" hidden>Повторить загрузку</button>
         <div class="users-table">
           <div class="users-columns" aria-hidden="true">
-            <span>Пользователь</span><span>GPT · неделя</span><span>Диалоги</span><span></span>
+            <span>Пользователь</span><span>Неделя подписки</span><span>Диалоги</span><span></span>
           </div>
           <div id="users-list" aria-label="Пользователи"></div>
         </div>
@@ -212,9 +212,9 @@
             <p class="field-hint">От всей подписки. 0% — запрет задач.</p>
             <p id="user-usage" class="field-hint"></p>
             </section><section id="claude-limits" role="tabpanel" aria-labelledby="limits-claude" hidden>
-            <label for="claude-daily">Токенов в сутки</label><input id="claude-daily" type="number" min="0" step="1" placeholder="Без ограничения">
-            <label for="claude-weekly">Токенов за 7 дней</label><input id="claude-weekly" type="number" min="0" step="1" placeholder="Без ограничения">
-            <p class="field-hint">Личные лимиты Claude. Пусто — без ограничения, 0 — запрет новых задач. Один начатый запрос может превысить остаток.</p><p id="claude-quota-usage" class="field-hint"></p>
+            <label for="claude-percent">Недельный лимит Claude</label>
+            <div class="input-unit"><input id="claude-percent" type="number" min="0" max="100" step="0.1" placeholder="Без ограничения" /><span>%</span></div>
+            <p class="field-hint">От недельного лимита подписки Claude. Новым — 10%. Пусто — без ограничения, 0% — запрет задач. Доля — по токенам человека среди всех на подписке.</p><p id="claude-quota-usage" class="field-hint"></p>
             </section></div><p id="user-storage" class="field-hint"></p>
             <label for="user-dialogs">Количество диалогов</label>
             <div class="input-unit">

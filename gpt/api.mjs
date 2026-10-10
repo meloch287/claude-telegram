@@ -11,7 +11,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { config } from "../dist/config.js";
 import { verifyInitData } from "../dist/crypto.js";
-import { claudeQuota, getOrCreateUser, setModel, isGptUserAllowed } from "../dist/db.js";
+import { allowUser, claudeQuota, getOrCreateUser, setModel, isGptUserAllowed, isUserAllowedInDb } from "../dist/db.js";
 import * as store from "./store.mjs";
 import { startUserDeletion } from "./user-deletion.mjs";
 import { engineAccess, setEngineAccess } from "../dist/engine-access.js";
@@ -233,7 +233,10 @@ export async function extraApi(req, res) {
       if(body.claude!==undefined)claudeQuota.validate(body.claude);
       store.setUserPolicy(uid, id, body);
       if(body.claude!==undefined)claudeQuota.set(uid,id,body.claude);
+      else if(body.allowed===true)claudeQuota.applyDefault(id);
       getOrCreateUser(id);
+      // Открыл доступ — открыт и Claude (на подписке владельца), как у приглашённых.
+      if (body.allowed === true && id !== store.ADMIN_ID && !isUserAllowedInDb(id)) allowUser(id, store.ADMIN_ID, typeof body.note === "string" && body.note.trim() ? body.note.trim() : null);
       if (body.allowed === false) await revokeAccess(id);
       reply(res, 200, { ok: true });
       return true;

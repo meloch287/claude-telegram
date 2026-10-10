@@ -39,17 +39,39 @@ function mapMarkdown(text: string, prose: (part: string) => string, code: (part:
   return result + prose(text.slice(offset));
 }
 
+const STRUCTURED = /^\s*(#{1,6}\s|[-*+]\s|\d+[.)]\s|\||>|<|\[\^)/;
+const HEADING = /^ {0,3}#{1,6}\s/;
+const HTML = /^\s*</;
+const INDENTED = /^\s{2,}/;
+/** Пустой абзац: в Telegram абзацы идут почти вплотную, так между ними видна пустая строка. */
+const SPACER = "\u00a0";
+
+/**
+ * Раскладка ответа для Telegram. Модель разделяет абзацы пустой строкой, но в
+ * rich-сообщении абзацы почти слипаются — вставляем между ними пустой абзац.
+ * Одинарный перенос между обычными строками (подзаголовок и текст, конец
+ * списка и текст) делаем новым абзацем: иначе строки склеиваются в одну.
+ * Перед списками, таблицами, цитатами, <details> и кодом пустой абзац не нужен.
+ */
 export function layoutMarkdown(text: string): string {
-  return mapMarkdown(text, part => part.split("\n").map((line, i, lines) => {
-    const structured = /^\s*(#{1,6}\s|[-*+]\s|\d+[.)]\s|\||>|<|\[\^)/;
-    const next = lines[i + 1];
-    if (!line.trim() || !next?.trim()) return line;
-    if (/^ {0,3}#{1,6}\s/.test(line)) return line.trimEnd() + "\n";
-    if (!structured.test(line) && /^ {0,3}(?:[-*+]\s|\d+[.)]\s|\|)/.test(next)) return line.trimEnd() + "\n";
-    if (structured.test(line) || structured.test(next) || /^\s{2,}/.test(line) || /^\s{2,}/.test(next)) return line;
-    if (/[.!?…][»”"')\]]*\s*$/.test(line)) return line.trimEnd() + "\n";
-    return line.trimEnd() + "  ";
-  }).join("\n"), part => part);
+  return mapMarkdown(text, part => {
+    const pieces = part.split(/(\n{2,})/);
+    for (let i = 1; i < pieces.length - 1; i += 2) {
+      const before = pieces[i - 1]!, after = pieces[i + 1]!;
+      const last = before.trimEnd().split("\n").pop() ?? "", first = after.trimStart().split("\n")[0] ?? "";
+      // Перед списком, таблицей и цитатой Telegram и так делает отступ.
+      if (!before.trim() || !after.trim() || HEADING.test(last) || HTML.test(last) || STRUCTURED.test(first) || last.trim() === SPACER) continue;
+      pieces[i] = `\n\n${SPACER}\n\n`;
+    }
+    return pieces.join("").split("\n").map((line, i, lines) => {
+      const next = lines[i + 1];
+      if (!line.trim() || !next?.trim()) return line;
+      if (HEADING.test(line)) return line.trimEnd() + "\n";
+      if (INDENTED.test(line) || INDENTED.test(next) || HTML.test(line) || HTML.test(next)) return line;
+      if (STRUCTURED.test(line) && STRUCTURED.test(next)) return line;
+      return line.trimEnd() + "\n";
+    }).join("\n");
+  }, part => part);
 }
 
 export function prepareRichMarkdown(text: string): string {

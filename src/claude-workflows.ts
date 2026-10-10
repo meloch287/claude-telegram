@@ -11,6 +11,7 @@ import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { workerFor } from "./agent/isolation.js";
+import { workerMap } from "./claude-workers.js";
 import type { SyncResult, WorkflowItem } from "./workflow-sync-child.js";
 
 const SOURCE_DIR = fileURLToPath(new URL("../claude-workflows/", import.meta.url));
@@ -29,10 +30,7 @@ export function managedWorkflows(): WorkflowItem[] {
 
 /** Пользователи с изолированным Claude Code — из той же карты, что и workerFor. */
 export function claudeWorkerUsers(): number[] {
-  return (process.env.CLAUDE_WORKER_UID_MAP ?? "")
-    .split(",")
-    .map((entry) => Number(entry.trim().split(":")[0]))
-    .filter((id) => Number.isSafeInteger(id) && id > 0);
+  return [...workerMap().keys()];
 }
 
 const synced = new Set<number>();

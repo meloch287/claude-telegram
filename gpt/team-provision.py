@@ -21,9 +21,20 @@ def acl(path,spec,owner=None,create=False):
   subprocess.run(['setfacl','-m',spec,'--','/proc/self/fd/'+str(fd)],pass_fds=(fd,),check=True,capture_output=True)
  finally:os.close(fd)
 
+def worker_mapping():
+ """Исполнители Claude: data/claude-workers.json (служба ai-bot-claude-workers) и .env, .env главнее."""
+ mapping={}
+ try:
+  import json
+  raw=json.load(open(os.environ.get('CLAUDE_WORKERS_FILE','/opt/ai-bot/data/claude-workers.json')))
+  mapping={str(k):str(v) for k,v in raw.items() if re.fullmatch(r'[1-9][0-9]*',str(k)) and isinstance(v,int)}
+ except (OSError,ValueError,AttributeError):pass
+ mapping.update(x.split(':') for x in os.environ.get('CLAUDE_WORKER_UID_MAP','').split(',') if x)
+ return mapping
+
 def main(uid):
  if not re.fullmatch(r'[1-9][0-9]*',uid):raise ValueError('Invalid user')
- mapping=dict(x.split(':') for x in os.environ.get('CLAUDE_WORKER_UID_MAP','').split(',') if x)
+ mapping=worker_mapping()
  worker=int(mapping.get(uid,'0'))
  if worker and (worker<1000 or sum(int(v)==worker for v in mapping.values())!=1):raise ValueError('Unknown worker')
  peer=worker or 1000
