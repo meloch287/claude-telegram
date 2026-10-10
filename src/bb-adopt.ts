@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { credentialEnv } from "./auth.js";
 import { claudeRuntimeOptions } from "./claude-settings.js";
-import { credentialFor, recordSessionStart, recordUsage } from "./db.js";
+import { credentialFor, getChat, recordSessionStart, recordUsage } from "./db.js";
 import { createDialog, dialogRecords, prepareDialog, updateDialog, type DialogRecord } from "./agent/dialog-workspace.js";
 import { spawnWorker, workerFor } from "./agent/isolation.js";
 import { renameUserSession } from "./agent/session-history.js";
@@ -65,7 +65,8 @@ const claudeTurn: Turn = async (userId, record, cwd, prompt) => {
 export async function adoptBbDialog(userId: number, request: AdoptRequest, deps: { turn?: Turn; create?: typeof createDialog; prepare?: typeof prepareDialog; rename?: typeof renameUserSession } = {}): Promise<string> {
   const existing = dialogRecords(userId).find((r) => r.origin === request.origin && !r.deleted);
   if (existing?.started) return existing.id;
-  const record = existing ?? (deps.create ?? createDialog)(userId, "default");
+  // Текущий проект человека: /resume показывает диалоги только открытого проекта.
+  const record = existing ?? (deps.create ?? createDialog)(userId, getChat(userId)?.project ?? "default");
   updateDialog(userId, record.id, { origin: request.origin, title: request.title });
   const cwd = (deps.prepare ?? prepareDialog)(userId, record);
   const file = join(cwd, ".bb-history.md");

@@ -13,6 +13,8 @@ const dist = new URL(process.env.DIST, "file://").href;
 const { adoptBbDialog, parseAdopt, historyText } = await import(dist + "/bb-adopt.js");
 const { dialogRecords, dialogPath } = await import(dist + "/agent/dialog-workspace.js");
 const uid = 777, prompts = [], renamed = [];
+const db = await import(dist + "/db.js");
+db.saveChat({ chatId: uid, userId: uid, project: "kursovaya", sessionId: null, permissionMode: "default" });
 const deps = { turn: async (u, record, cwd, prompt) => { prompts.push(prompt); }, rename: async (u, id, title) => { renamed.push(title); return true; } };
 const req = parseAdopt({ origin: "thr_ctieaxq3xp", title: "IngCheckUp", history: [{ role: "user", body: "Проверь курсовую" }, { role: "assistant", body: "Проверил" }, { role: "tool", body: "x" }] });
 const first = await adoptBbDialog(uid, req, deps);
@@ -41,6 +43,7 @@ test("перенос Claude-диалога из bb", () => {
     assert.equal(r.turns, 1, "ход переноса — один раз");
     assert.equal(r.record.origin, "thr_ctieaxq3xp");
     assert.equal(r.record.title, "IngCheckUp");
+    assert.equal(r.record.project, "kursovaya", "в открытый проект — иначе /resume его не покажет");
     assert.equal(r.record.started, true);
     assert.deepEqual(r.renamed, ["IngCheckUp"]);
     assert.equal(r.file, true);
