@@ -1483,11 +1483,11 @@ bot.callbackQuery(/^m:(.+)$/, async (ctx) => {
   await ctx.editMessageReplyMarkup({ reply_markup: view.keyboard }).catch(() => undefined);
 });
 
-bot.callbackQuery(/^(md|ce|ct):(.+)$/, async (ctx) => {
+bot.callbackQuery(/^(md|ce):(.+)$/, async (ctx) => {
   if (getSession(ctx.chat!.id)?.conversation.busy) { await ctx.answerCallbackQuery("Дождись завершения задачи или нажми /stop"); return; }
   const kind = ctx.match[1], raw = ctx.match[2] ?? "default", userId = ctx.from.id;
   try {
-    const patch = kind === "md" ? { model: raw } : kind === "ce" ? { effort: raw === "default" ? null : raw } : { thinking: claudePreferences(userId).thinking === "disabled" ? "enabled" : "disabled" };
+    const patch = kind === "md" ? { model: raw } : { effort: raw === "default" ? null : raw };
     saveClaudePreferences(userId, patch);
     await reloadClaudeSettings(ctx.chat!.id);
     await ctx.answerCallbackQuery("Настройки Claude сохранены");

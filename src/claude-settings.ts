@@ -69,7 +69,8 @@ export function claudePreferences(uid: number): ClaudePreferences {
   const migrated = claudeModels(uid).find(m => m.value === old || m.resolvedModel === old);
   const saved = preferences[String(uid)] ?? { model: migrated?.value ?? "default", effort: null, thinking: "auto", orchestration: false };
   const model = claudeModels(uid).find(m => m.value === saved.model) ?? claudeModels(uid)[0]!;
-  return { model: model.value, effort: model.supportedEffortLevels?.includes(saved.effort!) ? saved.effort : null, thinking: saved.thinking, orchestration: saved.orchestration === true };
+  // Мышление всегда как в Claude Code (адаптивное): отдельный выключатель убран.
+  return { model: model.value, effort: model.supportedEffortLevels?.includes(saved.effort!) ? saved.effort : null, thinking: "auto", orchestration: saved.orchestration === true };
 }
 export function saveClaudePreferences(uid: number, patch: Record<string, unknown>): ClaudePreferences {
   if (Object.keys(patch).some(k => !["model", "effort", "thinking", "orchestration"].includes(k))) throw Error("Неизвестная настройка Claude");
@@ -78,8 +79,8 @@ export function saveClaudePreferences(uid: number, patch: Record<string, unknown
   const selected = patch.model ?? old.model;
   const model = claudeModels(uid).find(m => m.value === selected || m.resolvedModel === selected);
   if (!model) throw Error("Выбери модель из списка Claude Code");
-  const thinking = patch.thinking ?? old.thinking;
-  if (thinking !== "auto" && thinking !== "enabled" && thinking !== "disabled") throw Error("Неизвестный режим размышления");
+  // Старые клиенты ещё могут прислать thinking — принимаем, но мышление всегда «как в Claude Code».
+  const thinking: ClaudeThinking = "auto";
   const effort = patch.effort === undefined ? (model.supportedEffortLevels?.includes(old.effort!) ? old.effort : null) : patch.effort;
   if (effort !== null && (typeof effort !== "string" || !model.supportedEffortLevels?.includes(effort as EffortLevel))) throw Error("Этот уровень недоступен для выбранной модели Claude");
   const orchestration = patch.orchestration === undefined ? old.orchestration : patch.orchestration === true;

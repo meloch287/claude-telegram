@@ -128,8 +128,8 @@ const SCREENS: Record<ScreenId, Screen> = {
       const prefs = claudePreferences(userId), model = claudeModels(userId).find(m => m.value === prefs.model)!;
       const keyboard = new InlineKeyboard().text(`Как в Claude Code${prefs.effort === null ? " ✓" : ""}`, "ce:default").row();
       for (const level of model.supportedEffortLevels ?? []) keyboard.text(`${CLAUDE_EFFORT_LABELS[level]}${prefs.effort === level ? " ✓" : ""}`, `ce:${level}`).row();
-      keyboard.text(`Мышление: ${prefs.thinking === "disabled" ? "выключено" : prefs.thinking === "enabled" ? "включено" : "как в Claude Code"}`, "ct:toggle").row().text(BACK, "nav:settings");
-      return { text: "Размышление Claude Code\n\nУровни зависят от выбранной модели. Настройки применяются к следующему сообщению.", keyboard };
+      keyboard.text(BACK, "nav:settings");
+      return { text: "Глубина размышления Claude\n\nУровни зависят от выбранной модели. «Как в Claude Code» — глубину подбирает модель. Настройки применяются к следующему сообщению.", keyboard };
     },
   },
   model: {

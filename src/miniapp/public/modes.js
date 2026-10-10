@@ -44,7 +44,6 @@
     if(!state)return;
     const data=state[state.engine];
     for(const el of document.querySelectorAll('.settings-card button,.settings-card select'))el.disabled=pending||!data.available;
-    if(state.engine==='claude'&&data.thinking==='disabled'){for(const el of $('efforts').children)el.disabled=true;$('effort-auto').disabled=true;}
     if(state.engine==='claude'&&data.orchestrationAvailable===false)$('orchestration').disabled=true;
   }
   function busy(value){working=value;updateControls();}
@@ -87,8 +86,6 @@
     else for(const [id,label] of data.models||[])option(model,id,label.replace(/^[^\p{L}\p{N}]+/u,''));
     model.value=data.model||'';model.disabled=working||!data.available;
     $('hero-model').textContent=model.selectedOptions[0]?.textContent||'Подключение готовится';
-    $('thinking-field').hidden=!claude;
-    $('thinking').value=data.thinking||'auto';$('thinking').disabled=working||!data.available;
     const selectedModel=currentModel();
     const levels=(claude?(selectedModel?.supportedEffortLevels||[]):(data.efforts||[]).map(([id])=>id)).filter(level=>!hiddenLevels.has(level));
     const efforts=$('efforts'),key=engine+':'+levels.join(',');
@@ -101,7 +98,7 @@
         button.append(document.createElement('i'));button.onclick=()=>chooseEffort(level);efforts.append(button);
       });
     }
-    const off=working||!data.available||(claude&&data.thinking==='disabled');
+    const off=working||!data.available;
     for(const button of efforts.children)button.disabled=off;
     document.querySelector('.depth').hidden=!levels.length;
     const auto=$('effort-auto');auto.hidden=!(claude&&levels.length);auto.disabled=off;
@@ -165,7 +162,6 @@
   };
   function onSelect(id,patch){$(id).onchange=()=>{syncValues();haptic('selectionChanged');save(patch());};}
   onSelect('model',()=>({model:$('model').value}));
-  onSelect('thinking',()=>({thinking:$('thinking').value}));
   onSelect('permission',()=>({[state.engine==='claude'?'permissionMode':'mode']:$('permission').value}));
   $('orchestration').onclick=()=>{
     if(!state||working||engineSync||state.engine!=='claude')return;

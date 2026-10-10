@@ -7,7 +7,8 @@ test("cache is a subset of input; rates differ by model and fractional points ar
   assert.equal(priceUsage("gpt-6-astra", u).units, 1338416);
   assert.equal(priceUsage("gpt-6-luna", u).units, 13384.16);
   assert.equal(priceUsage("gpt-6-luna", { input_tokens: 1, cached_input_tokens: 1 }).ticks, 1);
-  assert.throws(() => priceUsage("unknown", u));
+  // Незнакомая модель (новая из каталога Codex) считается по самой дорогой линейке, а не ломает учёт.
+  assert.equal(priceUsage("unknown", u).ticks, priceUsage("gpt-6-astra", u).ticks);
   assert.throws(() => priceUsage("gpt-6-sol", { input_tokens: 1, cached_input_tokens: 2 }));
 });
 test("quota periods reset at UTC midnight and Monday, including Sunday and year rollover", () => {
