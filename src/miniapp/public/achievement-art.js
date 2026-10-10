@@ -14,7 +14,7 @@
 const SIZE = 12;
 
 const PALETTE = {
-  c: "#D97757",
+  c: "#10A37F",
   d: "#A84F32",
   i: "#141413",
   w: "#FAF9F5",

@@ -1,3 +1,4 @@
+import {splitText, splitRichMarkdown} from "../agent/rich-chunks.js";
 import type { Api } from "grammy";
 import { GrammyError, InlineKeyboard, InputFile } from "grammy";
 import type { ConversationOutput } from "../agent/conversation.js";
@@ -34,6 +35,7 @@ export class TelegramOutput implements ConversationOutput {
   #api: Api;
   #chatId: number;
   #statusMessageId: number | null = null;
+  #statusUpdate: Promise<void> = Promise.resolve();
   #typingTimer: NodeJS.Timeout | null = null;
   /**
    * Читать ли следующий ответ вслух. Ставится на одну задачу: пришло голосовое —
@@ -69,6 +71,9 @@ export class TelegramOutput implements ConversationOutput {
    * реплика «вот кнопки» засоряла бы переписку. Состав зависит от того, есть ли
    * что коммитить — предлагать дифф там, где ничего не менялось, бессмысленно.
    */
+  async recovery(id: string): Promise<void> {
+    await this.#api.sendMessage(this.#chatId, "История, файлы и этапы задачи сохранены.", { reply_markup: new InlineKeyboard().text("Продолжить", "recover:" + id) });
+  }
   async finished(): Promise<void> {
     if (this.quiet || this.#lastMessageId === null) return;
 
@@ -144,22 +149,22 @@ export class TelegramOutput implements ConversationOutput {
    * считает ошибкой), ответ не теряем: уходит обычным текстом, как раньше.
    */
   async sendRich(markdown: string): Promise<number | undefined> {
-    const text = markdown.trim();
-    if (!text) return undefined;
-    try {
-      const message = await this.#api.raw.sendRichMessage({
-        chat_id: this.#chatId,
-        rich_message: { markdown: prepareRichMarkdown(layoutMarkdown(text)) },
-      });
-      this.#lastMessageId = message.message_id;
-      return message.message_id;
-    } catch (error) {
-      const why = error instanceof GrammyError ? error.description : String(error);
-      console.error(`[output:${this.#chatId}] rich send failed, шлю текстом: ${why}`);
-      let last: number | undefined;
-      for (const piece of chunk(esc(text))) last = (await this.send(piece)) ?? last;
-      return last;
+    const prepared = prepareRichMarkdown(layoutMarkdown(markdown.trim()));
+    if (!prepared) return undefined;
+    let last: number | undefined;
+    for (const piece of splitRichMarkdown(prepared)) {
+      try {
+        const message = await this.#api.raw.sendRichMessage({chat_id: this.#chatId, rich_message: {markdown: piece}});
+        last = this.#lastMessageId = message.message_id;
+      } catch (error) {
+        if (!(error instanceof GrammyError) || error.error_code !== 400) throw error;
+        for (const part of splitText(piece, 3500)) {
+          const message = await this.#api.sendMessage(this.#chatId, esc(part), {parse_mode: "HTML", link_preview_options: {is_disabled: true}});
+          last = this.#lastMessageId = message.message_id;
+        }
+      }
     }
+    return last;
   }
 
   /**
@@ -187,6 +192,10 @@ export class TelegramOutput implements ConversationOutput {
   }
 
   /** То же, но для содержимого, которого нет на диске. */
+  async documentBytes(bytes: Uint8Array, fileName: string): Promise<void> {
+    await this.#api.sendDocument(this.#chatId,new InputFile(bytes,fileName));
+  }
+
   async documentFromText(text: string, fileName: string, caption?: string): Promise<void> {
     try {
       await this.#api.sendDocument(
@@ -202,12 +211,19 @@ export class TelegramOutput implements ConversationOutput {
   }
 
   async status(html: string): Promise<void> {
+    this.#statusUpdate = this.#statusUpdate.catch(() => {}).then(() => this.#setStatus(html));
+    return this.#statusUpdate;
+  }
+
+  async #setStatus(html: string): Promise<void> {
     if (this.quiet) return;
 
-    const text = `<i>работаю…</i>\n\n${html}`;
+    const text = html;
+    const reply_markup = new InlineKeyboard().text("⏹ Стоп", "claude:stop");
     if (this.#statusMessageId === null) {
-      const id = await this.send(text);
-      this.#statusMessageId = id ?? null;
+      const message = await this.#api.sendMessage(this.#chatId, text, {parse_mode: "HTML", reply_markup, link_preview_options: {is_disabled: true}});
+      const id = message.message_id;
+      this.#statusMessageId = id;
       // В базу — чтобы после падения процесса было кому сказать, что задача
       // оборвалась: само сообщение переживёт бот, а память нет.
       if (id) markRunning(this.#chatId, id);
@@ -215,6 +231,7 @@ export class TelegramOutput implements ConversationOutput {
     }
     try {
       await this.#api.editMessageText(this.#chatId, this.#statusMessageId, text, {
+        reply_markup,
         parse_mode: "HTML",
         link_preview_options: { is_disabled: true },
       });
@@ -228,6 +245,7 @@ export class TelegramOutput implements ConversationOutput {
   }
 
   async clearStatus(finalHtml?: string): Promise<void> {
+    await this.#statusUpdate.catch(() => {});
     const id = this.#statusMessageId;
     this.#statusMessageId = null;
     clearRunning(this.#chatId);
@@ -237,7 +255,7 @@ export class TelegramOutput implements ConversationOutput {
     }
     try {
       if (finalHtml) {
-        await this.#api.editMessageText(this.#chatId, id, finalHtml, { parse_mode: "HTML" });
+        await this.#api.editMessageText(this.#chatId, id, finalHtml, { parse_mode: "HTML", reply_markup: {inline_keyboard: []} });
       } else {
         await this.#api.deleteMessage(this.#chatId, id);
       }

@@ -83,9 +83,9 @@ const NOOP = {
  * initData нет (демо, обычный браузер) — копия выключена: серверу не
  * доказать, чей это остров.
  */
-export function createCloud(initData, storage = window.localStorage) {
+export function createCloud(initData, storage = window.localStorage, engine = "gpt") {
   if (!initData) return NOOP;
-  const headers = { "X-Telegram-Init-Data": initData };
+  const headers = { "X-Telegram-Init-Data": initData, "X-Bot-Engine": engine };
   let stamps = {};
   try {
     stamps = JSON.parse(storage.getItem(STAMPS_KEY) || "{}") || {};
@@ -118,7 +118,7 @@ export function createCloud(initData, storage = window.localStorage) {
     const abort = new window.AbortController();
     const timer = setTimeout(() => abort.abort(), timeoutMs);
     try {
-      const response = await fetch("/api/world-save", { headers, signal: abort.signal });
+      const response = await fetch("./api/world-save", { headers, signal: abort.signal });
       if (!response.ok) return false;
       const { items } = await response.json();
       const plan = planMerge(localSnapshot(), items, stamps);
@@ -141,7 +141,7 @@ export function createCloud(initData, storage = window.localStorage) {
   }
 
   async function forgetNow(key) {
-    const response = await fetch(`/api/world-save?key=${encodeURIComponent(key)}`, {
+    const response = await fetch(`./api/world-save?key=${encodeURIComponent(key)}`, {
       method: "DELETE",
       headers,
     });
@@ -162,7 +162,7 @@ export function createCloud(initData, storage = window.localStorage) {
     for (const [key, data] of Object.entries(local)) {
       if (sent.get(key) === data) continue;
       const body = JSON.stringify({ key, data });
-      const response = await fetch("/api/world-save", {
+      const response = await fetch("./api/world-save", {
         method: "PUT",
         headers: { ...headers, "content-type": "application/json" },
         body,

@@ -1,3 +1,14 @@
+import { taskState } from "../bot/task-state.js";
+import { gptStorage } from "../engine.js";
+import {claudeTeamContext,cancelClaudeTeam} from "../team-context.js";
+import {claudeQuota, claimUsageFetch} from "../db.js";
+import {outgoingFiles,deliveryPath,FILE_DELIVERY_PROMPT} from '../bot/delivery.js';
+import {execFile as deliveryExec} from 'node:child_process';
+import {promisify as deliveryPromisify} from 'node:util';
+const readDelivery=deliveryPromisify(deliveryExec);
+import {syncClaudeGitHub} from "../github.js";
+import {readFileSync} from "node:fs";
+import {imageMime} from "../bot/media.js";
 import {
   query,
   type Query,
@@ -31,6 +42,8 @@ import { snapshot, reportChanges, formatSize, type Snapshot } from "../bot/artif
 import { credentialEnv, type Credential } from "../auth.js";
 import { activeProxyUrl } from "../proxy.js";
 import { config } from "../config.js";
+import { claudeRuntimeOptions, claudeModels, claudeModelLabel, claudePreferences } from "../claude-settings.js";
+import { spawnWorker, workerFor } from "./isolation.js";
 
 export interface ConversationOutput {
   /** Отправить сообщение, вернуть его message_id. */
@@ -45,8 +58,10 @@ export interface ConversationOutput {
   speak?(text: string): Promise<void>;
   /** Задача закончена: можно подвесить кнопки к последнему сообщению. */
   finished?(): Promise<void>;
+  recovery?(id: string): Promise<void>;
   /** Отдать файл с диска. */
   document(path: string, caption?: string, fileName?: string): Promise<void>;
+  documentBytes?(bytes: Uint8Array,fileName:string): Promise<void>;
   /** Отдать файлом текст, которого на диске нет. */
   documentFromText(text: string, fileName: string, caption?: string): Promise<void>;
   typing(): Promise<void>;
@@ -77,6 +92,7 @@ export function gitActions(command: string): { commit: boolean; push: boolean } 
 }
 
 export interface ConversationDeps {
+  createQuery?: typeof query;
   chatId: number;
   userId: number;
   cwd: string;
@@ -86,6 +102,7 @@ export interface ConversationDeps {
   permissionMode: PermissionMode;
   permissionTimeoutMs: number;
   resumeSessionId: string | null;
+  initialSessionId?: string;
   output: ConversationOutput;
   /** Вызывается на каждом result с ДЕЛЬТОЙ расхода, не с накопленным итогом. */
   onUsage(usage: ConversationUsage): void;
@@ -155,36 +172,29 @@ const STALL_CHECK_MS = 60_000;
  * оставить унаследованный ANTHROPIC_API_KEY рядом с токеном подписки, работа
  * молча пойдёт по API — то есть по деньгам вместо лимитов подписки.
  */
-function buildEnv(credential: Credential): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined) env[key] = value;
-  }
-  for (const [key, value] of Object.entries(credentialEnv(credential))) {
-    if (value === undefined) delete env[key];
-    else env[key] = value;
-  }
-
-  // Канал выхода выбран на старте пробой. Пустая строка — идти напрямую;
-  // тогда унаследованные переменные прокси нужно снять, иначе подпроцесс
-  // всё равно уйдёт в них.
-  // gh читает GH_TOKEN, git — свой credential helper (см. ниже). Оба берут
-  // токен из окружения, поэтому в файлы конфигурации он не попадает.
-  if (config.githubToken) {
-    env.GITHUB_TOKEN = config.githubToken;
-    env.GH_TOKEN = config.githubToken;
-    // Helper отдаёт логин и пароль на stdout и читает токен из окружения:
-    // так секрет не оседает в ~/.gitconfig внутри тома.
-    env.GIT_CONFIG_COUNT = "1";
-    env.GIT_CONFIG_KEY_0 = "credential.https://github.com.helper";
-    env.GIT_CONFIG_VALUE_0 =
-      "!f() { echo username=x-access-token; echo password=$GITHUB_TOKEN; }; f";
-  }
-
+function buildEnv(credential: Credential, userId: number): Record<string, string> {
+  const worker = workerFor(userId);
   const proxy = activeProxyUrl();
-  for (const key of ["HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"]) {
-    if (proxy) env[key] = proxy;
-    else delete env[key];
+  if (!proxy) throw new Error("Claude Code остановлен: обязательный прокси недоступен.");
+  const env: Record<string, string> = {
+    PATH: "/usr/local/bin:/usr/bin:/bin",
+    LANG: "C.UTF-8",
+    AI_TEAM_ENGINE: "claude",
+    HOME: worker.home,
+    GIT_CONFIG_GLOBAL: `${worker.home}/.gitconfig`,
+    USER: worker.name,
+    LOGNAME: worker.name,
+    XDG_CONFIG_HOME: `${worker.home}/.config`,
+    XDG_CACHE_HOME: `${worker.home}/.cache`,
+    HTTP_PROXY: proxy,
+    HTTPS_PROXY: proxy,
+    http_proxy: proxy,
+    https_proxy: proxy,
+    NO_PROXY: "localhost,127.0.0.1",
+    no_proxy: "localhost,127.0.0.1",
+  };
+  for (const [key, value] of Object.entries(credentialEnv(credential))) {
+    if (value !== undefined) env[key] = value;
   }
   return env;
 }
@@ -204,48 +214,28 @@ const SYSTEM_APPEND = `
 
 # Оформление ответа
 
-Сообщения уходят в Telegram как Markdown, и Telegram рисует его сам: заголовки
-через #, **жирный**, списки, таблицы, код в обратных кавычках и свёрнутые блоки
-<details><summary>Название</summary> … </details>. Сплошной прозой не пиши:
-стена абзацев на телефоне не читается. Структуру выбирай сам под содержание,
-правило одно — всё, что длиннее трёх предложений, разбивай:
+Пиши по-русски, если пользователь не попросил другой язык.
+Короткий заголовок результата — отдельной строкой, затем пояснения отдельными абзацами.
+Не склеивай обращение, заголовок и длинную жирную оговорку. Жирным выделяй короткие ключевые слова.
+Используй Markdown: списки, таблицы, блоки кода и <details><summary>Подробности</summary>…</details>, когда они помогают.
+Перед таблицей, списком и после заголовка — одна пустая строка. Без декоративных разделителей.
+Добавляй обычно 1–3 уместных эмодзи, не внутри кода. Исторический контекст помечай отдельной строкой.
+Не навязывай длинный шаблон карточки короткому ответу.
+Между смысловыми абзацами ставь два перевода строки, а не один: одинарный перенос не отделяет абзац визуально.
+Один абзац — одна мысль, обычно 1–3 коротких предложения. Не начинай технический ответ с длинного приветствия.
+Несколько действий или недостающих данных перечисляй короткими пунктами. Не выделяй жирным целый пункт или предложение.
+Если предыдущий контекст доступен в истории, сначала прочитай его и проверь пути инструментами, затем сообщай, чего действительно не хватает.
+Бот сам добавляет «✅ Готово», время и сворачиваемый журнал реальных шагов, вывода команд и ошибок.
+Не придумывай и не дублируй этот журнал. В ответе коротко сообщи результат, проверки и реальные ограничения.
 
-- заголовок ## на каждый смысловой блок: что сделал, что нашёл, что проверил;
-- заголовки и названия свёрнутых блоков начинай с эмодзи по смыслу:
-  🔧 что сделал, 🔍 что нашёл, ✅ проверки, ⚠️ риски, ➡️ следующий шаг;
-- перечисления — списком, ключевые слова и цифры — жирным;
-- сравнения, параметры, «было/стало» и результаты проверок — таблицей,
-  а не абзацем;
-- команды, пути, имена файлов — в обратных кавычках;
-- подробности, нужные не всем (логи, разборы, длинные списки), — в свёрнутый
-  <details>, чтобы главное читалось без раскрытия;
-- деревья каталогов и ASCII-графику не рисуй.
+# GitHub
 
-Итог законченной задачи оформляй карточкой:
-
-# <эмодзи по смыслу> <Название задачи в трёх-пяти словах>
-
-**Статус:** ✔ готово | ⚠ готово с оговорками | ✖ не вышло — полфразы, что это значит
-
-## 🧭 Итог
-
-Два-четыре предложения: что сделано и что важно знать.
-
-<details><summary>📋 Полный итог</summary>
-
-Что именно менял, где и почему — списком. **➡️ Следующий шаг**, если он есть.
-
-</details>
-
-<details><summary>🔬 Проверки и подробности</summary>
-
-Что проверял и чем — таблицей «проверка | итог»: команды, коды ответов, тесты. Что не проверял — тоже.
-
-</details>
-
-Между тегами details/summary и содержимым — пустая строка. Короткие ответы на
-вопросы карточкой не оформляй, но заголовки и списки используй и в них, если
-ответ длиннее пары предложений.
+Команда /github подключает личный GitHub сразу к GPT, Claude и веб-интерфейсу.
+Ключ Claude лежит в $HOME/.ssh/gpt-github/id_ed25519, сведения проверки в account.json рядом.
+Используй GIT_CONFIG_GLOBAL из окружения, он сохраняет подключение во всех проектах.
+Проверка: ssh -T git@github.com. Фраза successfully authenticated означает успех даже с кодом 1.
+gh auth status проверяет отдельный OAuth. Не проси повторную авторизацию без реальной проверки SSH/git.
+Не показывай приватный ключ. У каждого пользователя только его ключ и репозитории.
 
 # Карта проекта
 
@@ -283,6 +273,7 @@ const SYSTEM_APPEND = `
  * на прогреве.
  */
 export class Conversation {
+  #checkpoint: string | undefined;
   readonly chatId: number;
   #deps: ConversationDeps;
   #queue = new MessageQueue<SDKUserMessage>();
@@ -290,6 +281,9 @@ export class Conversation {
   #pump: Promise<void> | null = null;
   #sessionId: string | null = null;
   #busy = false;
+  #turnStarted = 0;
+  #progressTimer: NodeJS.Timeout | null = null;
+  #renderingActivity = false;
   #activity: string[] = [];
   /** tool_use_id → имя инструмента: результаты приходят отдельными сообщениями. */
   #toolNames = new Map<string, string>();
@@ -300,13 +294,17 @@ export class Conversation {
   #turnCommits = 0;
   #turnPushes = 0;
   /** Что делал агент за задачу — чек-лист в журнале. */
-  #steps: string[] = [];
+  #steps: {id: string; label: string}[] = [];
+  #stepResults = new Map<string, boolean>();
+  #interrupted = false;
+  #activeModel: string | null = null;
   /** Вывод команд и ошибки инструментов копятся и уходят одним свёрнутым блоком. */
   #toolOutputs: { label: string; text: string }[] = [];
   #toolErrors: { label: string; text: string }[] = [];
   #lastText: string | null = null;
   #resumeSessionId: string | null;
   #closed = false;
+  #lastImages: string[] = [];
 
   // modelUsage и total_cost_usd в streaming-сессии накопительные:
   // каждый result содержит итог с начала сессии. Пишем в статистику разницу.
@@ -347,17 +345,31 @@ export class Conversation {
   }
 
   /** Добавляет реплику пользователя. Первый вызов поднимает сессию. */
-  async send(text: string): Promise<void> {
+  #delivered=new Set<string>();
+  async send(text: string, images: string[] = []): Promise<void> {
+    this.#delivered.clear();
+    if(!this.#deps.createQuery) { await gptStorage(this.#deps.userId, "admit"); claudeQuota.assert(this.#deps.userId); }
     if (this.#closed) throw new Error("Диалог уже закрыт");
-    if (!this.#query) this.#start();
+    if (!this.#query) {
+      if (!this.#deps.createQuery) await syncClaudeGitHub(this.#deps.userId);
+      this.#start();
+    }
+    if (this.#deps.initialSessionId) {
+      if (this.#busy && this.#checkpoint) taskState.append(this.#checkpoint, text);
+      else this.#checkpoint = taskState.begin(this.#deps.userId, "claude", this.#deps.initialSessionId || this.#sessionId || this.#resumeSessionId || "", text, images);
+    }
     this.#busy = true;
+    this.#turnStarted = Date.now();
     this.#activity = [];
     this.#toolNames.clear();
     this.#toolLabels.clear();
     this.#steps = [];
+    this.#stepResults.clear();
+    this.#interrupted = false;
     this.#toolOutputs = [];
     this.#toolErrors = [];
     this.#lastText = text;
+    this.#lastImages = images;
     // Снимок до работы: по разнице после результата видно, какие файлы
     // появились или изменились, и их можно вернуть в чат.
     try {
@@ -367,7 +379,10 @@ export class Conversation {
     }
     this.#queue.push({
       type: "user",
-      message: { role: "user", content: text },
+      message: { role: "user", content: images.length ? [
+        {type:"text",text},
+        ...images.slice(0,12).map(path=>{const bytes=readFileSync(path),mime=imageMime(bytes);if(!mime)throw Error("Неподдерживаемый формат изображения");return {type:"image",source:{type:"base64",media_type:mime,data:bytes.toString("base64")}};})
+      ] : text },
       parent_tool_use_id: null,
       session_id: this.#sessionId ?? "",
     } as SDKUserMessage);
@@ -375,10 +390,19 @@ export class Conversation {
     this.#deps.output.startTyping();
     this.#lastActivity = Date.now();
     this.#watchStall();
+    void this.#renderActivity(true).catch(() => {});
+    if (!this.#progressTimer) {
+      this.#progressTimer = setInterval(() => {if (this.#busy) void this.#renderActivity().catch(() => {});}, 5000);
+      this.#progressTimer.unref?.();
+    }
   }
 
-  async interrupt(): Promise<void> {
-    if (!this.#query) return;
+  async interrupt(preserve = false): Promise<void> {
+    if(!this.#deps.createQuery)void cancelClaudeTeam(this.#deps.userId);
+    if (!this.#query || !this.#busy) return;
+    this.#interrupted = true;
+    taskState.state(this.#checkpoint, preserve ? "interrupted" : "cancelled");
+    this.#checkpoint = undefined;
     flushChat(this.chatId, { kind: "deny", message: "Пользователь остановил работу" });
     try {
       await this.#query.interrupt();
@@ -438,6 +462,8 @@ export class Conversation {
     const holder = this.#query as unknown as Record<string, unknown>;
     const method = holder["usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET"];
     if (typeof method !== "function") return;
+    // Тот же общий интервал, что у мини-аппа и bb: иначе Anthropic отвечает 429.
+    if (!this.#deps.createQuery && !claimUsageFetch(this.#deps.userId)) return;
 
     try {
       const response = await (method as () => Promise<unknown>).call(this.#query);
@@ -470,12 +496,16 @@ export class Conversation {
   async setModel(model: string): Promise<void> {
     if (!this.#query) return;
     await this.#query.setModel(model);
+    this.#activeModel = model;
   }
 
   /** Закрывает сессию: очередь завершается, query() доигрывает и выходит. */
   async close(): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
+    if (this.#busy) taskState.state(this.#checkpoint, "interrupted");
+    if (this.#progressTimer) clearInterval(this.#progressTimer);
+    this.#progressTimer = null;
     this.#deps.output.stopTyping();
     // Сторож живёт вместе с диалогом: без этого таймер остался бы висеть на
     // каждой закрытой сессии.
@@ -485,6 +515,7 @@ export class Conversation {
     }
     flushChat(this.chatId, { kind: "deny", message: "Сессия закрыта" });
     if (!this.#queue.closed) this.#queue.close();
+    this.#query?.close();
     try {
       await this.#pump;
     } catch {
@@ -493,7 +524,7 @@ export class Conversation {
   }
 
   #start(): void {
-    const { credential, model, cwd, permissionMode, permissionTimeoutMs, output } = this.#deps;
+    const { credential, model, cwd, permissionMode, permissionTimeoutMs, output, userId } = this.#deps;
     const resumeSessionId = this.#resumeSessionId;
 
     const canUseTool = createPermissionBridge({
@@ -514,13 +545,15 @@ export class Conversation {
       currentMode: () => this.#deps.permissionMode,
     });
 
-    this.#query = query({
+    this.#query = (this.#deps.createQuery ?? query)({
       prompt: this.#queue,
       options: {
         cwd,
-        ...(model ? { model } : {}),
+        ...claudeRuntimeOptions(userId),
         // Набор инструментов не урезаем: это обычный Claude Code, просто в чате.
-        allowedTools: AUTO_APPROVED,
+        // Включённая оркестрация — уже согласие человека: Workflow не спрашиваем
+        // карточкой на каждый запуск. Без неё запуск воркфлоу подтверждают кнопкой.
+        allowedTools: claudePreferences(userId).orchestration ? [...AUTO_APPROVED, "Workflow"] : AUTO_APPROVED,
         permissionMode,
         // Без этого флага SDK не пускает в bypassPermissions вовсе.
         ...(permissionMode === "bypassPermissions"
@@ -530,8 +563,8 @@ export class Conversation {
         // Сторож необратимого отключается в .env (DANGER_GUARD=0): тогда бот
         // не спрашивает вообще ничего, это осознанный выбор владельца.
         ...(config.dangerGuard ? { hooks: { PreToolUse: [{ hooks: [dangerGuard] }] } } : {}),
-        ...(resumeSessionId ? { resume: resumeSessionId } : {}),
-        systemPrompt: { type: "preset", preset: "claude_code", append: SYSTEM_APPEND },
+        ...(resumeSessionId ? { resume: resumeSessionId } : this.#deps.initialSessionId ? { sessionId: this.#deps.initialSessionId } : {}),
+        systemPrompt: { type: "preset", preset: "claude_code", append: SYSTEM_APPEND + "\nСоздавай файлы, репозитории, зависимости, сборки и временные данные внутри текущей рабочей папки этого диалога. У каждого диалога отдельная папка; при удалении диалога она удаляется целиком. Общую историю и файлы других диалогов используй как справочные данные.\n" + FILE_DELIVERY_PROMPT + "\n" + claudeTeamContext(userId) },
         // Скиллы, CLAUDE.md и правила проекта.
         settingSources: [...SETTING_SOURCES],
         mcpServers: loadMcpServers(),
@@ -540,7 +573,8 @@ export class Conversation {
         includePartialMessages: false,
         // env заменяет окружение подпроцесса целиком, а не дополняет его,
         // поэтому process.env нужно расстелить руками — иначе не будет PATH.
-        env: buildEnv(credential),
+        env: { ...buildEnv(credential, userId), XDG_CACHE_HOME: `${cwd}/.cache`, npm_config_cache: `${cwd}/.npm`, TMPDIR: `${cwd}/.tmp` },
+        spawnClaudeCodeProcess: (options) => spawnWorker(userId, options),
         stderr: (data: string) => {
           if (data.trim()) console.error(`[claude:${this.chatId}] ${data.trim()}`);
         },
@@ -602,11 +636,22 @@ export class Conversation {
       }
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);
+      const wasBusy = this.#busy;
+      taskState.state(this.#checkpoint, "interrupted");
+      if (this.#checkpoint && !this.#closed) await this.#deps.output.recovery?.(this.#checkpoint).catch(() => {});
       this.#busy = false;
       this.#deps.output.stopTyping();
       flushChat(this.chatId, { kind: "deny", message: "Сессия упала" });
       this.#query = null;
       this.#queue = new MessageQueue<SDKUserMessage>();
+      this.#resumeSessionId = this.#sessionId ?? this.#resumeSessionId;
+      if (this.#closed) return;
+      console.error(`[claude:${this.chatId}] session failed: ${text.slice(0,500)}`);
+      if (/exited with code 143|SIGTERM/i.test(text)) {
+        await this.#deps.output.clearStatus();
+        if(wasBusy)await this.#deps.output.send("Claude был перезапущен. История сохранена — отправь «Продолжи», чтобы продолжить задачу.");
+        return;
+      }
 
       // Сохранённая сессия не найдена: файлы могли пропасть вместе с
       // пересборкой контейнера, а идентификатор в базе остался. Начинаем
@@ -617,7 +662,7 @@ export class Conversation {
         this.#deps.onResumeLost();
         await this.#deps.output.clearStatus();
         await this.#deps.output.send("↻ Прошлый чат не нашёлся, начинаю новый.");
-        if (this.#lastText) await this.send(this.#lastText);
+        if (this.#lastText) await this.send(this.#lastText, this.#lastImages);
         return;
       }
 
@@ -645,6 +690,7 @@ export class Conversation {
     switch (message.type) {
       case "system": {
         if (message.subtype === "init") {
+          this.#activeModel = message.model;
           this.#sessionId = message.session_id;
           this.#deps.onSessionId(message.session_id);
           return;
@@ -742,7 +788,13 @@ export class Conversation {
 
         for (const block of message.message.content) {
           if (block.type === "text" && block.text.trim()) {
-            const full = block.text.trim();
+            const outgoing=outgoingFiles(block.text.trim());
+            const full = outgoing.visible;
+            for(const file of outgoing.files.slice(0,5)){
+              try{
+                await this.#deliverArtifact(file);
+              }catch{await output.send('Не удалось прикрепить файл. Проверь, что он сохранён в твоей папке и не больше 49 МиБ.');}
+            }
             let fileIndex = 0;
             for (const part of splitCodeBlocks(full)) {
               if (part.kind === "file") {
@@ -752,7 +804,7 @@ export class Conversation {
                 continue;
               }
               // Rich-сообщение вмещает 32 тысячи символов: режем только совсем длинное.
-              for (const piece of chunk(part.body, RICH_LIMIT)) await output.sendRich(piece);
+              await output.sendRich(part.body);
             }
             // Озвучка после текста, а не вместо: голос догоняет ответ, который
             // уже можно читать. Ошибка тут ответа не отменяет.
@@ -768,7 +820,8 @@ export class Conversation {
               const git = gitActions(String((block.input as { command?: unknown })?.command ?? ""));
               if (git.commit || git.push) this.#gitPending.set(block.id, git);
             }
-            this.#steps.push(step);
+            this.#steps.push({id: block.id, label: step});
+            taskState.steps(this.#checkpoint, this.#steps.slice(-30).map(s => ({label:s.label,done:this.#stepResults.get(s.id) ?? false})));
             this.#activity.push(
               describeToolShort(block.name, (block.input ?? {}) as Record<string, unknown>),
             );
@@ -794,6 +847,8 @@ export class Conversation {
           };
           if (result.type !== "tool_result") continue;
 
+          this.#stepResults.set(result.tool_use_id ?? "", !result.is_error);
+          taskState.steps(this.#checkpoint, this.#steps.slice(-30).map(s => ({label:s.label,done:this.#stepResults.get(s.id) ?? false})));
           const git = this.#gitPending.get(result.tool_use_id ?? "");
           if (git) {
             this.#gitPending.delete(result.tool_use_id ?? "");
@@ -837,6 +892,9 @@ export class Conversation {
       }
 
       case "result": {
+        taskState.state(this.#checkpoint, message.subtype === "success" && !this.#interrupted ? "done" : this.#interrupted ? "cancelled" : "interrupted");
+        if (message.subtype !== "success" && this.#checkpoint && !this.#interrupted) await output.recovery?.(this.#checkpoint).catch(() => {});
+        this.#checkpoint = undefined;
         this.#busy = false;
         this.#deps.output.stopTyping();
         const tokens = totalTokens(message);
@@ -855,7 +913,7 @@ export class Conversation {
         this.#deps.onUsage({
           tokens: deltaTokens,
           costUsd: deltaCost,
-          task: message.subtype === "success",
+          task: message.subtype === "success" && !this.#interrupted,
           commits: this.#turnCommits,
           pushes: this.#turnPushes,
         });
@@ -868,7 +926,7 @@ export class Conversation {
         }
 
         const summary =
-          message.subtype === "success"
+          this.#interrupted ? `⏹ Остановлено · ${formatDuration(message.duration_ms)}` : message.subtype === "success"
             ? `✅ Готово · ${formatDuration(message.duration_ms)} · ${formatTokensShort(deltaTokens)}`
             : `⚠️ Прервано: ${esc(message.subtype)}`;
         // Журнал задачи заменяет строку состояния: итог плюс свёрнутые шаги,
@@ -901,6 +959,20 @@ export class Conversation {
    * Файлы, появившиеся за задачу. Раньше результат оставался на сервере, и
    * забрать его можно было только через git.
    */
+  async #deliverArtifact(file:string):Promise<void>{
+                const {userId,cwd}=this.#deps;
+                const root=`/opt/ai-bot/tenants/${userId}/workspace/AI-bot/User${userId}`;
+                const normalized=file.startsWith(`/opt/AI-bot/User${userId}/`)?file.replace(`/opt/AI-bot/User${userId}`,root):file;
+                const target=deliveryPath(cwd,root,normalized);
+                if(this.#delivered.has(target.path))return;
+                if(this.#delivered.size>=5)throw Error('До 5 файлов за ответ. Попроси собрать архив.');
+                const worker=workerFor(userId);
+                const result=await readDelivery('python3',[new URL('../../gpt/deliver-file.py',import.meta.url).pathname,target.root,target.name],{uid:worker.uid,gid:worker.gid,encoding:'buffer',maxBuffer:50*1024*1024});
+                if(!this.#deps.output.documentBytes)throw Error('Отправка вложений недоступна');
+                await this.#deps.output.documentBytes(result.stdout,target.name.split('/').pop()!);
+                this.#delivered.add(target.path);
+  }
+
   async #offerArtifacts(): Promise<void> {
     const before = this.#before;
     this.#before = null;
@@ -918,30 +990,26 @@ export class Conversation {
     // папке что-то большое произошло.
     if (report.bulk) {
       await this.#deps.output.send(
-        `📁 В проекте изменилось ${report.total} файлов — похоже на клон или сборку, в чат не тащу. Нужен конкретный: /file &lt;путь&gt;`,
+        `📁 В проекте изменилось ${report.total} файлов — похоже на клон или сборку, в чат не тащу. Напиши, какой файл прислать.`,
       );
       return;
     }
 
-    const files = report.files;
+    const files = report.files.filter(f=>!this.#delivered.has(f.absolute));
     if (files.length === 0) return;
 
     // Сыпать в чат десяток файлов подряд — шум. Один-два отдаём сразу,
     // остальные перечисляем: забрать можно командой /file.
-    const send = files.slice(0, 2);
+    const send = files.slice(0, Math.min(2,5-this.#delivered.size));
     for (const file of send) {
-      await this.#deps.output.document(
-        file.absolute,
-        `${file.isNew ? "🆕" : "✏️"} <code>${esc(file.relative)}</code> · ${formatSize(file.size)}`,
-        file.relative.split("/").pop(),
-      );
+      try{await this.#deliverArtifact(file.absolute);}catch{await this.#deps.output.send('Не удалось прикрепить файл. Напиши его название, чтобы повторить отправку.');}
     }
 
-    const rest = files.slice(2);
+    const rest = files.slice(send.length);
     if (rest.length > 0) {
       const list = rest.map((f) => `• <code>${esc(f.relative)}</code> · ${formatSize(f.size)}`);
       await this.#deps.output.send(
-        `Ещё изменилось:\n${list.join("\n")}\n\nЗабрать: /file &lt;путь&gt;`,
+        `Ещё изменилось:\n${list.join("\n")}\n\nНапиши «пришли» и название файла.`,
       );
     }
   }
@@ -959,7 +1027,10 @@ export class Conversation {
 
     const parts = [summary];
     if (steps.length > 0) {
-      const shown = steps.slice(0, MAX_STEPS).map((step) => `- [x] ${step}`);
+      const shown = steps.slice(0, MAX_STEPS).map((step) => {
+        const done = this.#stepResults.get(step.id);
+        return `${done === true ? "- [x]" : "- [ ]"} ${done === false ? "⚠️ " : done === undefined ? "⏸ " : ""}${step.label}`;
+      });
       if (steps.length > MAX_STEPS) shown.push(`- …и ещё ${steps.length - MAX_STEPS}`);
       parts.push(details(`☑️ Шаги (${steps.length})`, shown.join("\n")));
     }
@@ -982,14 +1053,18 @@ export class Conversation {
 
   #lastRender = 0;
   async #renderActivity(force = false): Promise<void> {
-    // Telegram душит частые правки сообщений; полторы секунды — безопасный шаг.
     const now = Date.now();
-    if (!force && now - this.#lastRender < 1500) return;
+    if (!this.#busy || this.#closed || this.#renderingActivity || (!force && now - this.#lastRender < 1500)) return;
     this.#lastRender = now;
-    const tail = this.#activity.slice(-6);
-    const more = this.#activity.length - tail.length;
-    const head = more > 0 ? `<i>…ещё ${more} шаг(ов)</i>\n` : "";
-    await this.#deps.output.status(`${head}${tail.join("\n")}`);
+    this.#renderingActivity = true;
+    try {
+      const recent = this.#activity.slice(-4);
+      const selected = this.#activeModel ?? claudePreferences(this.#deps.userId).model;
+      const info = claudeModels(this.#deps.userId).find(m => m.value === selected || m.resolvedModel === selected);
+      const label = info ? claudeModelLabel(info).replace(/^По умолчанию · /, "") : selected === "default" ? "Claude Code" : selected;
+      const heading = `✨ <b>${esc(label)}</b> · ${formatDuration(now - this.#turnStarted)}`;
+      await this.#deps.output.status(`${heading}\n\n${recent.length ? recent.join("\n") : "✍️ Готовлю ответ…"}`);
+    } finally { this.#renderingActivity = false; }
   }
 }
 

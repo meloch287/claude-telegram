@@ -1,9 +1,15 @@
-import { catSvg, claudeStar } from "./cat-art.js";
+import {engine,modeStorage,modeHeaders,migrateOwnWorld} from "./mode-scope.js";
+import { renderPersonalQuota } from "./accounting.js?v=20261003-admin19";
+import { revealPage } from "./loading.js?v=20261009-state9";
+import { lastSection, rememberSection, prepareNavigation } from "./navigation.js?v=20261009-unified1";
+import { fetchJson } from "./network.js";
+import { catSvg, gptMark } from "./cat-art.js?v=20261002-cats5";
 import { achievementSvg } from "./achievement-art.js";
 import { createWorld, RACES, TERRAIN_TOOLS, MAPS, renderPreview, W, H } from "./world.js";
 import { icon } from "./icons.js";
 import { createCloud } from "./cloud.js";
 
+function modeMark(size){return engine === "gpt" ? gptMark(size) : `<img src="./claude.svg" width="${size}" height="${size}" alt="" aria-hidden="true">`;}
 const tg = window.Telegram?.WebApp;
 const nf = new Intl.NumberFormat("ru-RU");
 
@@ -154,6 +160,12 @@ window.addEventListener("pointerdown", () => (keyboardUser = false), true);
 const RING = 2 * Math.PI * 54;
 
 function render(profile) {
+  document.documentElement.dataset.engine = engine;
+  for(const link of document.querySelectorAll('a[href="./modes.html"]')){const target=new URL(link.href);target.hash=location.hash;link.href=target.href;}
+  document.querySelector("#bot-home-link").setAttribute("aria-label",engine === "claude" ? "Назад к Клод боту" : "Назад к GPT боту");
+  document.querySelector('a[data-section="admin"]').hidden = !profile.capabilities?.management;
+  if (!profile.capabilities?.management && !["cats", "world"].includes(lastSection()))
+    rememberSection("cats");
   const { cat, cats, achievements, totals, today, model, bot } = profile;
 
   el("plan-line").textContent = model?.label ? `✦ ${model.label.split(" — ")[0]}` : "";
@@ -197,6 +209,7 @@ function render(profile) {
   }, 60);
 
   renderStats(bot, totals, today);
+  void loadPersonalQuota();
   renderChart(profile.usageByDay ?? []);
   renderCoop(profile.coop ?? []);
   renderCats(cats, cat);
@@ -240,8 +253,8 @@ function renderStats(bot, totals, today) {
     const badge = document.createElement("span");
     badge.className = "stat-icon";
     badge.setAttribute("aria-hidden", "true");
-    // У главной цифры — фирменная звезда Claude, у остальных — эмодзи.
-    if (item.wide) badge.innerHTML = claudeStar(24);
+    // У главной цифры — фирменная звезда GPT, у остальных — эмодзи.
+    if (item.wide) badge.innerHTML = modeMark(24);
     else badge.append(text(item.icon));
 
     const body = document.createElement("div");
@@ -260,9 +273,19 @@ function renderStats(bot, totals, today) {
       const b = document.createElement("b");
       b.append(text(`+${short(item.side)}`));
       const s = document.createElement("span");
-      s.append(text("сегодня"));
+      s.append(text("сегодня · UTC"));
+      side.title = "Вход + выход, включая кеш.";
+      if (today.unverifiedTokens) {
+        side.title += ` Старые записи на ${nf.format(today.unverifiedTokens)} токенов не подтверждены журналами и исключены из итога.`;
+      }
       side.append(b, s);
       li.append(side);
+      if (today.unverifiedTokens) {
+        const note = document.createElement("p");
+        note.className = "stat-accounting-note";
+        note.textContent = "Старые неподтверждённые записи исключены из счётчика.";
+        li.append(note);
+      }
     }
 
     list.append(li);
@@ -281,7 +304,7 @@ function renderCats(cats, current) {
   rail.replaceChildren();
   let currentCard = null;
 
-  cats.forEach((item, index) => {
+  cats.forEach((item) => {
     const li = document.createElement("li");
     const isCurrent = item.level === current.level;
     li.className = `cat-card${item.unlocked ? "" : " cat-card--locked"}${isCurrent ? " cat-card--current" : ""}`;
@@ -293,9 +316,7 @@ function renderCats(cats, current) {
     const art = document.createElement("div");
     art.className = "cat-art";
     // Живые вразнобой: одинаковый такт у десятка котов читается как дребезг.
-    art.innerHTML = catSvg(item, 72, { animated: item.unlocked });
-    const sprite = art.firstElementChild;
-    if (sprite) sprite.style.animationDelay = -(index % 5) * 0.9 + "s";
+    art.innerHTML = catSvg(item, 72, { animated: true });
 
     const level = document.createElement("span");
     level.className = "cat-card-level";
@@ -376,13 +397,15 @@ function renderAchievements(achievements) {
 let world = null;
 
 function setupTabs() {
+  prepareNavigation("cats");
   const tabs = [el("tab-cat"), el("tab-city")];
   const panels = [el("main"), el("panel-city")];
   const segmented = document.querySelector(".segmented");
   let current = -1;
 
-  const select = (index, animate = true) => {
+  const applySelection = (index) => {
     if (index === current) return;
+    if(current!==-1)window.gptNavigation.capture();
     const from = current;
     current = index;
     tabs.forEach((tab, i) => {
@@ -395,18 +418,9 @@ function setupTabs() {
     document.documentElement.classList.toggle("on-city", index === 1);
 
     const panel = panels[index];
-    if (animate && from !== -1 && !reduceMotion) {
-      panel.dataset.from = index > from ? "right" : "left";
-      panel.classList.remove("is-entering");
-      void panel.offsetWidth;
-      panel.classList.add("is-entering");
-      panel.addEventListener("animationend", () => panel.classList.remove("is-entering"), {
-        once: true,
-      });
-    }
     if (from !== -1) window.scrollTo(0, 0);
 
-    el("page-title").textContent = index === 0 ? "Мой Claude-кот" : "Мой мир";
+    el("page-title").textContent = index === 0 ? "Мой кот" : "Мой мир";
     if (index === 1) world?.start();
     else world?.stop();
 
@@ -426,10 +440,15 @@ function setupTabs() {
     }
     if (from !== -1) haptic("selection");
     try {
-      localStorage.setItem("tab", String(index));
+      rememberSection(index === 1 ? "world" : "cats");
     } catch {
       /* ничего */
     }
+  };
+
+  const select = (index, animate = true) => {
+    if(index===current)return;
+    return window.aiMotion.change(()=>applySelection(index),{animate:animate && current!==-1,target:()=>panels[index]});
   };
 
   tabs.forEach((tab, i) => {
@@ -445,7 +464,7 @@ function setupTabs() {
 
   let remembered = 0;
   try {
-    remembered = Number(localStorage.getItem("tab") || 0);
+    remembered = lastSection() === "world" ? 1 : 0;
   } catch {
     /* ничего */
   }
@@ -769,7 +788,7 @@ function rankFor(done) {
 function createQuests(storeKey, onDone) {
   let done = new Set();
   try {
-    done = new Set(JSON.parse(localStorage.getItem(storeKey) || "[]"));
+    done = new Set(JSON.parse(modeStorage.getItem(storeKey) || "[]"));
   } catch {
     /* начнём с нуля */
   }
@@ -814,7 +833,7 @@ function createQuests(storeKey, onDone) {
     }
     if (changed) {
       try {
-        localStorage.setItem(storeKey, JSON.stringify([...done]));
+        modeStorage.setItem(storeKey, JSON.stringify([...done]));
       } catch {
         /* не сохранилось — пересчитаем */
       }
@@ -841,7 +860,7 @@ function setupCity(profile) {
   const seed = visiting ? visiting.seed : (profile.world?.seed ?? 1);
   let mapId = "island";
   try {
-    mapId = visiting ? visiting.map : localStorage.getItem(`world:map:${seed}`) || "island";
+    mapId = visiting ? visiting.map : modeStorage.getItem(`world:map:${seed}`) || "island";
   } catch {
     /* ничего */
   }
@@ -1061,9 +1080,9 @@ function setupCity(profile) {
     // Чужой остров в рейтинг под своим именем не пишем.
     if (!initData || visiting) return;
     try {
-      await fetch("/api/world-score", {
+      await fetch("./api/world-score", {
         method: "POST",
-        headers: { "content-type": "application/json", "X-Telegram-Init-Data": initData },
+        headers: { "content-type": "application/json", "X-Telegram-Init-Data": initData, "X-Bot-Engine": engine },
         body: JSON.stringify({
           score: h.score,
           pop: h.pop,
@@ -1080,9 +1099,9 @@ function setupCity(profile) {
 
   const sendTo = async (row, kind, amount) => {
     try {
-      const r = await fetch("/api/world-send", {
+      const r = await fetch("./api/world-send", {
         method: "POST",
-        headers: { "content-type": "application/json", "X-Telegram-Init-Data": tg.initData },
+        headers: { "content-type": "application/json", "X-Telegram-Init-Data": tg.initData, "X-Bot-Engine": engine },
         body: JSON.stringify({ id: row.id, kind, amount }),
       });
       if (r.ok) return "ok";
@@ -1144,7 +1163,7 @@ function setupCity(profile) {
     };
     if (row.visitable)
       button("👀", "В гости", () => {
-        location.href = `${location.pathname}?visit=${encodeURIComponent(row.id)}`;
+        location.href = `${location.pathname}?engine=${engine}&visit=${encodeURIComponent(row.id)}${location.hash}`;
       });
     button("🎁", "Подарить котов", () => gift(row));
     button("🏴‍☠️", "Послать пиратов", () => raidOn(row));
@@ -1160,7 +1179,7 @@ function setupCity(profile) {
       return;
     }
     try {
-      const r = await fetch("/api/world-top", { headers: { "X-Telegram-Init-Data": initData } });
+      const r = await fetch("./api/world-top", { headers: modeHeaders(initData) });
       const data = await r.json();
       box.replaceChildren();
       const head = document.createElement("div");
@@ -1198,7 +1217,7 @@ function setupCity(profile) {
   const buildStory = () => {
     const h = lastHud || {};
     const lines = [
-      `Мой мир №${seed % 10000} в Claude-боте: день ${h.day ?? 1}, эра «${h.eraName ?? "Начало"}», ${h.season ?? ""}.`,
+      `Мой мир №${seed % 10000} в GPT-боте: день ${h.day ?? 1}, эра «${h.eraName ?? "Начало"}», ${h.season ?? ""}.`,
     ];
     lines.push(`Котов: ${h.pop ?? 0}. Достижений: ${(h.ach || []).length}.`);
     if (h.kings?.length)
@@ -1445,8 +1464,17 @@ function setupCity(profile) {
   el("zoom-out").addEventListener("click", () => zoomStep(-1));
   // Скрытая вкладка имеет нулевую ширину: пересчитываем, как только рамка
   // получила размер — при показе вкладки, повороте экрана, смене окна.
-  if ("ResizeObserver" in window) new window.ResizeObserver(() => layoutStage()).observe(viewport);
-  else window.addEventListener("resize", layoutStage);
+  if ("ResizeObserver" in window) {
+    let layoutQueued = false;
+    new window.ResizeObserver(() => {
+      if (layoutQueued) return;
+      layoutQueued = true;
+      window.requestAnimationFrame(() => {
+        layoutQueued = false;
+        if (viewport.isConnected) layoutStage();
+      });
+    }).observe(viewport);
+  } else window.addEventListener("resize", layoutStage);
   layoutStage();
 
   const local = (e) => {
@@ -1886,7 +1914,7 @@ function setupCity(profile) {
       }
       const go = () => {
         try {
-          localStorage.setItem(`world:map:${seed}`, m.id);
+          modeStorage.setItem(`world:map:${seed}`, m.id);
         } catch {
           /* ничего */
         }
@@ -2004,7 +2032,7 @@ function сообщить(текст, заголовок) {
 }
 
 function setupShare(profile) {
-  const line = `Мой Claude-кот: ${profile.cat.name} (уровень ${profile.cat.level}/10), ${nf.format(profile.totals.tokens)} токенов`;
+  const line = `Мой кот: ${profile.cat.name} (уровень ${profile.cat.level}/10), ${nf.format(profile.totals.tokens)} токенов`;
 
   const share = () => {
     haptic("light");
@@ -2030,7 +2058,7 @@ function setupShare(profile) {
   if (inTelegram && tg.MainButton) {
     tg.MainButton.setParams({
       text: "Поделиться котом",
-      color: "#D97757",
+      color: "#10A37F",
       text_color: "#FFFFFF",
       ...(can("7.10") ? { has_shine_effect: true } : {}),
     });
@@ -2046,11 +2074,11 @@ function setupShare(profile) {
 }
 
 function fail(message) {
-  el("loading").hidden = true;
   el("error").hidden = false;
   el("error-text").textContent = message;
-  el("error-art").innerHTML = claudeStar(72);
+  el("error-art").innerHTML = modeMark(72);
   el("error-retry").addEventListener("click", () => location.reload(), { once: true });
+  revealPage();
 }
 
 /**
@@ -2064,8 +2092,9 @@ async function loadVisit(initData) {
   const id = new URLSearchParams(location.search).get("visit");
   if (!id) return null;
   try {
-    const r = await fetch(`/api/world-visit?id=${encodeURIComponent(id)}`, {
-      headers: { "X-Telegram-Init-Data": initData },
+    const r = await fetch(`./api/world-visit?id=${encodeURIComponent(id)}`, {
+      signal: window.AbortSignal.timeout(8000),
+      headers: modeHeaders(initData),
     });
     if (!r.ok) return null;
     const island = await r.json();
@@ -2111,9 +2140,9 @@ async function welcomeBack(world) {
   }
   if (tg?.initData) {
     try {
-      const r = await fetch("/api/world-claim", {
+      const r = await fetch("./api/world-claim", {
         method: "POST",
-        headers: { "X-Telegram-Init-Data": tg.initData },
+        headers: { "X-Telegram-Init-Data": tg.initData, "X-Bot-Engine": engine },
       });
       if (r.ok) lines.push(...world.receive(await r.json()));
     } catch {
@@ -2155,12 +2184,11 @@ async function welcomeBack(world) {
 let cloud = createCloud(null);
 
 async function loadDemo() {
-  const response = await fetch("/demo-profile.json");
+  const response = await fetch("./demo-profile.json");
   return response.json();
 }
 
 function show() {
-  el("loading").hidden = true;
   el("app").hidden = false;
 }
 
@@ -2175,8 +2203,10 @@ async function main() {
 
   if (new URLSearchParams(location.search).has("demo")) {
     const profile = await loadDemo();
+    document.title = profile.engine === "claude" ? "Клод бот · Статистика" : "GPT бот · Статистика";
     show();
     render(profile);
+    revealPage();
     return;
   }
 
@@ -2188,39 +2218,32 @@ async function main() {
 
   // Копию мира забираем параллельно с профилем: к созданию мира она должна
   // уже лежать в localStorage, а лишнего ожидания на открытии не хочется.
-  cloud = createCloud(initData);
-  const pulling = cloud.pull();
+  cloud = createCloud(initData, modeStorage, engine);
   const visitLoading = loadVisit(initData);
 
   try {
-    const response = await fetch("/api/profile", {
-      headers: { "X-Telegram-Init-Data": initData },
+    const profile = await fetchJson("./api/profile", {
+      headers: modeHeaders(initData),
     });
-    if (!response.ok) {
-      fail(
-        response.status === 401
-          ? "Telegram не подтвердил, что это ты. Открой мини-апп заново из бота."
-          : `Сервер ответил ошибкой ${response.status}.`,
-      );
-      return;
-    }
-    const profile = await response.json();
-    await pulling;
+    migrateOwnWorld(profile.world.seed);
+    await cloud.pull();
     cloud.start();
     visiting = await visitLoading;
     if (!visiting && new URLSearchParams(location.search).has("visit"))
-      window.history.replaceState(null, "", location.pathname);
+      window.history.replaceState(null, "", location.pathname+"?engine="+engine);
     // Показываем до отрисовки: размеры контейнеров (график, лента котов)
     // нужны уже в render, а у скрытых они нулевые.
+    document.title = profile.engine === "claude" ? "Клод бот · Статистика" : "GPT бот · Статистика";
     show();
     render(profile);
+    revealPage();
   } catch (error) {
     fail("Не получилось загрузить профиль. Проверь соединение и попробуй ещё раз.");
     console.error(error);
   }
 }
 
-void main();
+void main().catch(() => fail("Не удалось открыть мини-апп. Нажми «Попробовать ещё раз»."));
 
 /* ── График расхода по дням ───────────────────────────────────────────────
    Расход за сутки — величина за дискретный период, это столбцы, а не линия.
@@ -2491,3 +2514,26 @@ function renderCoop(members) {
     list.append(li);
   }
 }
+
+async function loadPersonalQuota() {
+  if(engine!=="gpt")return;
+  let box = document.getElementById("personal-quota");
+  if (!box) {
+    box = document.createElement("section");
+    box.id = "personal-quota";
+    box.className = "personal-quota";
+    document.getElementById("stats").after(box);
+  }
+  try {
+    const q = await fetchJson("./api/gpt/quota", {
+      headers: { "x-telegram-init-data": window.Telegram?.WebApp?.initData || "" },
+    });
+    renderPersonalQuota(box, q);
+  } catch {
+    box.hidden = true;
+  }
+}
+
+setInterval(() => {
+  if (!document.hidden && document.getElementById("personal-quota")) void loadPersonalQuota();
+}, 60000);

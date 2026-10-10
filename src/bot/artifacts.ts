@@ -1,5 +1,5 @@
-import { readdirSync, statSync } from "node:fs";
-import { join, relative, sep } from "node:path";
+import { readdirSync, lstatSync,openSync,closeSync,constants,realpathSync } from "node:fs";
+import { join, relative, sep,resolve } from "node:path";
 
 /**
  * Что агент создал за время задачи.
@@ -30,34 +30,19 @@ export type Snapshot = Map<string, number>;
 
 export function snapshot(root: string): Snapshot {
   const seen: Snapshot = new Map();
-  walk(root, root, seen);
+  try{if(realpathSync(root)!==resolve(root))return seen;walk(root, root, seen);}catch{}
   return seen;
 }
 
-function walk(root: string, dir: string, into: Snapshot): void {
-  if (into.size >= MAX_ENTRIES) return;
-  let entries: string[];
-  try {
-    entries = readdirSync(dir);
-  } catch {
-    return;
-  }
-  for (const entry of entries) {
-    if (SKIP.has(entry)) continue;
-    const path = join(dir, entry);
-    let info;
-    try {
-      info = statSync(path);
-    } catch {
-      continue;
-    }
-    if (info.isDirectory()) {
-      walk(root, path, into);
-    } else {
-      into.set(relative(root, path), info.mtimeMs);
-    }
-    if (into.size >= MAX_ENTRIES) return;
-  }
+function walk(root: string, dir: string, into: Snapshot, logical=dir): void {
+ if(into.size>=MAX_ENTRIES)return;
+ let fd:number;try{fd=openSync(dir,constants.O_RDONLY|constants.O_DIRECTORY|constants.O_NOFOLLOW)}catch{return}
+ try{for(const entry of readdirSync(`/proc/self/fd/${fd}`)){
+  if(SKIP.has(entry))continue;
+  const pinned=`/proc/self/fd/${fd}/${entry}`,path=join(logical,entry);
+  try{const info=lstatSync(pinned);if(info.isSymbolicLink())continue;if(info.isDirectory())walk(root,pinned,into,path);else if(info.isFile()&&info.nlink===1)into.set(relative(root,path),info.mtimeMs)}catch{}
+  if(into.size>=MAX_ENTRIES)return;
+ }}finally{closeSync(fd)}
 }
 
 export interface Artifact {
@@ -69,7 +54,7 @@ export interface Artifact {
 }
 
 /** Телеграм не принимает от ботов файлы больше пятидесяти мегабайт. */
-const MAX_SEND_BYTES = 50 * 1024 * 1024;
+const MAX_SEND_BYTES = 49 * 1024 * 1024;
 
 /**
  * Порог «это не результат, а массовая операция».
@@ -107,7 +92,7 @@ export function reportChanges(root: string, before: Snapshot, limit = 10): Chang
     const absolute = join(root, path);
     let size: number;
     try {
-      size = statSync(absolute).size;
+      const info=lstatSync(absolute);if(!info.isFile()||info.nlink!==1)continue;size=info.size;
     } catch {
       continue;
     }

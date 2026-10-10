@@ -1,3 +1,5 @@
+import { getModeData } from "./db.js";
+import type { Mode } from "./mode-data.js";
 import { ACHIEVEMENTS, CAT_LEVELS, catForTokens } from "./cats.js";
 import {
   getOrCreateUser,
@@ -16,8 +18,8 @@ export interface UnlockedAchievement {
 
 const BY_ID = new Map(ACHIEVEMENTS.map((a) => [a.id, a]));
 
-function grant(userId: number, id: string, out: UnlockedAchievement[]): void {
-  if (!unlockAchievement(userId, id)) return;
+function grant(userId: number, id: string, out: UnlockedAchievement[], engine: Mode = "claude"): void {
+  if (!getModeData(engine).unlock(userId, id)) return;
   const achievement = BY_ID.get(id);
   if (achievement) out.push(achievement);
 }
@@ -34,37 +36,37 @@ export type AchievementEvent =
  * Проверяет условия после события и возвращает то, что открылось прямо сейчас.
  * Возвращает только новые ачивки — их бот показывает пользователю.
  */
-export function checkAchievements(userId: number, event: AchievementEvent): UnlockedAchievement[] {
+export function checkAchievements(userId: number, event: AchievementEvent, engine: Mode = "claude"): UnlockedAchievement[] {
   const unlocked: UnlockedAchievement[] = [];
-  const user = getOrCreateUser(userId);
+  const user = getModeData(engine).stats(userId);
 
   switch (event.type) {
     case "message": {
-      grant(userId, "first_blood", unlocked);
-      if (event.hour >= 2 && event.hour < 5) grant(userId, "night_owl", unlocked);
-      if (user.total_messages >= 100) grant(userId, "hundred_msgs", unlocked);
-      const streak = touchStreak(userId);
-      if (streak >= 7) grant(userId, "streak_7", unlocked);
+      grant(userId, "first_blood", unlocked, engine);
+      if (event.hour >= 2 && event.hour < 5) grant(userId, "night_owl", unlocked, engine);
+      if (user.total_messages >= 100) grant(userId, "hundred_msgs", unlocked, engine);
+      const streak = getModeData(engine).streak(userId);
+      if (streak >= 7) grant(userId, "streak_7", unlocked, engine);
       break;
     }
     case "tool": {
       if (event.allowed) {
-        grant(userId, "first_tool", unlocked);
-        if (event.toolName === "Bash") grant(userId, "first_bash", unlocked);
+        grant(userId, "first_tool", unlocked, engine);
+        if (event.toolName === "Bash") grant(userId, "first_bash", unlocked, engine);
         if (event.toolName === "Edit" || event.toolName === "Write") {
-          grant(userId, "first_edit", unlocked);
+          grant(userId, "first_edit", unlocked, engine);
         }
       } else {
-        grant(userId, "first_deny", unlocked);
+        grant(userId, "first_deny", unlocked, engine);
       }
       break;
     }
     case "interrupt":
-      grant(userId, "interrupter", unlocked);
+      grant(userId, "interrupter", unlocked, engine);
       break;
     case "project": {
-      const count = seeProject(userId, event.project);
-      if (count >= 3) grant(userId, "polyglot", unlocked);
+      const count = getModeData(engine).project(userId, event.project);
+      if (count >= 3) grant(userId, "polyglot", unlocked, engine);
       break;
     }
     case "usage":
@@ -72,17 +74,17 @@ export function checkAchievements(userId: number, event: AchievementEvent): Unlo
   }
 
   // Пороговые ачивки проверяем после любого события — расход мог измениться.
-  if (user.total_tokens >= 1_000_000) grant(userId, "million", unlocked);
+  if (user.total_tokens >= 1_000_000) grant(userId, "million", unlocked, engine);
   const maxLevel = CAT_LEVELS[CAT_LEVELS.length - 1]!;
   if (catForTokens(user.total_tokens).level === maxLevel.level) {
-    grant(userId, "max_cat", unlocked);
+    grant(userId, "max_cat", unlocked, engine);
   }
 
   return unlocked;
 }
 
-export function unlockedIds(userId: number): Set<string> {
-  return new Set(listAchievements(userId).map((row) => row.achievement));
+export function unlockedIds(userId: number, engine: Mode = "claude"): Set<string> {
+  return new Set(getModeData(engine).achievements(userId).map((row) => row.achievement));
 }
 
 export function renderUnlocked(items: UnlockedAchievement[]): string {

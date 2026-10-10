@@ -1,0 +1,29 @@
+[Unit]
+Description=AI Mini App Cloudflare entrance through the guarded proxy
+Requires=ai-bot-proxy.service nftables.service
+BindsTo=ai-bot-proxy.service
+Wants=caddy.service
+After=network-online.target ai-bot-proxy.service nftables.service caddy.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/ai-bot/app
+ExecStartPre=/usr/local/libexec/ai-bot-proxy/guard-health
+ExecStart=/usr/bin/python3 /opt/ai-bot/app/scripts/miniapp-tunnel.py
+Restart=always
+RestartSec=10
+TimeoutStartSec=90
+TimeoutStopSec=20
+KillMode=mixed
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/ai-bot/data
+MemoryMax=256M
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target ai-bot-proxy.service

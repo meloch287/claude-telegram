@@ -1,17 +1,24 @@
+import { isAdmin } from "../admin.js";
+import { getModeData } from "../db.js";
+import type { Mode } from "../mode-data.js";
+import { checkAchievements } from "../achievements.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createHash, createHmac } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { extname, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { handleModesApi } from "./modes-api.js";
+import { engineFor } from "../engine.js";
+import { claudePreferences, claudeModels } from "../claude-settings.js";
 import { config } from "../config.js";
 import { verifyInitData } from "../crypto.js";
 import {
   getOrCreateUser,
+  isGptUserAllowed,
   getUsageToday,
+  getUnverifiedTokens,
   listAchievements,
   listRateLimits,
-  coopMembers,
-  payerFor,
   quotaLeft,
   usageByDay,
   usageSince,
@@ -27,7 +34,7 @@ import {
   WORLD_SEND_KINDS,
   type WorldSendKind,
 } from "../db.js";
-import { ACHIEVEMENTS, CAT_LEVELS, catForTokens, catProgress, nextCat } from "../cats.js";
+import { ACHIEVEMENTS, CAT_LEVELS, catForTokens, catProgress, nextCat, catForMode } from "../cats.js";
 import { MODELS } from "../bot/keyboards.js";
 import { limitTitle, percentOf, toMillis, WINDOWS } from "../limits.js";
 import { subscriptionUsage } from "../subscription-usage.js";
@@ -63,7 +70,7 @@ function authenticate(initData: string | null): number | null {
   if (!params) return null;
   try {
     const user = JSON.parse(params.user ?? "{}") as { id?: number };
-    return typeof user.id === "number" ? user.id : null;
+    return typeof user.id === "number" && isGptUserAllowed(user.id) ? user.id : null;
   } catch {
     return null;
   }
@@ -113,8 +120,8 @@ function buildLimits(userId: number) {
         ms === null
           ? null
           : {
-              subscription: subscriptionUsage(ms),
-              bot: usageSince(userId, ms),
+              subscription: subscriptionUsage(ms, userId),
+              bot: getModeData("claude").since(userId, ms),
             },
       /**
        * Потолок окна и доля от него. Именно это показывается как «X из 100%»,
@@ -122,7 +129,8 @@ function buildLimits(userId: number) {
        * иначе процент был бы выдуман молча.
        */
       ceiling: ms === null ? 0 : ceilingFor(type),
-      ownPercent: ms === null ? null : percentOf(subscriptionUsage(ms).tokens, ceilingFor(type)),
+      ownPercent:
+        ms === null ? null : percentOf(subscriptionUsage(ms, userId).tokens, ceilingFor(type)),
     };
   };
 
@@ -133,24 +141,29 @@ function buildLimits(userId: number) {
 }
 
 /** Число в 31 бит из id: мир одного человека всегда один и тот же. */
-function worldSeed(userId: number): number {
-  const digest = createHash("sha1").update(`world:${userId}`).digest();
+function worldSeed(userId: number, engine: Mode = "gpt"): number {
+  const digest = createHash("sha1").update(engine === "gpt" ? `world:${userId}` : `world:claude:${userId}`).digest();
   return digest.readUInt32BE(0) & 0x7fffffff;
 }
 
-function profilePayload(userId: number) {
-  const user = getOrCreateUser(userId);
-  const cat = catForTokens(user.total_tokens);
-  const next = nextCat(user.total_tokens);
-  const unlocked = new Set(listAchievements(userId).map((row) => row.achievement));
-  const today = getUsageToday(userId);
+function profilePayload(userId: number, engine: Mode = "gpt") {
+  const mode = getModeData(engine);
+  const user = {...getOrCreateUser(userId),...mode.stats(userId)};
+  checkAchievements(userId,{type:"usage"},engine);
+  const cat = catForMode(catForTokens(user.total_tokens),engine);
+  const nextRaw = nextCat(user.total_tokens);
+  const next = nextRaw ? catForMode(nextRaw,engine) : null;
+  const unlocked = new Set(mode.achievements(userId).map((row) => row.achievement));
+  const today = mode.daily(userId,1)[0]!;
 
   return {
+    engine,
+    capabilities: { management: isAdmin(userId) },
     model: {
-      id: user.model ?? "",
+      id: engine === "claude" ? claudePreferences(userId).model : user.model ?? "",
       // Ярлык берём из того же списка, что показывает бот в /model, — чтобы
       // мини-апп и чат не разошлись в названиях.
-      label: MODELS.find(([id]) => id === (user.model ?? ""))?.[1] ?? user.model ?? "По умолчанию",
+      label: engine === "claude" ? (claudeModels(userId).find(m => m.value === claudePreferences(userId).model)?.displayName ?? "Claude Code") : user.model ?? "GPT",
     },
     totals: {
       tokens: user.total_tokens,
@@ -161,10 +174,10 @@ function profilePayload(userId: number) {
       toolsDenied: user.tools_denied,
       streakDays: user.streak_days,
     },
-    today: { tokens: today.tokens },
+    today: { tokens: today.tokens, unverifiedTokens: engine === "gpt" ? getUnverifiedTokens(userId) : 0 },
     // Две недели — столько столбиков читается на телефоне без сжатия в кашу.
     // Ряд приходит сплошным, с нулями за дни простоя.
-    usageByDay: usageByDay(userId, 14),
+    usageByDay: mode.daily(userId, 14),
     /**
      * Расход бота отдельно от импортированной истории: деньги известны только
      * за то, что бот сделал сам, и рядом с токенами за всю жизнь выглядели бы
@@ -192,7 +205,7 @@ function profilePayload(userId: number) {
       nextThreshold: next?.threshold ?? null,
       nextName: next?.name ?? null,
     },
-    cats: CAT_LEVELS.map((c) => ({
+    cats: CAT_LEVELS.map(c=>catForMode(c,engine)).map((c) => ({
       level: c.level,
       id: c.id,
       name: c.name,
@@ -209,10 +222,10 @@ function profilePayload(userId: number) {
      * Сид острова для вкладки «Мой город». Не сам user_id: он бы утёк в
      * localStorage и в адрес картинки, а перемешанный — просто число.
      */
-    world: { seed: worldSeed(userId) },
+    world: { seed: worldSeed(userId, engine) },
     // Своя квота: null — ограничения нет, и это умолчание.
     quota: quotaLeft(userId),
-    limits: buildLimits(userId),
+    limits: engine === "claude" ? buildLimits(userId) : [],
     /**
      * Кооп: кто работает на одной подписке. Показываем только своих —
      * плательщика и позванных им. Чужие подписки друг друга не видят.
@@ -220,13 +233,13 @@ function profilePayload(userId: number) {
      * Кот у каждого свой: он считается от собственного расхода, а не от общего.
      * Поэтому таблица честная — видно, кто сколько потратил, а не кто чей гость.
      */
-    coop: coopMembers(userId).map((member) => {
-      const cat = catForTokens(member.total_tokens);
+    coop: [user].map((member) => {
+      const cat = catForMode(catForTokens(member.total_tokens),engine);
       return {
         id: member.user_id,
         name: member.display_name,
         isYou: member.user_id === userId,
-        isPayer: member.user_id === payerFor(userId),
+        isPayer: true,
         tokens: member.total_tokens,
         // Через бота — без импортированной истории: сравнивать людей по чужому
         // импорту бессмысленно, у кого-то его просто нет.
@@ -280,13 +293,14 @@ async function handleWorldSave(
   res: ServerResponse,
   url: URL,
   userId: number,
+  engine: Mode,
 ): Promise<void> {
   if (req.method === "GET") {
-    sendJson(res, 200, { items: listWorldSaves(userId) });
+    sendJson(res, 200, { items: getModeData(engine).listWorldSaves(userId) });
     return;
   }
   if (req.method === "DELETE") {
-    deleteWorldSave(userId, url.searchParams.get("key") ?? "");
+    getModeData(engine).deleteWorldSave(userId, url.searchParams.get("key") ?? "");
     sendJson(res, 200, { ok: true });
     return;
   }
@@ -296,6 +310,10 @@ async function handleWorldSave(
   }
   // Запас сверху на JSON-обёртку и экранирование кавычек внутри снимка.
   const raw = await readBody(req, WORLD_SAVE_MAX_BYTES * 2);
+  if (!isGptUserAllowed(userId)) {
+    sendJson(res, 401, { error: "access revoked" });
+    return;
+  }
   if (raw === null) {
     sendJson(res, 413, { error: "size" });
     return;
@@ -311,7 +329,7 @@ async function handleWorldSave(
     sendJson(res, 400, { error: "key and data must be strings" });
     return;
   }
-  const result = putWorldSave(userId, body.key, body.data);
+  const result = getModeData(engine).putWorldSave(userId, body.key, body.data);
   if ("error" in result) {
     sendJson(res, result.error === "size" ? 413 : result.error === "limit" ? 409 : 400, result);
     return;
@@ -323,25 +341,25 @@ async function handleWorldSave(
  * Остров в рейтинге узнаётся по непрозрачному id, а не по user_id: иначе из
  * мини-аппа утекали бы Telegram-id всех игроков.
  */
-function islandId(userId: number): string {
+function islandId(userId: number, engine: Mode): string {
   return createHmac("sha256", config.botToken)
-    .update(`island:${userId}`)
+    .update(engine === "gpt" ? `island:${userId}` : `island:claude:${userId}`)
     .digest("base64url")
     .slice(0, 12);
 }
 
-function islandOwner(id: string): { user_id: number; display_name: string | null } | null {
-  return topWorlds(1000).find((r) => islandId(r.user_id) === id) ?? null;
+function islandOwner(id: string, engine: Mode): { user_id: number; display_name: string | null } | null {
+  return getModeData(engine).topWorlds(1000).find((r) => islandId(r.user_id, engine) === id) ?? null;
 }
 
-function islandName(userId: number, displayName: string | null): string {
-  return displayName || `Остров №${worldSeed(userId) % 10000}`;
+function islandName(userId: number, displayName: string | null, engine: Mode): string {
+  return displayName || `Остров №${worldSeed(userId, engine) % 10000}`;
 }
 
 /** Снимок острова целиком из облачной копии: карта, на которой человек сейчас. */
-function islandSnapshot(userId: number): { seed: number; map: string; data: string } | null {
-  const seed = worldSeed(userId);
-  const saves = listWorldSaves(userId);
+function islandSnapshot(userId: number, engine: Mode): { seed: number; map: string; data: string } | null {
+  const seed = worldSeed(userId, engine);
+  const saves = getModeData(engine).listWorldSaves(userId);
   const map = saves.find((s) => s.key === `world:map:${seed}`)?.data || "island";
   // Версия формата — клиентская; берём самую свежую из тех, что есть.
   const pattern = new RegExp(`^world:v(\\d+):${seed}:${map}$`);
@@ -366,8 +384,13 @@ async function handleWorldSend(
   req: IncomingMessage,
   res: ServerResponse,
   userId: number,
+  engine: Mode,
 ): Promise<void> {
   const raw = await readBody(req, 4096);
+  if (!isGptUserAllowed(userId)) {
+    sendJson(res, 401, { error: "access revoked" });
+    return;
+  }
   let body: { id?: unknown; kind?: unknown; amount?: unknown };
   try {
     body = JSON.parse(raw ?? "") as typeof body;
@@ -376,23 +399,23 @@ async function handleWorldSend(
     return;
   }
   const kind = body.kind as WorldSendKind;
-  const owner = typeof body.id === "string" ? islandOwner(body.id) : null;
+  const owner = typeof body.id === "string" ? islandOwner(body.id, engine) : null;
   if (!WORLD_SEND_KINDS.includes(kind) || !owner) {
     sendJson(res, 400, { error: "unknown island or kind" });
     return;
   }
   const amount = Math.max(1, Math.min(kind === "gift" ? 5 : 3, Number(body.amount) || 1));
-  const result = sendToWorld(userId, owner.user_id, kind, amount);
+  const result = getModeData(engine).sendToWorld(userId, owner.user_id, kind, amount);
   if ("error" in result) {
     sendJson(res, result.error === "self" ? 400 : 429, result);
     return;
   }
   const me = getOrCreateUser(userId);
-  const from = islandName(userId, me.display_name);
-  const text =
+  const from = islandName(userId, me.display_name, engine);
+  const text = `${engine === "gpt" ? "GPT" : "Claude"} · ` + (
     kind === "gift"
       ? `🎁 С острова «${from}» к тебе плывут коты: ${amount}. Открой «Мой мир», чтобы встретить их.`
-      : `🏴‍☠️ Остров «${from}» отправил к тебе пиратов! Открой «Мой мир» — они уже у берегов.`;
+      : `🏴‍☠️ Остров «${from}» отправил к тебе пиратов! Открой «Мой мир» — они уже у берегов.`);
   void worldNotifier?.(owner.user_id, text).catch(() => undefined);
   sendJson(res, 200, { ok: true, amount });
 }
@@ -400,7 +423,7 @@ async function handleWorldSend(
 async function serveStatic(
   pathname: string,
 ): Promise<{ body: Buffer; type: string; etag: string } | null> {
-  const relative = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
+  const relative = pathname === "/" ? "modes.html" : pathname.replace(/^\/+/, "");
   // normalize + префиксная проверка: без них `../../etc/passwd` уехал бы наружу.
   const target = resolve(PUBLIC_DIR, normalize(relative));
   if (target !== PUBLIC_DIR && !target.startsWith(PUBLIC_DIR + "/")) return null;
@@ -415,9 +438,22 @@ async function serveStatic(
   }
 }
 
-export function startMiniAppServer(): void {
+let extraApiHandler: ((req: IncomingMessage, res: ServerResponse) => Promise<boolean>) | null =
+  null;
+export function setExtraApiHandler(
+  handler: (req: IncomingMessage, res: ServerResponse) => Promise<boolean>,
+): void {
+  extraApiHandler = handler;
+}
+
+export function startMiniAppServer(): ReturnType<typeof createServer> {
   const server = createServer(async (req, res) => {
+    const scope = req.headers["x-bot-engine"];
+    if(scope !== undefined && scope !== "gpt" && scope !== "claude"){sendJson(res,400,{error:"Неизвестный режим"});return;}
+    const requestEngine = (_uid:number):Mode => scope as Mode ?? "gpt";
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+    if (extraApiHandler && (await extraApiHandler(req, res))) return;
+    if (await handleModesApi(req, res)) return;
 
     /**
      * Проба для docker healthcheck. Без неё restart: unless-stopped спасает
@@ -443,6 +479,10 @@ export function startMiniAppServer(): void {
         raw += chunk;
         if (raw.length > 4096) break;
       }
+      if (!isGptUserAllowed(userId)) {
+        sendJson(res, 401, { error: "access revoked" });
+        return;
+      }
       try {
         const body = JSON.parse(raw || "{}") as {
           score?: number;
@@ -451,7 +491,7 @@ export function startMiniAppServer(): void {
           era?: number;
           seed?: number;
         };
-        recordWorldScore(userId, {
+        getModeData(requestEngine(userId)).recordWorldScore(userId, {
           score: Number(body.score) || 0,
           pop: Number(body.pop) || 0,
           day: Number(body.day) || 1,
@@ -475,10 +515,11 @@ export function startMiniAppServer(): void {
         res.end(JSON.stringify({ error: "invalid init data" }));
         return;
       }
-      const top = topWorlds(10).map((r, i) => ({
+      const engine = requestEngine(userId);
+      const top = getModeData(engine).topWorlds(10).map((r, i) => ({
         rank: i + 1,
-        id: islandId(r.user_id),
-        visitable: islandSnapshot(r.user_id) !== null,
+        id: islandId(r.user_id, engine),
+        visitable: islandSnapshot(r.user_id, engine) !== null,
         name: r.display_name || `Остров №${r.seed}`,
         score: r.score,
         pop: r.pop,
@@ -486,7 +527,7 @@ export function startMiniAppServer(): void {
         era: r.era,
         me: r.user_id === userId,
       }));
-      const rank = worldRank(userId);
+      const rank = getModeData(engine).worldRank(userId);
       res.writeHead(200, {
         "content-type": "application/json; charset=utf-8",
         "cache-control": "no-store",
@@ -499,27 +540,29 @@ export function startMiniAppServer(): void {
       const initData = req.headers["x-telegram-init-data"];
       const userId = authenticate(typeof initData === "string" ? initData : null);
       if (url.pathname === "/api/world-claim" && req.method === "POST" && userId !== null) {
-        const claim = claimWorld(userId);
+        const engine = requestEngine(userId);
+        const claim = getModeData(engine).claimWorld(userId);
         sendJson(res, 200, {
           work: claim.work,
           inbox: claim.inbox.map((i) => ({
             kind: i.kind,
             amount: i.amount,
             at: i.at,
-            fromName: islandName(i.fromUser, i.fromName),
+            fromName: islandName(i.fromUser, i.fromName, engine),
           })),
         });
         return;
       }
       if (url.pathname === "/api/world-visit" && userId !== null) {
-        const owner = islandOwner(url.searchParams.get("id") ?? "");
-        const snapshot = owner ? islandSnapshot(owner.user_id) : null;
+        const engine = requestEngine(userId);
+        const owner = islandOwner(url.searchParams.get("id") ?? "", engine);
+        const snapshot = owner ? islandSnapshot(owner.user_id, engine) : null;
         if (!owner || !snapshot) {
           sendJson(res, 404, { error: "island not synced" });
           return;
         }
         sendJson(res, 200, {
-          name: islandName(owner.user_id, owner.display_name),
+          name: islandName(owner.user_id, owner.display_name, engine),
           seed: snapshot.seed,
           map: snapshot.map,
           data: snapshot.data,
@@ -529,7 +572,7 @@ export function startMiniAppServer(): void {
       }
       if (url.pathname === "/api/world-send" && req.method === "POST" && userId !== null) {
         try {
-          await handleWorldSend(req, res, userId);
+          await handleWorldSend(req, res, userId, requestEngine(userId));
         } catch (error) {
           console.error("world-send:", error);
           if (!res.headersSent) sendJson(res, 500, { error: "internal" });
@@ -554,7 +597,7 @@ export function startMiniAppServer(): void {
         return;
       }
       try {
-        await handleWorldSave(req, res, url, userId);
+        await handleWorldSave(req, res, url, userId, requestEngine(userId));
       } catch (error) {
         console.error("world-save:", error);
         if (!res.headersSent) sendJson(res, 500, { error: "internal" });
@@ -574,7 +617,7 @@ export function startMiniAppServer(): void {
         "content-type": "application/json; charset=utf-8",
         "cache-control": "no-store",
       });
-      res.end(JSON.stringify(profilePayload(userId)));
+      res.end(JSON.stringify(profilePayload(userId, requestEngine(userId))));
       return;
     }
 
@@ -601,18 +644,19 @@ export function startMiniAppServer(): void {
       etag: asset.etag,
       // Мини-апп встраивается только в Telegram; чужие фреймы не нужны.
       "content-security-policy":
-        "default-src 'self'; script-src 'self' https://telegram.org; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors https://web.telegram.org https://telegram.org",
+        "default-src 'self'; script-src 'self' https://telegram.org; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; frame-ancestors https://web.telegram.org https://telegram.org",
       "x-content-type-options": "nosniff",
     });
     res.end(asset.body);
   });
 
-  server.listen(config.miniappPort, () => {
+  server.listen(config.miniappPort, "127.0.0.1", () => {
     console.log(`🐱 Mini App слушает http://localhost:${config.miniappPort}`);
     if (!config.miniappUrl) {
       console.log("   MINIAPP_URL не задан — кнопка мини-аппа в боте скрыта.");
     }
   });
+  return server;
 }
 
 export { profilePayload };

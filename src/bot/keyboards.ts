@@ -1,3 +1,5 @@
+import { INSTALLED_CLAUDE_MODELS } from "../claude-catalog.js";
+import { claudeModelLabel } from "../claude-settings.js";
 import { InlineKeyboard } from "grammy";
 import type { PendingPermission, PendingQuestion } from "../agent/permissions.js";
 
@@ -49,15 +51,7 @@ export function questionKeyboard(pending: PendingQuestion): InlineKeyboard {
   return kb;
 }
 
-export const MODELS: [string, string][] = [
-  ["", "По умолчанию"],
-  ["claude-fable-5-1", "Fable 5.1 — самая умная"],
-  ["claude-fable-5", "Fable 5 — прошлый Fable"],
-  ["claude-opus-5-5", "Opus 5.5 — новая сильная"],
-  ["claude-opus-5", "Opus 5 — сильная"],
-  ["claude-sonnet-5", "Sonnet 5 — баланс"],
-  ["claude-haiku-4-5", "Haiku 4.5 — быстрая"],
-];
+export const MODELS: [string, string][] = INSTALLED_CLAUDE_MODELS.map(model => [model.value, claudeModelLabel(model)]);
 
 /**
  * Подтверждение коммита. Сообщение придумала модель, и последнее слово должно

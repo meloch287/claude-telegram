@@ -53,17 +53,22 @@ export async function synthesize(text: string): Promise<Buffer | null> {
     });
 
     // Прокси по умолчанию не нужен: сервис озвучки обычно ближе, чем Anthropic.
-    const proxy = config.ttsViaProxy ? activeProxyUrl() : "";
+    const local = ["127.0.0.1", "localhost", "[::1]"].includes(new URL(config.ttsUrl).hostname);
+    const proxy = local ? "" : activeProxyUrl() || (process.env.TELEGRAM_PROXY ?? "").trim();
+    if (!local && !proxy) throw Error("Обязательный прокси недоступен");
     const response = proxy
       ? await (async () => {
           const { fetch: viaProxy, ProxyAgent } = await import("undici");
-          return viaProxy(config.ttsUrl, {
+          const dispatcher = new ProxyAgent(proxy);
+          const result = await viaProxy(config.ttsUrl, {
             method: "POST",
             headers,
             body,
             signal: controller.signal,
-            dispatcher: new ProxyAgent(proxy),
-          }) as unknown as Response;
+            dispatcher,
+          });
+          void dispatcher.close().catch(() => {});
+          return result as unknown as Response;
         })()
       : await fetch(config.ttsUrl, {
           method: "POST",

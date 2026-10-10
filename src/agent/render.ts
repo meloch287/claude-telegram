@@ -28,78 +28,32 @@ export const RICH_LIMIT = 30000;
  * формулой. Поэтому доллары вне кода экранируем; блоки и строки кода не
  * трогаем — внутри них экранирование не действует и не нужно.
  */
-/**
- * Раскладка ответа перед отправкой.
- *
- * Модель, особенно в долгой сессии, пишет сплошной прозой: абзацы без
- * заголовков и списков, и в Telegram такой ответ читается стеной. Здесь два
- * дешёвых приёма, которые ничего не выдумывают за модель:
- *  - перенос строки внутри абзаца становится настоящим переносом (Markdown
- *    иначе склеивает соседние строки в одну);
- *  - абзац, начинающийся с короткой темы перед тире или двоеточием
- *    («Трекер — баг настоящий», «Проверки: 201 тест»), получает тему жирным.
- * Блоки кода, списки, заголовки, таблицы и HTML не трогаем.
- */
+const CODE_PARTS = /(^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?^ {0,3}\2[ \t]*(?=\n|$)|`+[^`\n]+`+)/gm;
+
+function mapMarkdown(text: string, prose: (part: string) => string, code: (part: string) => string): string {
+  let result = "", offset = 0;
+  for (const match of text.matchAll(CODE_PARTS)) {
+    result += prose(text.slice(offset, match.index)) + code(match[0]);
+    offset = match.index! + match[0].length;
+  }
+  return result + prose(text.slice(offset));
+}
+
 export function layoutMarkdown(text: string): string {
-  return text
-    .split(/(```[\s\S]*?```)/)
-    .map((part, index) => (index % 2 === 1 ? part : layoutProse(part)))
-    .join("");
-}
-
-const STRUCTURED_LINE = /^\s*(#{1,6}\s|[-*+]\s|\d+[.)]\s|\||>|<|\[\^)/;
-const LEAD_IN = /^([^\n.!?:—*]{2,48}?)( — |: )/u;
-const HEADING = /^\s*#{1,6}\s/;
-const HTML_LINE = /^\s*<\/?(details|summary)/i;
-/**
- * Пустой абзац между блоками. Telegram рисует абзацы rich-сообщения впритык,
- * пустая строка в Markdown зазора не даёт (проверено 23.09.2026: блоки
- * приходят как paragraph/paragraph без отступа). Абзац из одного неразрывного
- * пробела сохраняется отдельным блоком и читается как пустая строка.
- */
-const SPACER = "\u00a0";
-
-function layoutProse(text: string): string {
-  const blocks = text.split(/\n{2,}/).map(layoutBlock);
-  const out: string[] = [];
-  for (let i = 0; i < blocks.length; i++) {
-    const block = blocks[i]!;
-    out.push(block);
-    const next = blocks[i + 1];
-    if (next !== undefined && needsSpacer(block, next)) out.push(SPACER);
-  }
-  return out.join("\n\n");
-}
-
-/** Заголовки и теги свёрнутых блоков несут свой отступ; пустые края не трогаем. */
-function needsSpacer(before: string, after: string): boolean {
-  if (!before.trim() || !after.trim()) return false;
-  for (const block of [before, after]) {
-    if (HEADING.test(block) || HTML_LINE.test(block) || block.startsWith("---")) return false;
-  }
-  return true;
-}
-
-function layoutBlock(paragraph: string): string {
-  const lines = paragraph.split("\n");
-  if (lines.some((line) => STRUCTURED_LINE.test(line))) return paragraph;
-  const joined = lines.map((line) => line.trimEnd()).join("  \n");
-  const lead = LEAD_IN.exec(joined);
-  if (!lead) return joined;
-  // Подводка уже с эмодзи — второе не вешаем.
-  const marker = /^[\p{L}\p{N}«"]/u.test(lead[1]!) ? "🔹 " : "";
-  return joined.replace(LEAD_IN, `${marker}**$1**$2`);
+  return mapMarkdown(text, part => part.split("\n").map((line, i, lines) => {
+    const structured = /^\s*(#{1,6}\s|[-*+]\s|\d+[.)]\s|\||>|<|\[\^)/;
+    const next = lines[i + 1];
+    if (!line.trim() || !next?.trim()) return line;
+    if (/^ {0,3}#{1,6}\s/.test(line)) return line.trimEnd() + "\n";
+    if (!structured.test(line) && /^ {0,3}(?:[-*+]\s|\d+[.)]\s|\|)/.test(next)) return line.trimEnd() + "\n";
+    if (structured.test(line) || structured.test(next) || /^\s{2,}/.test(line) || /^\s{2,}/.test(next)) return line;
+    if (/[.!?…][»”"')\]]*\s*$/.test(line)) return line.trimEnd() + "\n";
+    return line.trimEnd() + "  ";
+  }).join("\n"), part => part);
 }
 
 export function prepareRichMarkdown(text: string): string {
-  return text
-    .split(/(```[\s\S]*?```|`[^`\n]*`)/)
-    .map((part, index) =>
-      index % 2 === 1
-        ? hideSecrets(part, "code")
-        : hideSecrets(part.replace(/\$/g, "\\$"), "prose"),
-    )
-    .join("");
+  return mapMarkdown(text, part => hideSecrets(part.replace(/(?<!\\)\$/g, "\\$"), "prose"), part => hideSecrets(part, "code"));
 }
 
 /**

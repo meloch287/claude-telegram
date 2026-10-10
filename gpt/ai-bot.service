@@ -1,0 +1,29 @@
+[Unit]
+ConditionPathExists=!/opt/ai-bot/NOT_STARTED
+Description=AI Telegram controller with isolated user workers
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+RequiresMountsFor=/opt/ai-bot/tenants
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/ai-bot/app
+ExecStartPre=/bin/sh /opt/ai-bot/app/gpt/network.sh
+ExecStart=/usr/bin/node /opt/ai-bot/app/gpt/main.mjs
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/ai-bot /run
+MemoryMax=512M
+TasksMax=256
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

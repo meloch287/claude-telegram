@@ -9,3 +9,6 @@ proxy/
 claude-home/
 whisper-cache/
 last-deploy-report.txt
+
+output/
+gpt/__pycache__/

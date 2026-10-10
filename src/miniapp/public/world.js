@@ -1,3 +1,4 @@
+import {modeStorage} from "./mode-scope.js";
 /**
  * Мой город — континент четырёх кошачьих народов, в духе WorldBox.
  *
@@ -63,16 +64,16 @@ function walkable(t) {
 export const RACES = [
   {
     id: "human",
-    name: "Люди-коты",
-    plural: "людей-котов",
-    dat: "людям-котам",
-    instr: "людьми-котами",
-    fur: "#d9a066",
-    dark: "#a86a3b",
-    hat: "#b23a26",
-    roof: "#b23a26",
+    name: "Коты Sol",
+    plural: "котов Sol",
+    dat: "котам Sol",
+    instr: "котами Sol",
+    fur: "#f1d67a",
+    dark: "#aa832c",
+    hat: "#10a37f",
+    roof: "#10a37f",
     wall: "#e9d3a6",
-    banner: "#b23a26",
+    banner: "#10a37f",
     zone: "#ff4d4d",
     likes: (t) => (t === T.GRASS ? 3 : t === T.SAND ? 1 : 0),
     canStand: (t) => walkable(t),
@@ -80,12 +81,12 @@ export const RACES = [
   },
   {
     id: "elf",
-    name: "Эльфы-коты",
-    plural: "эльфов-котов",
-    dat: "эльфам-котам",
-    instr: "эльфами-котами",
-    fur: "#efe9d6",
-    dark: "#9aa77a",
+    name: "Коты Luna",
+    plural: "котов Luna",
+    dat: "котам Luna",
+    instr: "котами Luna",
+    fur: "#c4b5fd",
+    dark: "#7960bf",
     hat: "#5f8f45",
     roof: "#3d6a2c",
     wall: "#8a6a44",
@@ -97,12 +98,12 @@ export const RACES = [
   },
   {
     id: "orc",
-    name: "Орки-коты",
-    plural: "орков-котов",
-    dat: "оркам-котам",
-    instr: "орками-котами",
-    fur: "#6f8f4a",
-    dark: "#40592a",
+    name: "Коты Astra",
+    plural: "котов Astra",
+    dat: "котам Astra",
+    instr: "котами Astra",
+    fur: "#aea1f3",
+    dark: "#6757ac",
     hat: "#3b2f2a",
     roof: "#3b2f2a",
     wall: "#7a5a3a",
@@ -114,12 +115,12 @@ export const RACES = [
   },
   {
     id: "gnome",
-    name: "Гномы-коты",
-    plural: "гномов-котов",
-    dat: "гномам-котам",
-    instr: "гномами-котами",
-    fur: "#b7b3ad",
-    dark: "#6f6a63",
+    name: "Коты Codex",
+    plural: "котов Codex",
+    dat: "котам Codex",
+    instr: "котами Codex",
+    fur: "#80d5ca",
+    dark: "#2a807a",
     hat: "#c9402b",
     roof: "#6d6a66",
     wall: "#9a9590",
@@ -483,12 +484,12 @@ export const WONDERS = [
   { id: "statue", at: 5, name: "Статуя кота", desc: "5 коммитов через бота" },
   { id: "library", at: 15, name: "Библиотека", desc: "15 коммитов через бота" },
   { id: "observatory", at: 40, name: "Обсерватория", desc: "40 коммитов через бота" },
-  { id: "tower", at: 100, name: "Башня Claude", desc: "100 коммитов через бота" },
+  { id: "tower", at: 100, name: "Башня GPT", desc: "100 коммитов через бота" },
 ];
 
 /**
  * snapshot — чужой остров строкой сохранения (гости): мир берётся из неё, а
- * не из localStorage. readonly — смотреть можно, менять нельзя: инструменты
+ * не из modeStorage. readonly — смотреть можно, менять нельзя: инструменты
  * молчат, сохранения нет, и чужой остров не затрёт свой.
  */
 export function createWorld({
@@ -779,7 +780,7 @@ export function createWorld({
     if (readonly || erased) return;
     {
       try {
-        localStorage.setItem(
+        modeStorage.setItem(
           storeKey,
           JSON.stringify({
             v: SAVE_VERSION,
@@ -837,7 +838,7 @@ export function createWorld({
 
   function restore() {
     try {
-      const saved = JSON.parse(snapshot ?? localStorage.getItem(storeKey) ?? "null");
+      const saved = JSON.parse(snapshot ?? modeStorage.getItem(storeKey) ?? "null");
       if (
         !saved ||
         saved.v !== SAVE_VERSION ||
@@ -1080,7 +1081,7 @@ export function createWorld({
     upgraded: (r, lvl) =>
       `${RACES[r].name} ${lvl === 1 ? "надстроили второй этаж" : "возвели башню"}.`,
     shipyard: (r, village) =>
-      `В ${village} ${RACES[r].plural === "людей-котов" ? "люди-коты" : RACES[r].name.toLowerCase()} поставили верфь — можно в море.`,
+      `В ${village} ${RACES[r].plural === "котов Sol" ? "люди-коты" : RACES[r].name.toLowerCase()} поставили верфь — можно в море.`,
     grow: (n) =>
       `Пока тебя не было, родилось ${n} кот${plural(n)} — остров растёт от твоей работы.`,
     spawn: (n, r) => `Бог призвал ${n} ${RACES[r].plural}.`,
@@ -1170,10 +1171,10 @@ export function createWorld({
     drown: (n) => `${n} кот${plural(n)} уплыл${n === 1 ? "" : "и"} на плотах: их землю затопило.`,
     trade: (a, b) => `${RACES[a].name} торгуют с ${RACES[b].instr}.`,
     festival: (r) => `У ${RACES[r].plural} праздник урожая.`,
-    fishing: () => "Люди-коты вышли в море на рыбалку.",
-    forge: () => "В горах гномов-котов стучит кузня.",
-    song: () => "Эльфы-коты поют в чаще — слышно даже на пустошах.",
-    raid: () => "Орки-коты устроили набег на соседей. Никто не пострадал: все коты.",
+    fishing: () => "Коты Sol вышли в море на рыбалку.",
+    forge: () => "В горах котов Codex стучит кузня.",
+    song: () => "Коты Luna поют в чаще — слышно даже на пустошах.",
+    raid: () => "Коты Astra устроили набег на соседей. Никто не пострадал: все коты.",
     newday: (d) => `Настал день ${d}.`,
     era: (r, e) => `${RACES[r].name} вступили в эру «${ERAS[e].name}».`,
     ship: (r) => `${RACES[r].name} спустили на воду корабль.`,
@@ -3176,7 +3177,7 @@ export function createWorld({
   const discoverKey = `world:discovered:${seed}`;
   function loadDiscovered() {
     try {
-      state.discovered = JSON.parse(localStorage.getItem(discoverKey) || "[]");
+      state.discovered = JSON.parse(modeStorage.getItem(discoverKey) || "[]");
     } catch {
       state.discovered = [];
     }
@@ -3192,7 +3193,7 @@ export function createWorld({
     state.discovered.push(found.id);
     if (!readonly)
       try {
-        localStorage.setItem(discoverKey, JSON.stringify(state.discovered));
+        modeStorage.setItem(discoverKey, JSON.stringify(state.discovered));
       } catch {
         /* пусть */
       }
@@ -4589,15 +4590,15 @@ export function createWorld({
         rect(g, race.roof, bx + 1, by + 2, 6, 1);
         rect(g, race.roof, bx + 2, by + 1, 4, 1);
         rect(g, race.roof, bx + 3, by, 2, 1);
-        rect(g, "#efe9d6", bx, by + 2, 1, 1);
-        rect(g, "#efe9d6", bx + 7, by + 2, 1, 1);
+        rect(g, "#c4b5fd", bx, by + 2, 1, 1);
+        rect(g, "#c4b5fd", bx + 7, by + 2, 1, 1);
         rect(g, "#3b2f2a", bx + 3, by + 5, 2, 3);
         rect(g, race.banner, bx + 6, by + 4, 1, 2);
         break;
       case "gnome":
         rect(g, race.wall, bx, by + 1, 8, 7);
         rect(g, race.roof, bx + 1, by, 6, 1);
-        rect(g, "#6f6a63", bx + 1, by + 2, 6, 1);
+        rect(g, "#2a807a", bx + 1, by + 2, 6, 1);
         rect(g, "#3b2f2a", bx + 3, by + 4, 2, 4);
         rect(g, "#5b3d22", bx + 2, by + 3, 4, 1);
         rect(g, race.banner, bx + 1, by + 4, 1, 1);
@@ -4629,7 +4630,7 @@ export function createWorld({
     rect(g, race.roof, bx + 2, top, 4, 1);
     rect(g, "#141413", bx + 3, top - 1, 2, 1);
     if (race.id === "gnome") rect(g, race.banner, bx + 6, top + 10, 1, 1);
-    if (race.id === "orc") rect(g, "#efe9d6", bx, top + 1, 1, 2);
+    if (race.id === "orc") rect(g, "#c4b5fd", bx, top + 1, 1, 2);
     if (race.id === "elf") rect(g, "#3d6a2c", bx - 1, top + 9, 1, 5);
     if (race.id === "human") rect(g, race.banner, bx + 7, top + 4, 1, 3);
   }
@@ -4687,7 +4688,7 @@ export function createWorld({
     const bx = x * PX;
     const by = y * PX;
     rect(g, "#8c8780", bx, by + 1, PX, 6);
-    rect(g, "#b7b3ad", bx, by, PX, 1);
+    rect(g, "#80d5ca", bx, by, PX, 1);
     rect(g, "#5f5d58", bx + 1, by + 3, 2, 1);
     rect(g, "#5f5d58", bx + 5, by + 3, 2, 1);
     rect(g, "#5f5d58", bx + 3, by + 5, 2, 1);
@@ -4698,10 +4699,10 @@ export function createWorld({
     const bx = t.x * PX;
     const by = t.y * PX;
     rect(g, "#8c8780", bx + 1, by - 3, 6, 10);
-    rect(g, "#b7b3ad", bx, by - 4, 8, 1);
-    rect(g, "#b7b3ad", bx + 1, by - 5, 1, 1);
-    rect(g, "#b7b3ad", bx + 3, by - 5, 2, 1);
-    rect(g, "#b7b3ad", bx + 6, by - 5, 1, 1);
+    rect(g, "#80d5ca", bx, by - 4, 8, 1);
+    rect(g, "#80d5ca", bx + 1, by - 5, 1, 1);
+    rect(g, "#80d5ca", bx + 3, by - 5, 2, 1);
+    rect(g, "#80d5ca", bx + 6, by - 5, 1, 1);
     rect(g, "#141413", bx + 3, by, 2, 2);
     rect(g, race.banner, bx + 7, by - 7, 1, 3);
   }
@@ -4717,7 +4718,7 @@ export function createWorld({
     const bx = gr.x * PX;
     const by = gr.y * PX;
     rect(g, "#8c8780", bx + 2, by + 1, 4, 6);
-    rect(g, "#b7b3ad", bx + 3, by + 1, 2, 1);
+    rect(g, "#80d5ca", bx + 3, by + 1, 2, 1);
     rect(g, "#4a4844", bx + 3, by + 3, 2, 1);
     rect(g, "#4a4844", bx + 3, by + 5, 2, 1);
     rect(g, "#5f8f42", bx + 1, by + 7, 6, 1);
@@ -5077,15 +5078,15 @@ export function createWorld({
         rect(ctx, "#3d6a2c", bx + 2, by - 1, 2, 1);
         break;
       case "orc":
-        rect(ctx, "#efe9d6", bx + 1, by + 4, 1, 1);
-        rect(ctx, "#efe9d6", bx + 4, by + 4, 1, 1);
+        rect(ctx, "#c4b5fd", bx + 1, by + 4, 1, 1);
+        rect(ctx, "#c4b5fd", bx + 4, by + 4, 1, 1);
         rect(ctx, "#3b2f2a", bx + 1, by - 1, 1, 1);
         rect(ctx, "#3b2f2a", bx + 4, by - 1, 1, 1);
         break;
       case "gnome":
         rect(ctx, race.hat, bx + 2, by - 2, 2, 1);
         rect(ctx, race.hat, bx + 1, by - 1, 4, 1);
-        rect(ctx, "#efe9d6", bx + 1, by + 4, 4, 1);
+        rect(ctx, "#c4b5fd", bx + 1, by + 4, 4, 1);
         break;
       default:
         break;
@@ -5229,8 +5230,8 @@ export function createWorld({
         rect(ctx, "#8e4a33", bx + 1, by - 10, 6, 18);
         rect(ctx, "#b85c3c", bx + 2, by - 10, 4, 18);
         for (let i = 0; i < 4; i += 1) rect(ctx, "#ffd9a8", bx + 3, by - 7 + i * 4, 2, 2);
-        rect(ctx, "#d97757", bx + 3, by - 16, 2, 6);
-        rect(ctx, "#d97757", bx + 1, by - 14, 6, 2);
+        rect(ctx, "#10a37f", bx + 3, by - 16, 2, 6);
+        rect(ctx, "#10a37f", bx + 1, by - 14, 6, 2);
         if (blink) {
           ctx.globalAlpha = 0.3;
           rect(ctx, "#ffb38a", bx - 1, by - 18, 10, 10);
@@ -5798,7 +5799,7 @@ export function createWorld({
       clearTimeout(saveTimer);
       // До перезагрузки мир ещё тикает и сохранил бы себя обратно.
       erased = true;
-      localStorage.removeItem(storeKey);
+      modeStorage.removeItem(storeKey);
       return storeKey;
     },
     get chronicle() {

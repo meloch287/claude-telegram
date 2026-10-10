@@ -1,0 +1,134 @@
+/* «Чаты и файлы». Основа — ui.css. */
+
+.visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+
+.page-header { margin: 0 0 18px; }
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  margin: 0 0 8px -6px;
+  padding: 4px 8px 4px 6px;
+  border-radius: 10px;
+  color: var(--accent-ink);
+  font-size: 16px;
+  transition: background-color 300ms var(--ease-out);
+}
+.back-link svg { width: 10px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.back-link:active { background: var(--accent-soft); transition: none; }
+
+.tabs { --count: 3; margin-bottom: 16px; }
+.tabs:has([data-tab="files"][aria-pressed="true"]) { --index: 1; }
+.tabs:has([data-tab="tasks"][aria-pressed="true"]) { --index: 2; }
+.pane.enter { animation: ui-rise 360ms var(--ease-out); }
+
+/* Поле поиска как в Telegram. */
+.search-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 40px;
+  margin-bottom: 12px;
+  padding: 0 12px 0 34px;
+  border-radius: 10px;
+  background: var(--fill-2);
+  transition: background-color 250ms var(--ease-out), box-shadow 250ms var(--ease-out);
+}
+.search-field:focus-within { background: var(--card); box-shadow: 0 0 0 2px var(--accent); }
+.search-field svg { position: absolute; left: 11px; width: 16px; height: 16px; fill: none; stroke: var(--hint); stroke-width: 2; stroke-linecap: round; }
+.search-field input {
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-size: 16px;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.search-field input::placeholder { color: var(--hint); opacity: 1; }
+.search-field input::-webkit-search-cancel-button { -webkit-appearance: none; }
+
+.filters { margin-bottom: 16px; }
+
+/* Карточки результатов, файлов и задач. */
+.cards { display: grid; gap: 10px; min-height: 96px; align-content: start; }
+.card {
+  padding: 14px 16px;
+  border-radius: var(--r);
+  background: var(--card);
+  overflow-wrap: anywhere;
+  animation: ui-rise 380ms var(--ease-out) backwards;
+}
+.card:nth-child(2) { animation-delay: 35ms; }
+.card:nth-child(3) { animation-delay: 70ms; }
+.card:nth-child(4) { animation-delay: 105ms; }
+.card:nth-child(5) { animation-delay: 140ms; }
+.card:nth-child(n + 6) { animation-delay: 175ms; }
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+  color: var(--hint);
+}
+.badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--hint); }
+.card h3 { margin: 4px 0 0; font-size: 16px; line-height: 21px; font-weight: 600; }
+.card p { margin: 6px 0 0; color: var(--hint); font-size: 14px; line-height: 19px; white-space: pre-wrap; }
+.card > button, .cards > button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  margin-top: 12px;
+  padding: 7px 14px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: 14px;
+  font-weight: 600;
+  transition: transform 160ms var(--ease-out), opacity 200ms var(--ease-out);
+}
+.cards > button { justify-self: center; margin-top: 2px; }
+.card > button:active, .cards > button:active { transform: scale(0.96); }
+.card > button:disabled, .cards > button:disabled { opacity: 0.55; }
+.card details { margin-top: 10px; font-size: 14px; color: var(--hint); }
+.card summary { cursor: pointer; color: var(--accent-ink); font-weight: 500; }
+.empty { padding: 28px 8px; color: var(--hint); font-size: 15px; text-align: center; }
+.lead { margin: 0 16px 14px; color: var(--hint); font-size: 14px; line-height: 19px; }
+#tasks .section-head { margin-top: 4px; }
+
+.file-actions { display: flex; gap: 10px; margin: 14px 0 16px; }
+.file-actions .btn { flex: 1; min-height: 46px; font-size: 15px; }
+#more, #refresh { margin-top: 12px; }
+
+.status { min-height: 20px; margin: 14px 16px 0; color: var(--hint); font-size: 13px; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; }
+.status.error { color: var(--danger); }
+
+/* Предпросмотр файла — шторка. */
+#preview .sheet-header h2 { font-size: 17px; line-height: 22px; overflow-wrap: anywhere; }
+#preview-content { margin-bottom: 4px; }
+#preview-content img { width: 100%; height: auto; max-height: 55dvh; object-fit: contain; border-radius: 12px; background: var(--fill); }
+#preview-content pre {
+  max-height: 52dvh;
+  margin: 0;
+  padding: 12px 14px;
+  overflow: auto;
+  border-radius: 12px;
+  background: var(--fill);
+  font: 13px/1.5 ui-monospace, "SF Mono", Menlo, "Roboto Mono", monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.muted { color: var(--hint); font-size: 14px; }
+
+@media (max-width: 360px) {
+  .file-actions { flex-wrap: wrap; }
+  .file-actions .btn { min-width: 130px; }
+}
+.badge[data-engine="gpt"]::before { background: #10a37f; }
+.badge[data-engine="claude"]::before { background: #d97757; }

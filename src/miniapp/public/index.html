@@ -1,14 +1,16 @@
 <!doctype html>
-<html lang="ru">
+<html lang="ru" data-page="cats" data-boot>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="light dark" />
-    <title>Мой Claude-кот</title>
-    <link rel="stylesheet" href="/style.css" />
+    <title>Мой кот</title>
+    <link rel="stylesheet" href="./style.css?v=20261009-ui1" />
     <!-- Скрипт Telegram лежит у нас: telegram.org с телефона без VPN не открывается, и страница висела на его загрузке. -->
-    <script src="/telegram-web-app.js"></script>
-  </head>
+    <link rel="stylesheet" href="./loading.css?v=20261009-ui1" />
+    <script src="./telegram-web-app.js"></script>
+    <script src="./entry.js?v=20261009-unified1"></script>
+  <link rel="stylesheet" href="./motion.css?v=20261009-smooth2"><script src="./motion.js?v=20261009-ui1"></script></head>
   <body>
     <a class="skip-link" href="#main">Перейти к основному содержимому</a>
 
@@ -18,7 +20,7 @@
       Скелет вместо строки «Загружаю…»: форма будущей страницы видна сразу,
       и переход к настоящим данным не дёргает раскладку.
     -->
-    <div class="skeleton" id="loading" role="status" aria-label="Загружаю профиль">
+    <div class="skeleton page-loader" id="loading" role="status" aria-label="Загружаю профиль">
       <div class="sk sk-tabs"></div>
       <div class="sk sk-hero"></div>
       <div class="sk-row">
@@ -35,11 +37,15 @@
       <button class="button" id="error-retry" type="button">Попробовать ещё раз</button>
     </div>
 
-    <div id="app" hidden>
-      <h1 class="visually-hidden" id="page-title">Мой Claude-кот</h1>
+    <div id="app" class="page-content" hidden>
+      <h1 class="visually-hidden" id="page-title">Мой кот</h1>
 
       <!-- Переключатель разделов липнет к верху: до него не надо листать назад. -->
       <header class="topbar">
+        <nav class="topbar-actions" aria-label="Навигация">
+          <a href="./modes.html" class="gpt-dialog-link nav-card" id="bot-home-link"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m10 5-7 7 7 7M3 12h18"/></svg><span>Назад</span></a>
+
+        </nav>
         <div class="segmented" role="tablist" aria-label="Разделы">
           <span class="segmented-thumb" aria-hidden="true"></span>
           <button
@@ -79,7 +85,7 @@
               <circle class="hero-ring-fill" id="hero-ring" cx="60" cy="60" r="54" />
             </svg>
             <div id="hero-cat" class="cat-art hero-cat"></div>
-          </div>
+    </div>
 
           <div class="hero-chips">
             <span class="chip chip--accent" id="hero-level"></span>
@@ -319,6 +325,7 @@
           <ol class="timeline" id="chronicle" role="list"></ol>
         </section>
       </section>
+      <footer class="admin-footer"><a href="./chats.html?section=admin" data-section="admin" hidden>Админка <span aria-hidden="true">↗</span></a></footer>
     </div>
 
     <!--
@@ -382,6 +389,6 @@
       </div>
     </div>
 
-    <script type="module" src="/app.js"></script>
+    <script type="module" src="./app.js?v=20261009-state9"></script>
   </body>
 </html>

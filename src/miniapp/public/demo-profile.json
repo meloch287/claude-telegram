@@ -18,23 +18,32 @@
   "cat": {
     "level": 4,
     "id": "refactor",
-    "name": "Кот-рефакторщик",
+    "name": "Кот Luna",
     "title": "Удалил больше строк, чем написал",
     "quote": "Этой абстракции здесь быть не должно.",
-    "palette": ["#D6B489", "#A07F53", "#141413"],
+    "palette": [
+      "#C4B5FD",
+      "#7960BF",
+      "#152923"
+    ],
     "accessory": "ножницы",
     "progress": 0.26666666666666666,
     "nextThreshold": 750000,
-    "nextName": "Кот-дебагер"
+    "nextName": "Кот-дебагер",
+    "threshold": 6000000
   },
   "cats": [
     {
       "level": 1,
       "id": "intern",
-      "name": "Котёнок-стажёр",
+      "name": "GPT-котёнок",
       "threshold": 0,
       "title": "Только что открыл первый файл",
-      "palette": ["#D97757", "#A84F32", "#141413"],
+      "palette": [
+        "#6EE7C0",
+        "#188A70",
+        "#152923"
+      ],
       "accessory": "клубок",
       "quote": "Мяу. А где тут README?",
       "unlocked": true
@@ -42,10 +51,14 @@
     {
       "level": 2,
       "id": "reader",
-      "name": "Кот-читатель",
-      "threshold": 25000,
+      "name": "Кот-исследователь",
+      "threshold": 500000,
       "title": "Читает быстрее, чем ты скроллишь",
-      "palette": ["#8A8781", "#5E5B56", "#141413"],
+      "palette": [
+        "#9ADDE8",
+        "#397D8A",
+        "#152923"
+      ],
       "accessory": "очки",
       "quote": "Я прочитал всё. Даже комментарии.",
       "unlocked": true
@@ -53,10 +66,14 @@
     {
       "level": 3,
       "id": "greper",
-      "name": "Кот-грепер",
-      "threshold": 100000,
+      "name": "Кот Codex",
+      "threshold": 2000000,
       "title": "Находит нужную строку с первого раза",
-      "palette": ["#55534E", "#332F2B", "#141413"],
+      "palette": [
+        "#91A6B8",
+        "#445A6F",
+        "#152923"
+      ],
       "accessory": "лупа",
       "quote": "Оно в utils. Всегда в utils.",
       "unlocked": true
@@ -64,10 +81,14 @@
     {
       "level": 4,
       "id": "refactor",
-      "name": "Кот-рефакторщик",
-      "threshold": 300000,
+      "name": "Кот Luna",
+      "threshold": 6000000,
       "title": "Удалил больше строк, чем написал",
-      "palette": ["#D6B489", "#A07F53", "#141413"],
+      "palette": [
+        "#C4B5FD",
+        "#7960BF",
+        "#152923"
+      ],
       "accessory": "ножницы",
       "quote": "Этой абстракции здесь быть не должно.",
       "unlocked": true
@@ -75,10 +96,14 @@
     {
       "level": 5,
       "id": "debugger",
-      "name": "Кот-дебагер",
-      "threshold": 750000,
+      "name": "Кот-навигатор",
+      "threshold": 15000000,
       "title": "Видит баг сквозь стек-трейс",
-      "palette": ["#C4633E", "#8E4227", "#141413"],
+      "palette": [
+        "#A9E67F",
+        "#527F35",
+        "#152923"
+      ],
       "accessory": "фонарик",
       "quote": "Воспроизводится. Дальше дело техники.",
       "unlocked": false
@@ -86,10 +111,14 @@
     {
       "level": 6,
       "id": "architect",
-      "name": "Кот-архитектор",
-      "threshold": 1500000,
+      "name": "Кот Sol",
+      "threshold": 30000000,
       "title": "Рисует схемы, которые потом сбываются",
-      "palette": ["#6A9BCC", "#3F6A96", "#141413"],
+      "palette": [
+        "#F1D67A",
+        "#AA832C",
+        "#152923"
+      ],
       "accessory": "чертёж",
       "quote": "Разложим на модули — и станет скучно. В хорошем смысле.",
       "unlocked": false
@@ -97,10 +126,14 @@
     {
       "level": 7,
       "id": "reviewer",
-      "name": "Кот-ревьюер",
-      "threshold": 3000000,
+      "name": "Кот-инженер",
+      "threshold": 60000000,
       "title": "Оставляет комментарии, с которыми не поспоришь",
-      "palette": ["#7E9166", "#556042", "#141413"],
+      "palette": [
+        "#80D5CA",
+        "#2A807A",
+        "#152923"
+      ],
       "accessory": "красная ручка",
       "quote": "Здесь гонка. Вот сценарий.",
       "unlocked": false
@@ -108,21 +141,29 @@
     {
       "level": 8,
       "id": "orchestrator",
-      "name": "Кот-оркестратор",
-      "threshold": 6000000,
+      "name": "Кот Astra",
+      "threshold": 120000000,
       "title": "Запускает субагентов и не путается",
-      "palette": ["#6B4E9B", "#46316B", "#141413"],
+      "palette": [
+        "#AEA1F3",
+        "#6757AC",
+        "#152923"
+      ],
       "accessory": "дирижёрская палочка",
       "quote": "Ты, ты и ты — по файлу каждому.",
       "unlocked": false
     },
     {
       "level": 9,
-      "id": "opus",
-      "name": "Кот-опус",
-      "threshold": 12000000,
+      "id": "creator",
+      "name": "Кот-создатель",
+      "threshold": 250000000,
       "title": "Работает всю ночь, к утру всё зелёное",
-      "palette": ["#A85236", "#743520", "#141413"],
+      "palette": [
+        "#79DBC0",
+        "#2E8D76",
+        "#152923"
+      ],
       "accessory": "кружка",
       "quote": "Тесты прошли. Все. Проверил дважды.",
       "unlocked": false
@@ -130,10 +171,14 @@
     {
       "level": 10,
       "id": "quantum",
-      "name": "Квантовый кот",
-      "threshold": 25000000,
+      "name": "Квантовый GPT-кот",
+      "threshold": 500000000,
       "title": "Одновременно исправил и не трогал",
-      "palette": ["#E0A93B", "#A2731F", "#141413"],
+      "palette": [
+        "#CEEFA2",
+        "#759C48",
+        "#152923"
+      ],
       "accessory": "коробка",
       "quote": "Пока ты не открыл PR, баг и есть, и нет.",
       "unlocked": false
@@ -365,7 +410,11 @@
         "level": 4,
         "id": "refactor",
         "name": "Кот-рефакторщик",
-        "palette": ["#7B9A6D", "#4F6B45", "#141413"],
+        "palette": [
+          "#7B9A6D",
+          "#4F6B45",
+          "#141413"
+        ],
         "accessory": "beret"
       },
       "quota": null
@@ -382,7 +431,11 @@
         "level": 2,
         "id": "reader",
         "name": "Кот-читатель",
-        "palette": ["#8A8781", "#5E5B56", "#141413"],
+        "palette": [
+          "#8A8781",
+          "#5E5B56",
+          "#141413"
+        ],
         "accessory": "cap"
       },
       "quota": {
@@ -403,7 +456,11 @@
         "level": 1,
         "id": "intern",
         "name": "Котёнок-стажёр",
-        "palette": ["#D97757", "#A84F32", "#141413"],
+        "palette": [
+          "#D97757",
+          "#A84F32",
+          "#141413"
+        ],
         "accessory": null
       },
       "quota": {
@@ -413,7 +470,7 @@
       }
     }
   ],
-  "botUsername": "ClaudeBOT",
+  "botUsername": "GPTBOT",
   "quota": null,
   "world": {
     "seed": 1057399

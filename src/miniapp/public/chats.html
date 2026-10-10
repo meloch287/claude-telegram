@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="ru" data-page="chats" data-boot>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Админка · AI Bot</title>
+    <link rel="stylesheet" href="./chats.css?v=20261010-engines1" />
+    <link rel="stylesheet" href="./loading.css?v=20261009-ui1" />
+    <script src="./telegram-web-app.js"></script>
+    <script src="./entry.js?v=20261009-unified1"></script>
+    <script type="module" src="./chats.js?v=20261010-engines1"></script>
+  <link rel="stylesheet" href="./motion.css?v=20261009-smooth2"><script src="./motion.js?v=20261009-ui1"></script></head>
+  <body data-section="admin">
+    <div class="page-loader" role="status" aria-label="Загрузка">
+      <div class="boot-placeholder"></div>
+      <div class="boot-placeholder large"></div>
+      <div class="boot-placeholder small"></div>
+    </div>
+    <main class="page-content">
+      <nav aria-label="Приложение">
+        <span class="brand"
+          ><svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            aria-hidden="true"
+          >
+            <path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 3V6a2 2 0 0 1 2-2Z" />
+            <path d="M7 9h10M7 13h6" /></svg
+          >AI Bot</span
+        >
+        <a href="./modes.html" class="admin-home-link nav-card"
+          >‹ Назад</a
+        >
+      </nav>
+      <header>
+        <h1 id="page-title">Админка</h1>
+        <p id="page-description">GPT и Claude · доступ и лимиты</p>
+      </header>
+      <section id="panel-admin" aria-label="Управление">
+        <section class="account-card engine-card" aria-labelledby="engines-title">
+          <h3 id="engines-title">Доступ к движкам</h3>
+          <button id="engine-gpt" class="engine-row" type="button" role="switch" aria-checked="true" data-engine="gpt" disabled><span class="engine-name">GPT<small>Telegram, bb и консультации</small></span><span class="engine-switch" aria-hidden="true"></span></button>
+          <button id="engine-claude" class="engine-row" type="button" role="switch" aria-checked="true" data-engine="claude" disabled><span class="engine-name">Claude<small>Telegram, bb и консультации</small></span><span class="engine-switch" aria-hidden="true"></span></button>
+          <p class="engine-note">Выключенный движок закрыт для всех, кроме тебя. Им бот отвечает: «временно ограничен».</p>
+        </section>
+        <div id="accounting" class="accounting-slot" aria-live="polite" aria-busy="true">
+          <section class="account-card account-loading" role="status" aria-label="Загрузка статистики GPT">
+            <h3>GPT · подписка</h3>
+            <div class="account-placeholder wide" aria-hidden="true"></div>
+            <div class="account-placeholder" aria-hidden="true"></div>
+            <div class="account-placeholder bar" aria-hidden="true"></div>
+            <div class="account-placeholder short" aria-hidden="true"></div>
+          </section>
+          <section class="account-card account-loading account-loading-details" aria-hidden="true">
+            <div class="account-placeholder short"></div>
+          </section>
+        </div>
+        <div id="claude-accounting" class="accounting-slot" aria-live="polite" aria-busy="true">
+          <section class="account-card account-loading" role="status" aria-label="Загрузка статистики Claude">
+            <h3>Claude Code</h3>
+            <div class="account-placeholder wide" aria-hidden="true"></div>
+            <div class="account-placeholder" aria-hidden="true"></div>
+            <div class="account-placeholder bar" aria-hidden="true"></div>
+          </section>
+        </div>
+        <button id="accounting-refresh" class="secondary-button">Обновить</button>
+        <p id="accounting-status" class="note" role="status"></p>
+        <dl class="admin-overview" aria-label="Обзор">
+          <div>
+            <dt>С доступом</dt>
+            <dd id="stat-active">—</dd>
+          </div>
+          <div>
+            <dt>GPT · токены за день</dt>
+            <dd id="stat-tokens">—</dd>
+          </div>
+        </dl>
+        <p class="note" id="token-accounting-note" hidden></p>
+        <div class="users-heading">
+          <h2>Пользователи <span id="users-total" class="count-badge">—</span></h2>
+          <div class="admin-actions">
+            <button id="invite-user" class="primary-button">↗ Пригласить</button>
+            <button id="add-user" class="primary-button">
+              <span aria-hidden="true">＋</span> По ID
+            </button>
+          </div>
+        </div>
+        <div class="admin-toolbar">
+          <div class="search-field">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.7"
+              aria-hidden="true"
+            >
+              <circle cx="10.5" cy="10.5" r="6.5" />
+              <path d="m16 16 4.5 4.5" /></svg
+            ><input
+              id="user-search"
+              type="search"
+              placeholder="Имя или ID"
+              aria-label="Поиск пользователей"
+            />
+          </div>
+          <span class="select-field"
+            ><select id="user-filter" aria-label="Фильтр пользователей">
+              <option value="all">Все</option>
+              <option value="allowed">С доступом</option>
+              <option value="blocked">Без доступа</option>
+              <option value="limited">Лимит превышен</option></select
+            ><svg
+              viewBox="0 0 20 20"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+              aria-hidden="true"
+            >
+              <path d="m6 8 4 4 4-4" stroke-linecap="round" stroke-linejoin="round" /></svg
+          ></span>
+        </div>
+        <p id="admin-status" class="note" role="status"></p>
+        <button id="admin-retry" class="secondary-button" hidden>Повторить загрузку</button>
+        <div class="users-table">
+          <div class="users-columns" aria-hidden="true">
+            <span>Пользователь</span><span>GPT · неделя</span><span>Диалоги</span><span></span>
+          </div>
+          <div id="users-list" aria-label="Пользователи"></div>
+        </div>
+        <details class="limits-help">
+          <summary>Как работают лимиты</summary>
+          <p>По умолчанию: 10% Pro в неделю и 5 диалогов. Владелец — без личного лимита.</p>
+          <p>
+            Расход Pro — оценка по приросту показателя OpenAI. Начатый запрос может превысить лимит.
+            Диски: предупреждение от 20 ГБ, блокировка от 30 ГБ до очистки до 10 ГБ.
+          </p>
+        </details>
+      </section>
+    </main>
+    <dialog id="invite-detail" aria-labelledby="invite-title">
+      <div class="dialog-header"><h2 id="invite-title">Пригласить пользователя</h2></div>
+      <p class="note">Один человек · 7 дней · 10% Pro и 5 диалогов.</p>
+      <label for="invite-url">Ссылка приглашения</label>
+      <input id="invite-url" type="text" readonly />
+      <p id="invite-status" class="note" role="status"></p>
+      <div class="admin-actions">
+        <button id="invite-copy" class="primary-button">Скопировать</button
+        ><button id="invite-share" class="secondary-button">Отправить в Telegram</button>
+      </div>
+      <button id="invite-close" class="secondary-button">Закрыть</button>
+    </dialog>
+    <dialog id="user-detail" aria-labelledby="user-heading" aria-describedby="user-subtitle">
+      <form id="user-form">
+        <div class="sheet-heading">
+          <div>
+            <h2 id="user-heading">Пользователь</h2>
+            <p id="user-subtitle">Доступ и личные лимиты</p>
+          </div>
+          <button id="user-close" class="icon-button" type="button" aria-label="Закрыть">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.7"
+              aria-hidden="true"
+            >
+              <path d="m6 6 12 12M18 6 6 18" />
+            </svg>
+          </button>
+        </div>
+        <div class="sheet-body">
+          <fieldset>
+            <legend>Профиль</legend>
+            <label for="user-name">Имя или заметка</label
+            ><input
+              id="user-name"
+              maxlength="120"
+              placeholder="Как подписать пользователя"
+              autocomplete="off"
+            />
+            <label for="user-id">Telegram ID</label
+            ><input
+              id="user-id"
+              type="text"
+              inputmode="numeric"
+              pattern="[0-9]+"
+              required
+              placeholder="Например, 123456789"
+              aria-describedby="user-id-hint"
+            />
+            <p class="field-hint" id="user-id-hint">Числовой ID аккаунта, не @username.</p>
+          </fieldset>
+          <fieldset>
+            <legend>Лимиты</legend>
+            <div class="limit-engine" role="tablist" aria-label="Режим лимитов"><button type="button" role="tab" id="limits-gpt" aria-selected="true"><img src="./openai.svg" alt="">GPT</button><button type="button" role="tab" id="limits-claude" aria-selected="false"><img src="./claude.svg" alt="">Claude Code</button></div>
+            <div class="limit-pages"><section id="gpt-limits" role="tabpanel" aria-labelledby="limits-gpt">
+            <label for="user-percent">Недельный лимит Pro</label>
+            <div class="input-unit">
+              <input
+                id="user-percent"
+                type="number"
+                min="0"
+                max="100"
+                step="0.1"
+                value="10"
+                required
+              /><span>%</span>
+            </div>
+            <p class="field-hint">От всей подписки. 0% — запрет задач.</p>
+            <p id="user-usage" class="field-hint"></p>
+            </section><section id="claude-limits" role="tabpanel" aria-labelledby="limits-claude" hidden>
+            <label for="claude-daily">Токенов в сутки</label><input id="claude-daily" type="number" min="0" step="1" placeholder="Без ограничения">
+            <label for="claude-weekly">Токенов за 7 дней</label><input id="claude-weekly" type="number" min="0" step="1" placeholder="Без ограничения">
+            <p class="field-hint">Личные лимиты Claude. Пусто — без ограничения, 0 — запрет новых задач. Один начатый запрос может превысить остаток.</p><p id="claude-quota-usage" class="field-hint"></p>
+            </section></div><p id="user-storage" class="field-hint"></p>
+            <label for="user-dialogs">Количество диалогов</label>
+            <div class="input-unit">
+              <input
+                id="user-dialogs"
+                type="number"
+                min="0"
+                step="1"
+                placeholder="5"
+                aria-describedby="dialog-hint"
+              /><span id="dialog-unit">диалогов</span>
+            </div>
+            <p class="field-hint" id="dialog-hint">
+              Включая перенесённые чаты. Новые доступны в пределах лимита.
+            </p>
+          </fieldset>
+          <div id="user-access-section" class="access-section" hidden>
+            <div>
+              <h3>Доступ к боту</h3>
+              <p>История и файлы сохранятся.</p>
+            </div>
+            <button class="danger-button" id="user-remove" type="button">Отключить</button>
+          </div>
+          <div id="user-delete-section" class="access-section delete-section" hidden>
+            <div>
+              <h3>Удаление данных</h3>
+              <p>
+                Диалоги, файлы, вход в GPT и данные миниапки будут удалены с сервера. Доступ
+                закроется.
+              </p>
+            </div>
+            <button class="danger-button" id="user-delete" type="button">Удалить все данные</button>
+          </div>
+          <p id="user-form-status" class="form-error" role="alert" hidden></p>
+        </div>
+        <div class="sheet-actions">
+          <button id="user-cancel" class="secondary-button" type="button">Отмена</button
+          ><button class="primary-button" id="user-save" type="submit">Сохранить</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="user-delete-detail" aria-labelledby="delete-heading">
+      <form id="user-delete-form">
+        <div class="sheet-heading">
+          <div>
+            <h2 id="delete-heading">Удалить все данные?</h2>
+            <p id="delete-person"></p>
+          </div>
+        </div>
+        <div class="sheet-body">
+          <p class="delete-warning">
+            Это необратимо. Все диалоги, созданные файлы, контейнер, вход в GPT, статистика и
+            сохранения пользователя будут удалены, в том числе из резервных копий бота на этом
+            сервере.
+          </p>
+          <label for="delete-confirmation">Для подтверждения введи ID пользователя</label>
+          <input id="delete-confirmation" inputmode="numeric" autocomplete="off" required />
+          <p id="delete-status" class="field-hint" role="status"></p>
+        </div>
+        <div class="sheet-actions">
+          <button id="delete-close" class="secondary-button" type="button">Отмена</button
+          ><button id="delete-submit" class="danger-button" type="submit" disabled>
+            Удалить навсегда
+          </button>
+        </div>
+      </form>
+    </dialog>
+    <p id="toast" role="status" hidden></p>
+  </body>
+</html>

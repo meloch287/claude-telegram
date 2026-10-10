@@ -1,5 +1,5 @@
 /**
- * Мини-игра: чем больше токенов потратил — тем солиднее твой Claude-кот.
+ * Мини-игра: чем больше токенов потратил — тем солиднее твой GPT-кот.
  * Данные общие для бота и Mini App: бот шлёт текстом, мини-апп рисует SVG.
  */
 
@@ -20,100 +20,100 @@ export const CAT_LEVELS: CatLevel[] = [
   {
     level: 1,
     id: "intern",
-    name: "Котёнок-стажёр",
+    name: "GPT-котёнок",
     threshold: 0,
     title: "Только что открыл первый файл",
-    palette: ["#D97757", "#A84F32", "#141413"],
+    palette: ["#6EE7C0", "#188A70", "#152923"],
     accessory: "клубок",
     quote: "Мяу. А где тут README?",
   },
   {
     level: 2,
     id: "reader",
-    name: "Кот-читатель",
+    name: "Кот-исследователь",
     threshold: 500_000,
     title: "Читает быстрее, чем ты скроллишь",
-    palette: ["#8A8781", "#5E5B56", "#141413"],
+    palette: ["#9ADDE8", "#397D8A", "#152923"],
     accessory: "очки",
     quote: "Я прочитал всё. Даже комментарии.",
   },
   {
     level: 3,
     id: "greper",
-    name: "Кот-грепер",
+    name: "Кот Codex",
     threshold: 2_000_000,
     title: "Находит нужную строку с первого раза",
-    palette: ["#55534E", "#332F2B", "#141413"],
+    palette: ["#91A6B8", "#445A6F", "#152923"],
     accessory: "лупа",
     quote: "Оно в utils. Всегда в utils.",
   },
   {
     level: 4,
     id: "refactor",
-    name: "Кот-рефакторщик",
+    name: "Кот Luna",
     threshold: 6_000_000,
     title: "Удалил больше строк, чем написал",
-    palette: ["#D6B489", "#A07F53", "#141413"],
+    palette: ["#C4B5FD", "#7960BF", "#152923"],
     accessory: "ножницы",
     quote: "Этой абстракции здесь быть не должно.",
   },
   {
     level: 5,
     id: "debugger",
-    name: "Кот-дебагер",
+    name: "Кот-навигатор",
     threshold: 15_000_000,
     title: "Видит баг сквозь стек-трейс",
-    palette: ["#C4633E", "#8E4227", "#141413"],
+    palette: ["#A9E67F", "#527F35", "#152923"],
     accessory: "фонарик",
     quote: "Воспроизводится. Дальше дело техники.",
   },
   {
     level: 6,
     id: "architect",
-    name: "Кот-архитектор",
+    name: "Кот Sol",
     threshold: 30_000_000,
     title: "Рисует схемы, которые потом сбываются",
-    palette: ["#6A9BCC", "#3F6A96", "#141413"],
+    palette: ["#F1D67A", "#AA832C", "#152923"],
     accessory: "чертёж",
     quote: "Разложим на модули — и станет скучно. В хорошем смысле.",
   },
   {
     level: 7,
     id: "reviewer",
-    name: "Кот-ревьюер",
+    name: "Кот-инженер",
     threshold: 60_000_000,
     title: "Оставляет комментарии, с которыми не поспоришь",
-    palette: ["#7E9166", "#556042", "#141413"],
+    palette: ["#80D5CA", "#2A807A", "#152923"],
     accessory: "красная ручка",
     quote: "Здесь гонка. Вот сценарий.",
   },
   {
     level: 8,
     id: "orchestrator",
-    name: "Кот-оркестратор",
+    name: "Кот Astra",
     threshold: 120_000_000,
     title: "Запускает субагентов и не путается",
-    palette: ["#6B4E9B", "#46316B", "#141413"],
+    palette: ["#AEA1F3", "#6757AC", "#152923"],
     accessory: "дирижёрская палочка",
     quote: "Ты, ты и ты — по файлу каждому.",
   },
   {
     level: 9,
-    id: "opus",
-    name: "Кот-опус",
+    id: "creator",
+    name: "Кот-создатель",
     threshold: 250_000_000,
     title: "Работает всю ночь, к утру всё зелёное",
-    palette: ["#A85236", "#743520", "#141413"],
+    palette: ["#79DBC0", "#2E8D76", "#152923"],
     accessory: "кружка",
     quote: "Тесты прошли. Все. Проверил дважды.",
   },
   {
     level: 10,
     id: "quantum",
-    name: "Квантовый кот",
+    name: "Квантовый GPT-кот",
     threshold: 500_000_000,
     title: "Одновременно исправил и не трогал",
-    palette: ["#E0A93B", "#A2731F", "#141413"],
+    palette: ["#CEEFA2", "#759C48", "#152923"],
     accessory: "коробка",
     quote: "Пока ты не открыл PR, баг и есть, и нет.",
   },
@@ -178,7 +178,7 @@ export const ACHIEVEMENTS: Achievement[] = [
     description: "Поработать в трёх разных проектах",
     icon: "🗂️",
   },
-  { id: "max_cat", name: "Предел", description: "Дорасти до Квантового кота", icon: "🐈‍⬛" },
+  { id: "max_cat", name: "Предел", description: "Дорасти до Квантового GPT-кота", icon: "🐈‍⬛" },
 ];
 
 export function catForTokens(totalTokens: number): CatLevel {
@@ -205,4 +205,12 @@ export function catProgress(totalTokens: number): number {
 
 export function formatTokens(n: number): string {
   return new Intl.NumberFormat("ru-RU").format(Math.round(n));
+}
+
+export function catForMode(cat: CatLevel, engine: "gpt" | "claude"): CatLevel {
+ if(engine === "gpt")return cat;
+ const names=["Котёнок Claude","Кот-читатель","Кот Haiku","Кот-редактор","Кот-сыщик","Кот Sonnet","Кот-мыслитель","Кот Fable","Кот Opus","Мудрец Claude"];
+ const colors=[["#F0C9A9","#B97751"],["#E8B895","#A86142"],["#EAC9B9","#B97D65"],["#DBC3A3","#A3855B"],["#DFA788","#A96044"],["#EDC79E","#B58354"],["#C8B199","#836954"],["#D0B9D2","#876C91"],["#F1D8B3","#B68B51"],["#F2C9AE","#B8734F"]];
+ const pair=colors[cat.level-1]!;
+ return {...cat,id:"claude-"+cat.id,name:names[cat.level-1]!,palette:[pair[0]!,pair[1]!,"#3C2920"]};
 }

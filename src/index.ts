@@ -1,3 +1,23 @@
+import { createToolsMenu } from "./bot/tools-menu.js";
+import { taskState } from "./bot/task-state.js";
+import { setExtraApiHandler } from "./miniapp/server.js";
+import { beginClaudeWork } from "./bot/claude-work.js";
+import { registerClaudeStorage, isClaudeCleaning, stopClaudeForStorage } from "./bot/claude-storage.js";
+import { gptStorage } from "./engine.js";
+import { dialogRecord, updateDialog } from "./agent/dialog-workspace.js";
+import { registerClaudeDeleteMenu } from "./bot/delete-menu.js";
+import { claudeDeleteOperations, isClaudeDeleting } from "./bot/claude-deletion.js";
+import { listAllUserSessions, userSessionInfo, userSessionMessages, renameUserSession } from "./agent/session-history.js";
+import {isGitHubUpdate} from "./github.js";
+import {claudeUsageText} from "./claude-usage.js";
+import {imageMime,videoPreview} from "./bot/media.js";
+import {readFileSync as readMediaFile} from "node:fs";
+import { sendHelp } from "./bot/help.js";
+import { ADMIN_ID, isAdmin } from "./admin.js";
+import { getModeData } from "./db.js";
+import { catForMode } from "./cats.js";
+import { claudePreferences, claudeModels, claudeModelLabel, refreshClaudeModels, saveClaudePreferences } from "./claude-settings.js";
+import { reloadClaudeSettings } from "./bot/session.js";
 import {
   Bot,
   GrammyError,
@@ -11,9 +31,6 @@ import { HttpsProxyAgent } from "https-proxy-agent";
 import { statSync, readdirSync } from "node:fs";
 import { basename, join, resolve, sep } from "node:path";
 import {
-  getSessionMessages,
-  listSessions,
-  renameSession,
   type PermissionMode,
 } from "@anthropic-ai/claude-agent-sdk";
 import { fetchTelegramFile } from "./bot/tgFile.js";
@@ -29,6 +46,7 @@ import {
   disallowUser,
   inviterOf,
   isUserAllowedInDb,
+  isGptUserAllowed,
   listAllowedUsers,
   listRateLimits,
   quotaLeft,
@@ -65,7 +83,6 @@ import {
   stopBackgroundTask,
 } from "./bot/session.js";
 import {
-  HELP,
   acceptCredential,
   askForCredential,
   awaitingKindFor,
@@ -81,9 +98,8 @@ import { ACHIEVEMENTS, CAT_LEVELS, catForTokens, formatTokens, nextCat } from ".
 import { esc, prepareRichMarkdown, details, fence } from "./agent/render.js";
 import { limitTitle, percentOf, toMillis, WINDOWS } from "./limits.js";
 import { subscriptionUsage } from "./subscription-usage.js";
-import { saveTelegramFile } from "./bot/attachments.js";
+import { saveTelegramFile, saveAttachment } from "./bot/attachments.js";
 import { transcribe, transcriptionConfigured, TranscriptionNotConfigured } from "./bot/voice.js";
-import { speechConfigured } from "./bot/speak.js";
 import { formatSize } from "./bot/artifacts.js";
 import { cloneRepository } from "./bot/repos.js";
 import {
@@ -95,6 +111,7 @@ import {
   type RepoStatus,
 } from "./bot/git.js";
 import { setBotUsername, setWorldNotifier, startMiniAppServer } from "./miniapp/server.js";
+import { isWorkflowCommand, listWorkflows, syncAllWorkflows } from "./claude-workflows.js";
 import { scheduleDailyBackups } from "./backup.js";
 import {
   activeChannel,
@@ -105,7 +122,10 @@ import {
   startChannelWatch,
 } from "./proxy.js";
 import { startFileLog, tailLog } from "./log.js";
+import { engineFor, setEngine, gptReady, forwardToGpt, type Engine } from "./engine.js";
 import { runningTasks, clearRunning } from "./db.js";
+import { startBbBridge } from "./bb-bridge.js";
+import { engineAllowed, engineClosedText } from "./engine-access.js";
 
 // Раньше всего остального: иначе первые же строки о выборе канала и о том,
 // что пошло не так на старте, в файл не попадут — а именно они нужны, когда
@@ -160,7 +180,7 @@ bot.api.config.use(async (prev, method, payload, signal) => {
       return await prev(method, payload, signal);
     } catch (error) {
       const сетевая = error instanceof HttpError;
-      if (!сетевая || попытка >= паузы.length) throw error;
+      if (!сетевая || /^(?:send|forward|copy)/.test(method) && method !== "sendChatAction" || попытка >= паузы.length) throw error;
       console.warn(`[tg] ${method}: связь оборвалась, повтор через ${паузы[попытка]} мс`);
       await new Promise((готово) => setTimeout(готово, паузы[попытка]));
     }
@@ -169,7 +189,7 @@ bot.api.config.use(async (prev, method, payload, signal) => {
 
 /** Владелец — первый в списке из .env. Он один распоряжается доступом. */
 function ownerId(): number | undefined {
-  return config.allowedUserIds[0];
+  return ADMIN_ID;
 }
 
 /**
@@ -180,10 +200,105 @@ function ownerId(): number | undefined {
  * отзывается там же.
  */
 function isAllowed(userId: number): boolean {
-  if (config.allowedUserIds.length === 0) return true;
-  if (config.allowedUserIds.includes(userId)) return true;
-  return isUserAllowedInDb(userId);
+  return isGptUserAllowed(userId);
 }
+
+taskState.recover("claude");
+const toolsMenu = createToolsMenu({
+  api: bot.api,
+  activeClaude(uid) { workspaceFor(uid, getChat(uid)?.project || "default"); return getChat(uid)!.session_id!; },
+  async openClaude(uid, id) {
+    if (isClaudeDeleting(uid) || isClaudeCleaning(uid) || getSession(uid)?.conversation.busy) throw Error("Дождись завершения текущей задачи или нажми /stop");
+    const record = dialogRecord(uid, id);
+    if (!record) throw Error("Диалог удалён или недоступен");
+    const current = getChat(uid);
+    if (current?.session_id === id) return;
+    await resetSession(uid, uid);
+    saveChat({ chatId: uid, userId: uid, project: record.project, sessionId: id, title: record.title, permissionMode: current?.permission_mode ?? config.defaultPermissionMode });
+  },
+  async submitClaude(ctx, text, images) {
+    if (!await requireLogin(ctx)) return false;
+    const done = beginClaudeWork(ctx.from!.id);
+    try { return await runTask(ctx, text, images); } finally { done(); }
+  },
+});
+setExtraApiHandler(toolsMenu.api);
+
+/** Один токен и один поток Telegram updates для обоих движков. */
+bot.use(async (ctx, next) => {
+  const userId = ctx.from?.id;
+  if (userId === undefined || ctx.chat?.type !== "private" || !isAllowed(userId)) {
+    await next();
+    return;
+  }
+  if (isClaudeDeleting(userId) || isClaudeCleaning(userId)) {
+    if (ctx.callbackQuery) await ctx.answerCallbackQuery("Удаляю чаты Claude. Подожди немного.");
+    else await ctx.reply("Удаляю чаты Claude. Подожди немного.");
+    return;
+  }
+  if (await toolsMenu.handle(ctx)) return;
+  const deleteMode = (ctx.callbackQuery?.data?.startsWith("cdel:") || ctx.callbackQuery?.data?.startsWith("cdisk:")) ? "claude" : ctx.callbackQuery?.data?.startsWith("del:") ? "gpt" : null;
+  if (deleteMode && engineFor(userId) !== deleteMode) {
+    await ctx.answerCallbackQuery("Режим изменился. Открой /delete заново.");
+    return;
+  }
+  const command = ctx.message?.text?.trim() ?? "";
+  if(/^\/start(?:@\w+)?\s+usage_claude$/i.test(command)){
+    await ctx.reply(await claudeUsageText(userId));return;
+  }
+  if (ctx.callbackQuery?.data === "claude:stop") {
+    await ctx.answerCallbackQuery();
+    await getSession(ctx.chat.id)?.conversation.interrupt();
+    return;
+  }
+  const callback = ctx.callbackQuery?.data?.startsWith("engine:")
+    ? ctx.callbackQuery.data.slice("engine:".length)
+    : null;
+  if (callback) {
+    const raw = callback.trim().toLowerCase();
+    if (callback) await ctx.answerCallbackQuery();
+    if (raw === "claude" || raw === "gpt") {
+      const engine = raw as Engine;
+      if (engine === "gpt" && !isGptUserAllowed(userId)) {
+        await ctx.reply("Для твоего аккаунта доступ к GPT закрыт.");
+        return;
+      }
+      if (engine === "gpt" && !(await gptReady())) {
+        await ctx.reply("GPT пока недоступен. Claude Code продолжает работать.");
+        return;
+      }
+      setEngine(userId, engine);
+      await ctx.reply(
+        engine === "claude"
+          ? "Клод бот"
+          : "GPT бот",
+      );
+      return;
+    }
+    await ctx.reply(`Сейчас: ${engineFor(userId) === "claude" ? "Claude Code" : "GPT Codex"}. Выбери режим:`, {
+      reply_markup: new InlineKeyboard()
+        .text("Claude Code", "engine:claude")
+        .text("GPT Codex", "engine:gpt"),
+    });
+    return;
+  }
+  const workflowsList = /^\/workflows(?:@\w+)?(?:\s|$)/i.test(command);
+  if (!workflowsList && (ctx.callbackQuery?.data === "stop" || isGitHubUpdate(command, ctx.callbackQuery?.data) || engineFor(userId) === "gpt" || /^\/(?:web|webapp)(?:@\w+)?(?:\s|$)/i.test(command))) {
+    if (!isGptUserAllowed(userId)) {
+      setEngine(userId, "claude");
+      await ctx.reply("Доступ к GPT закрыт. Режим переключён на Claude Code.");
+      return;
+    }
+    try {
+      await forwardToGpt(ctx.update);
+    } catch (error) {
+      console.error("[engine] GPT dispatch failed:", error);
+      await ctx.reply("GPT временно недоступен. Выбрать Claude — /start.").catch(() => {});
+    }
+    return;
+  }
+  await next();
+});
 
 /** Доступ. Без белого списка бот отдаёт шелл кому угодно, поэтому проверка идёт первой. */
 bot.use(async (ctx, next) => {
@@ -199,7 +314,7 @@ bot.use(async (ctx, next) => {
   if (!isAllowed(userId)) {
     // Свой номер человеку виден: владельцу он нужен, чтобы добавить его,
     // а посторонний узнаёт только то, что и так знает про себя.
-    await ctx.reply(`Этот бот приватный. Твой номер: ${userId}`);
+    await ctx.reply("ЗДЕСЬ ЗАНЯТО!!! ВЫШЕЛ НАХУЙ ОТСЮДА");
     return;
   }
   await next();
@@ -237,6 +352,21 @@ bot.use(async (ctx, next) => {
   await next();
 });
 
+bot.use(async (ctx, next) => {
+  const text = ctx.message?.text || "";
+  const needsSpace = ctx.message && (!text.startsWith("/") || /^\/(?:bg|clone|commit)(?:\s|$)/.test(text));
+  if (ctx.chat?.type === "private" && needsSpace) {
+    const end = beginClaudeWork(ctx.from!.id);
+    try {
+      try { await gptStorage(ctx.from!.id, "admit"); }
+      catch (e) { await ctx.reply(e instanceof Error ? e.message : "Проверь место через /storage."); return; }
+      await next();
+    } finally { end(); }
+    return;
+  }
+  await next();
+});
+
 // ── Вход ─────────────────────────────────────────────────────────────────────
 
 bot.command("start", async (ctx) => {
@@ -244,7 +374,25 @@ bot.command("start", async (ctx) => {
 });
 
 bot.command("help", async (ctx) => {
-  await ctx.reply(HELP, { parse_mode: "HTML" });
+  await sendHelp(ctx, "claude");
+});
+
+/** Готовые воркфлоу Claude Code: оркестрация субагентов одной командой. */
+bot.command("workflows", async (ctx) => {
+  const list = listWorkflows(ctx.from!.id);
+  if (!list.length) {
+    await ctx.reply("Готовые воркфлоу работают в режиме Claude Code. Переключиться — /start.");
+    return;
+  }
+  const lines = list.map((w) => `/${w.name} — ${esc(w.description)}`);
+  await ctx.reply(
+    "<b>Готовые воркфлоу</b>\n\nКаждый раскладывает задачу на субагентов и перепроверяет результат.\n\n" +
+      lines.join("\n\n") +
+      "\n\nНапиши команду и задачу, например: <code>/review</code> или <code>/plan перевести бота на вебхуки</code>. " +
+      "Можно и словами: «сделай ревью воркфлоу». Без включённой оркестрации запуск подтверждают кнопкой." +
+      (engineFor(ctx.from!.id) === "gpt" ? "\n\nСейчас выбран GPT — воркфлоу работают в режиме Claude, переключиться: /start." : ""),
+    { parse_mode: "HTML" },
+  );
 });
 
 bot.command("logout", async (ctx) => {
@@ -456,11 +604,18 @@ bot.command("stop", async (ctx) => {
  * Прошлые чаты этого проекта. Сессии Claude Code лежат файлами рядом с рабочей
  * папкой, поэтому список тот же, что показал бы `claude --resume` в терминале.
  */
+const claudeDeleteMenu = registerClaudeDeleteMenu(bot, claudeDeleteOperations);
+const claudeStorageMenu = registerClaudeStorage(bot, claudeDeleteMenu.open);
+bot.callbackQuery(/^disk:/, async ctx => {
+  await ctx.answerCallbackQuery();
+  if (ctx.callbackQuery.data === "disk:dialogs") await claudeDeleteMenu.open(ctx);
+  else await claudeStorageMenu.show(ctx);
+});
+
 bot.command("resume", async (ctx) => {
   const userId = ctx.from!.id;
   const chatRow = getChat(ctx.chat.id);
   const project = chatRow?.project ?? "default";
-  const cwd = workspaceFor(userId, project);
 
   // «/resume все» — чаты из всех проектов пользователя. Без этого чат,
   // начатый в другом проекте, найти было нельзя вовсе.
@@ -468,24 +623,11 @@ bot.command("resume", async (ctx) => {
 
   let sessions;
   try {
-    if (wantsAll) {
-      const root = resolve(config.workspaceRoot, String(userId));
-      const projects = readdirSync(root, { withFileTypes: true })
-        .filter((e) => e.isDirectory())
-        .map((e) => e.name);
-      const found = await Promise.all(
-        projects.map(async (name) => {
-          const list = await listSessions({ dir: join(root, name), limit: 10 }).catch(() => []);
-          return list.map((item) => ({ ...item, project: name }));
-        }),
-      );
-      sessions = found
-        .flat()
-        .sort((a, b) => Number(new Date(b.lastModified)) - Number(new Date(a.lastModified)))
-        .slice(0, 10);
-    } else {
-      sessions = await listSessions({ dir: cwd, limit: 10 });
-    }
+    sessions = (await listAllUserSessions(userId))
+      .map(item => ({ ...item, project: dialogRecord(userId, item.sessionId)?.project ?? "default" }))
+      .filter(item => wantsAll || item.project === project)
+      .sort((a, b) => b.lastModified - a.lastModified)
+      .slice(0, 10);
   } catch (error) {
     await ctx.reply(`⚠️ Не смог прочитать список чатов: ${esc(String(error).slice(0, 200))}`, {
       parse_mode: "HTML",
@@ -534,9 +676,9 @@ bot.command("resume", async (ctx) => {
  * первым делом спрашивает «а что мы тут делали». Показываем последний обмен
  * репликами — этого хватает, чтобы вспомнить, и не приходится листать вверх.
  */
-async function lastExchange(sessionId: string, cwd: string): Promise<string | null> {
+async function lastExchange(userId: number, sessionId: string, cwd: string): Promise<string | null> {
   try {
-    const messages = await getSessionMessages(sessionId, { dir: cwd });
+    const messages = await userSessionMessages(userId, sessionId, cwd);
     if (!messages.length) return null;
 
     const текст = (m: (typeof messages)[number]): string => {
@@ -585,14 +727,25 @@ bot.callbackQuery(/^rs:(.+)$/, async (ctx) => {
   const chatId = ctx.chat!.id;
   const chatRow = getChat(chatId);
 
+  const info = await userSessionInfo(userId, sessionId).catch(() => null);
+  if (!info?.cwd) {
+    await ctx.answerCallbackQuery("Диалог недоступен. Открой /resume заново.");
+    return;
+  }
+  if (getSession(chatId)?.conversation.busy) {
+    await ctx.answerCallbackQuery("Дождись завершения задачи или нажми /stop.");
+    return;
+  }
+  const project = dialogRecord(userId, sessionId)?.project ?? "default";
+
   // Живой диалог закрываем: продолжать надо именно ту сессию, что выбрали.
   await resetSession(chatId, userId);
   saveChat({
     chatId,
     userId,
-    project: chatRow?.project ?? "default",
+    project,
     sessionId,
-    title: chatRow?.title ?? null,
+    title: info.customTitle || info.summary || null,
     permissionMode: chatRow?.permission_mode ?? config.defaultPermissionMode,
   });
 
@@ -601,8 +754,8 @@ bot.callbackQuery(/^rs:(.+)$/, async (ctx) => {
 
   // Напоминаем, на чём встали: без этого возврат в чат недельной давности
   // начинается с «а что мы тут делали».
-  const cwd = workspaceFor(userId, chatRow?.project ?? "default");
-  const хвост = await lastExchange(sessionId, cwd);
+  const cwd = workspaceFor(userId, project);
+  const хвост = await lastExchange(userId, sessionId, cwd);
   await ctx.reply(
     хвост
       ? `↩️ Вернулся в этот чат. На чём остановились:\n\n${хвост}\n\nПиши — продолжу.`
@@ -621,24 +774,22 @@ async function showScreen(ctx: CommandContext<Context>, id: ScreenId): Promise<v
 bot.command("menu", async (ctx) => showScreen(ctx, "menu"));
 bot.command("mode", async (ctx) => showScreen(ctx, "mode"));
 bot.command("model", async (ctx) => {
-  // «/model claude-fable-5-1» ставит модель по ID напрямую: новые модели
-  // выходят чаще, чем мы правим список кнопок.
+  await refreshClaudeModels(ctx.from!.id).catch(() => {});
   const raw = (ctx.match ?? "").trim();
   if (raw) {
-    if (!/^[a-z0-9._-]+$/i.test(raw)) {
-      await ctx.reply("Так модель не называется. Пример: /model claude-fable-5-1");
-      return;
-    }
-    const model = raw === "default" ? null : raw;
-    setModel(ctx.from!.id, model);
-    const session = getSession(ctx.chat.id);
-    if (session && model) await session.conversation.setModel(model);
-    const label = MODELS.find(([id]) => id === (model ?? ""))?.[1] ?? model;
-    await ctx.reply(`Модель: ${label ?? "по умолчанию"}`);
+    if (getSession(ctx.chat.id)?.conversation.busy) { await ctx.reply("Дождись завершения задачи или нажми /stop."); return; }
+    try {
+      const value = saveClaudePreferences(ctx.from!.id, { model: raw });
+      await reloadClaudeSettings(ctx.chat.id);
+      await ctx.reply(`Модель Claude: ${value.model}`);
+    } catch (error) { await ctx.reply(error instanceof Error ? error.message : "Не удалось выбрать модель"); }
     return;
   }
   await showScreen(ctx, "model");
 });
+bot.command("effort", async (ctx) => showScreen(ctx, "thinking"));
+bot.command("thinking", async (ctx) => showScreen(ctx, "thinking"));
+
 
 /**
  * Забрать репозиторий в рабочую папку проекта.
@@ -940,7 +1091,8 @@ bot.command("rename", async (ctx) => {
 
   const cwd = workspaceFor(userId, chatRow?.project ?? "default");
   try {
-    await renameSession(sessionId, title.slice(0, 80), { dir: cwd });
+    if (dialogRecord(userId, sessionId)?.started) await renameUserSession(userId, sessionId, title.slice(0, 80), cwd);
+    updateDialog(userId, sessionId, { title: title.slice(0, 80) });
   } catch (error) {
     await ctx.reply(`⚠️ Не переименовалось: ${esc(String(error).slice(0, 200))}`, {
       parse_mode: "HTML",
@@ -991,32 +1143,6 @@ bot.command("project", async (ctx) => {
  * Только владельцу: в логе видно, кто и что писал боту, включая чужие чаты,
  * если их когда-нибудь пустят. Первый в ALLOWED_USER_IDS и есть владелец.
  */
-/** Чаты, где бот читает вслух всегда, а не только в ответ на голосовое. */
-const alwaysVoice = new Set<number>();
-
-/**
- * Постоянная озвучка. На голосовое бот отвечает голосом и без неё; эта команда
- * для тех, кто пишет текстом, а слушать хочет.
- */
-bot.command("voice", async (ctx) => {
-  const chatId = ctx.chat.id;
-  if (!speechConfigured()) {
-    await ctx.reply("Озвучка не настроена: задай <code>TTS_URL</code> в <code>.env</code>.", {
-      parse_mode: "HTML",
-    });
-    return;
-  }
-  if (alwaysVoice.has(chatId)) {
-    alwaysVoice.delete(chatId);
-    await ctx.reply("🔇 Больше не читаю вслух.");
-    return;
-  }
-  alwaysVoice.add(chatId);
-  await ctx.reply(
-    "🔊 Буду читать ответы вслух — все, пока не выключишь. Выключить — /voice ещё раз.",
-  );
-});
-
 bot.command("logs", async (ctx) => {
   const owner = config.allowedUserIds[0];
   if (owner === undefined || ctx.from!.id !== owner) {
@@ -1054,6 +1180,7 @@ bot.command("logs", async (ctx) => {
  */
 bot.command("admin", async (ctx) => {
   const userId = ctx.from!.id;
+  if(!isAdmin(userId)){await ctx.reply("Управление доступно только владельцу.");return;}
 
   // Приглашать может каждый, у кого свой доступ. У кого его нет — тому нечего
   // делить: он сам работает по чужой подписке.
@@ -1186,6 +1313,7 @@ async function showAccessList(
   ctx: CommandContext<Context> | Context,
   userId: number,
 ): Promise<void> {
+  if(!isAdmin(userId))return;
   // Владелец видит всех: он отвечает за машину целиком. Остальные — только тех,
   // кого позвали сами, чтобы не лезть в чужие подписки.
   const общий = userId === ownerId();
@@ -1249,6 +1377,7 @@ async function showAccessList(
 
 bot.callbackQuery(/^adm:del:(\d+)$/, async (ctx) => {
   const userId = ctx.from.id;
+  if(!isAdmin(userId)){await ctx.answerCallbackQuery("Управление доступно только владельцу.");return;}
   const id = Number(ctx.match[1]);
   // Отозвать может тот, кто звал, и владелец машины. Иначе один приглашённый
   // выкидывал бы другого из чужой подписки.
@@ -1264,11 +1393,13 @@ bot.callbackQuery(/^adm:del:(\d+)$/, async (ctx) => {
 
 bot.command("stats", async (ctx) => {
   const userId = ctx.from!.id;
-  const user = getOrCreateUser(userId);
-  const today = getUsageToday(userId);
-  const cat = catForTokens(user.total_tokens);
-  const next = nextCat(user.total_tokens);
-  const modelLabel = MODELS.find(([id]) => id === (user.model ?? ""))?.[1] ?? user.model;
+  const user = {...getOrCreateUser(userId),...getModeData("claude").stats(userId)};
+  const today = getModeData("claude").daily(userId,1)[0]!;
+  const cat = catForMode(catForTokens(user.total_tokens),"claude");
+  const nextRaw = nextCat(user.total_tokens);
+  const next = nextRaw ? catForMode(nextRaw,"claude") : null;
+  const selected = claudeModels(userId).find(model => model.value === claudePreferences(userId).model)!;
+  const modelLabel = claudeModelLabel(selected);
 
   await ctx.reply(
     [
@@ -1298,11 +1429,11 @@ bot.command("stats", async (ctx) => {
 
 bot.command("cats", async (ctx) => {
   const userId = ctx.from!.id;
-  const user = getOrCreateUser(userId);
+  const user = {...getOrCreateUser(userId),...getModeData("claude").stats(userId)};
   const current = catForTokens(user.total_tokens);
   const have = unlockedIds(userId);
 
-  const catLines = CAT_LEVELS.map((cat) => {
+  const catLines = CAT_LEVELS.map(cat=>catForMode(cat,"claude")).map((cat) => {
     const open = user.total_tokens >= cat.threshold;
     const marker = cat.level === current.level ? "👉" : open ? "✅" : "🔒";
     const name = open ? `<b>${esc(cat.name)}</b>` : esc(cat.name);
@@ -1320,70 +1451,7 @@ bot.command("cats", async (ctx) => {
   );
 });
 
-bot.command("status", async (ctx) => {
-  const channel = activeChannel();
-  const chat = getChat(ctx.chat.id);
-
-  // Спрашивают про остаток — значит хотят свежее число, а не то, что осело
-  // после прошлой задачи. Живой сессии может и не быть: тогда покажем базу.
-  const session = getSession(ctx.chat.id);
-  if (session) await session.conversation.refreshRateLimits(true);
-  const lines = [
-    "<b>Чат</b>",
-    chat?.title ? esc(chat.title) : "новый — ещё ни одной задачи",
-    "",
-    "<b>Канал выхода</b>",
-    channel
-      ? `✅ ${esc(describeChannel(channel))}`
-      : "❌ рабочего канала нет — Anthropic недоступен ни напрямую, ни через прокси",
-  ];
-
-  // Две шкалы показываем всегда: недельное окно присылает событие только на
-  // подходе к пределу, и до тех пор строка просто отсутствовала — это читалось
-  // как поломка, хотя данных действительно нет.
-  const known = new Map(listRateLimits(ctx.from!.id).map((row) => [row.limit_type, row]));
-
-  lines.push("", "<b>Лимиты подписки</b>");
-  for (const { type, ms } of WINDOWS) {
-    const row = known.get(type);
-    const own = subscriptionUsage(ms);
-    const viaBot = usageSince(ctx.from!.id, ms);
-    const parts = [`<b>${esc(limitTitle(type))}</b>`];
-    const ceiling = type === "five_hour" ? config.limitFiveHourTokens : config.limitSevenDayTokens;
-    const свой = percentOf(own.tokens, ceiling);
-    if (row?.utilization != null) {
-      parts.push(`${Math.round(row.utilization)}%`);
-    } else if (свой !== null) {
-      // Процент от своего потолка: у Anthropic его этим токеном не взять.
-      parts.push(`${свой}% из 100 (${formatTokens(own.tokens)} из ${formatTokens(ceiling)})`);
-    } else {
-      parts.push(`замер ${formatTokens(own.tokens)} (через бота ${formatTokens(viaBot.tokens)})`);
-    }
-    if (row?.resets_at) {
-      parts.push(
-        `сброс ${new Date(toMillis(row.resets_at)).toLocaleString("ru-RU", {
-          day: "2-digit",
-          month: "2-digit",
-          hour: "2-digit",
-          minute: "2-digit",
-        })}`,
-      );
-    }
-    lines.push(parts.join(" · "));
-  }
-
-  if (![...known.values()].some((row) => row.utilization != null)) {
-    lines.push(
-      "",
-      "<i>Процент считается от своего потолка: число Anthropic приходит с claude.ai, " +
-        "а он с этого сервера отдаёт проверку Cloudflare. Расход берётся из транскриптов — " +
-        "всё, что сделал Claude Code на сервере, вместе с кэшем. Потолок задаётся в .env: " +
-        "LIMIT_FIVE_HOUR_TOKENS и LIMIT_SEVEN_DAY_TOKENS.</i>",
-    );
-  }
-
-  await ctx.reply(lines.join("\n"), { parse_mode: "HTML" });
-});
+bot.command(["usage","status"],async ctx=>{await ctx.reply(await claudeUsageText(ctx.from!.id));});
 
 // ── Инлайн-кнопки ────────────────────────────────────────────────────────────
 
@@ -1415,18 +1483,17 @@ bot.callbackQuery(/^m:(.+)$/, async (ctx) => {
   await ctx.editMessageReplyMarkup({ reply_markup: view.keyboard }).catch(() => undefined);
 });
 
-bot.callbackQuery(/^md:(.+)$/, async (ctx) => {
-  const raw = ctx.match[1] ?? "default";
-  const model = raw === "default" ? null : raw;
-  const userId = ctx.from.id;
-  setModel(userId, model);
-
-  const session = getSession(ctx.chat!.id);
-  if (session && model) await session.conversation.setModel(model);
-
-  await ctx.answerCallbackQuery("Модель изменена");
-  const view = renderScreen("model", { userId, chatId: ctx.chat!.id });
-  await ctx.editMessageReplyMarkup({ reply_markup: view.keyboard }).catch(() => undefined);
+bot.callbackQuery(/^(md|ce|ct):(.+)$/, async (ctx) => {
+  if (getSession(ctx.chat!.id)?.conversation.busy) { await ctx.answerCallbackQuery("Дождись завершения задачи или нажми /stop"); return; }
+  const kind = ctx.match[1], raw = ctx.match[2] ?? "default", userId = ctx.from.id;
+  try {
+    const patch = kind === "md" ? { model: raw } : kind === "ce" ? { effort: raw === "default" ? null : raw } : { thinking: claudePreferences(userId).thinking === "disabled" ? "enabled" : "disabled" };
+    saveClaudePreferences(userId, patch);
+    await reloadClaudeSettings(ctx.chat!.id);
+    await ctx.answerCallbackQuery("Настройки Claude сохранены");
+    const view = renderScreen(kind === "md" ? "model" : "thinking", { userId, chatId: ctx.chat!.id });
+    await ctx.editMessageReplyMarkup({ reply_markup: view.keyboard }).catch(() => undefined);
+  } catch (error) { await ctx.answerCallbackQuery(error instanceof Error ? error.message : "Не удалось сохранить"); }
 });
 
 bot.callbackQuery(/^p:([^:]+):(.+)$/, async (ctx) => {
@@ -1505,10 +1572,15 @@ bot.callbackQuery(/^q:([^:]+):(\d+)$/, async (ctx) => {
  * Отдать реплику агенту. Один путь на все виды сообщений: текст, голос, файл,
  * пересылку — иначе обработка ошибок разъезжается по копиям.
  */
-async function runTask(ctx: Context, prompt: string): Promise<boolean> {
+async function runTask(ctx: Context, prompt: string, images: string[] = []): Promise<boolean> {
   const userId = ctx.from?.id;
   const chatId = ctx.chat?.id;
   if (userId === undefined || chatId === undefined) return false;
+  // Админ может временно закрыть Claude для всех, кроме себя.
+  if (!engineAllowed("claude", userId)) {
+    await ctx.reply(engineClosedText("claude"));
+    return false;
+  }
 
   // Внутренняя суточная квота больше не блокирует: она отказывала «квота
   // исчерпана», хотя лимитов подписки хватало с запасом (04.09.2026). Расход
@@ -1524,8 +1596,8 @@ async function runTask(ctx: Context, prompt: string): Promise<boolean> {
     // Голосом — только если о том попросили командой /voice. Отвечать голосом
     // на голосовое казалось удобным, но это догадка за пользователя: он прислал
     // голосовое, потому что так быстрее набрать, а не потому что хочет слушать.
-    session.output.voiceReply = alwaysVoice.has(chatId);
-    await session.conversation.send(prompt);
+    session.output.voiceReply = taskState.voice(userId);
+    await session.conversation.send(prompt,images);
     return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -1568,7 +1640,7 @@ bot.on(["message:photo", "message:document"], async (ctx) => {
 
   let saved;
   try {
-    saved = await saveTelegramFile(ctx.api, fileId, cwd, suggested);
+    saved = await saveTelegramFile(ctx.api, fileId, cwd, suggested, userId);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await ctx.reply(`⚠️ Не смог принять файл: ${esc(message)}`, { parse_mode: "HTML" });
@@ -1582,7 +1654,7 @@ bot.on(["message:photo", "message:document"], async (ctx) => {
     ? `${caption}\n\nФайл лежит здесь: ${saved.path}`
     : `Пользователь прислал файл: ${saved.path}. Посмотри на него и скажи, что видишь.`;
 
-  await runTask(ctx, prompt);
+  await runTask(ctx, prompt, imageMime(readMediaFile(saved.path))?[saved.path]:[]);
 });
 
 /**
@@ -1607,7 +1679,7 @@ bot.on(["message:video", "message:video_note", "message:animation"], async (ctx)
 
   let saved;
   try {
-    saved = await saveTelegramFile(ctx.api, media.file_id, cwd, suggested);
+    saved = await saveTelegramFile(ctx.api, media.file_id, cwd, suggested, ctx.from.id);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await ctx.reply(`⚠️ Не смог принять видео: ${esc(message)}`, { parse_mode: "HTML" });
@@ -1615,17 +1687,15 @@ bot.on(["message:video", "message:video_note", "message:animation"], async (ctx)
   }
 
   const caption = ctx.message.caption?.trim();
-  await ctx.reply(
-    `🎬 Сохранил <code>${esc(saved.name)}</code>. Смотреть видео я не умею, но файл на месте — скажи, что с ним делать.`,
-    { parse_mode: "HTML" },
-  );
+  const images:string[]=[];
+  let description="Видео сохранено. Кадры не удалось подготовить — не выдумывай его содержимое.";
+  try{
+    const preview=await videoPreview(readMediaFile(saved.path));
+    for(let i=0;i<preview.frames.length;i++)images.push(saveAttachment(ctx.from.id,cwd,`кадр-${i+1}.jpg`,preview.frames[i]!).path);
+    description=`Видео, длительность ${Math.round(preview.duration)} сек. Приложены ${images.length} отдельных кадра по ходу видео; звук не расшифрован.`;
+  }catch{await ctx.reply("Видео сохранено, но кадры извлечь не удалось.");}
+  await runTask(ctx,`${caption||"Посмотри приложенное видео."}\n${description}\nВидеофайл: ${saved.path}`,images);
 
-  await runTask(
-    ctx,
-    caption
-      ? `${caption}\n\nВидеофайл лежит здесь: ${saved.path}`
-      : `Пользователь прислал видеофайл: ${saved.path}. Содержимое посмотреть нельзя — при необходимости используй инструменты (например, ffmpeg через Bash).`,
-  );
 });
 
 /**
@@ -1791,7 +1861,13 @@ bot.on("message:text", async (ctx, next) => {
     return;
   }
   const имя = text.slice(1).split(/[\s@]/)[0] ?? "";
-  await ctx.reply(`Нет такой команды: <code>/${esc(имя)}</code>\n\nВсе команды — /help.`, {
+  // Готовые воркфлоу (/review, /plan, /deep-research…) — это команды Claude Code:
+  // отдаём их агенту как есть, он сам развернёт воркфлоу.
+  if (isWorkflowCommand(ctx.from.id, имя.toLowerCase())) {
+    await next();
+    return;
+  }
+  await ctx.reply(`Нет такой команды: <code>/${esc(имя)}</code>\n\nВсе команды — /help, готовые воркфлоу — /workflows.`, {
     parse_mode: "HTML",
   });
 });
@@ -1917,8 +1993,7 @@ bot.catch((err) => {
 
 async function shutdown(signal: string): Promise<void> {
   console.log(`\n${signal}: закрываю сессии…`);
-  await bot.stop();
-  await closeAll();
+  await Promise.allSettled([closeAll(), bot.stop()]);
   closeDb();
   process.exit(0);
 }
@@ -1926,29 +2001,37 @@ async function shutdown(signal: string): Promise<void> {
 process.once("SIGINT", () => void shutdown("SIGINT"));
 process.once("SIGTERM", () => void shutdown("SIGTERM"));
 
+
+let checkingClaudeStorage = false;
+const claudeStorageTimer = setInterval(async () => {
+  if (checkingClaudeStorage) return;
+  checkingClaudeStorage = true;
+  try {
+    for (const uid of new Set([...runningTasks().map(t => t.chat_id), ...config.allowedUserIds, ADMIN_ID])) {
+      if (!getSession(uid)?.conversation.busy && !backgroundTasks(uid).length) continue;
+      try { await gptStorage(uid, "admit"); }
+      catch { await stopClaudeForStorage(uid); }
+    }
+  } finally { checkingClaudeStorage = false; }
+}, 60000);
+claudeStorageTimer.unref();
+
 await bot.api.setMyCommands([
-  { command: "menu", description: "главное меню" },
-  { command: "resume", description: "прошлые чаты" },
-  { command: "rename", description: "переименовать чат" },
-  { command: "new", description: "начать заново" },
-  { command: "file", description: "забрать файл из проекта" },
-  { command: "context", description: "насколько заполнен контекст" },
-  { command: "bg", description: "запустить задачу в фоне" },
-  { command: "stop", description: "остановить агента" },
-  { command: "mode", description: "режим разрешений" },
-  { command: "model", description: "сменить модель" },
-  { command: "clone", description: "забрать репозиторий" },
-  { command: "diff", description: "что изменилось в коде" },
-  { command: "commit", description: "закоммитить изменения" },
-  { command: "project", description: "переключить проект" },
-  { command: "stats", description: "расход и мой кот" },
-  { command: "cats", description: "коты и достижения" },
-  { command: "status", description: "канал выхода и лимиты" },
-  { command: "voice", description: "читать ответы вслух" },
-  { command: "logs", description: "хвост лога (владельцу)" },
-  { command: "admin", description: "кому можно пользоваться ботом (владельцу)" },
-  { command: "logout", description: "удалить доступ" },
-  { command: "help", description: "справка" },
+  {command:"start",description:"Главное меню · GPT и Claude"},
+  {command:"github",description:"Подключить GitHub к GPT и Claude"},
+  {command:"web",description:"Рабочая зона в браузере"},
+  {command:"new",description:"Новый диалог"},
+  {command:"resume",description:"Прошлые диалоги"},
+  {command:"delete",description:"Удалить чаты и их файлы"},
+  {command:"storage",description:"Место на диске и очистка"},
+  {command:"search",description:"Поиск по чатам GPT и Claude"},
+  {command:"files",description:"Галерея файлов и ZIP"},
+  {command:"continue",description:"Продолжить прерванную задачу"},
+  {command:"voice",description:"Включить или выключить озвучку"},
+  {command:"usage",description:"Лимиты выбранного ИИ"},
+  {command:"workflows",description:"Готовые воркфлоу с субагентами (Claude)"},
+  {command:"stop",description:"Остановить задачу"},
+  {command:"help",description:"Все команды"},
 ]);
 
 // Мини-апп поднимаем ПЕРВЫМ, до перебора каналов.
@@ -1960,6 +2043,8 @@ await bot.api.setMyCommands([
 // исправен, просто ждал VPN. Здоровье должно означать «процесс жив и
 // обслуживает», а не «канал до Anthropic поднялся».
 startMiniAppServer();
+// Готовые воркфлоу Claude Code — в ~/.claude/workflows каждого пользователя.
+syncAllWorkflows();
 // Подарок или пираты с чужого острова — повод открыть мир: пишем хозяину.
 setWorldNotifier(async (userId, text) => {
   await bot.api.sendMessage(userId, text);
@@ -1984,6 +2069,9 @@ if (choice.active) {
   console.log(`🌍 Выход: ${describeChannel(choice.active)}`);
 } else {
   console.warn("⚠️  Рабочего канала до Anthropic нет. Агент не сможет работать.");
+  if (process.env.REQUIRE_PROXY === "1") {
+    throw new Error("Обязательный прокси недоступен: бот не запускается.");
+  }
 }
 
 /**
@@ -2017,14 +2105,13 @@ startChannelWatch(parsePool(config.proxyPool), {
  * висит всегда. Без chat_id значение становится умолчанием для всех чатов.
  */
 if (config.miniappUrl) {
-  await bot.api.setChatMenuButton({
-    menu_button: {
-      type: "web_app",
-      text: "🐱 Кот",
-      web_app: { url: config.miniappUrl },
-    },
-  });
-  console.log(`🐱 Кнопка мини-аппа повешена на меню: ${config.miniappUrl}`);
+  const url = new URL("modes.html", config.miniappUrl.endsWith("/") ? config.miniappUrl : config.miniappUrl + "/").href;
+  for (const chat_id of [undefined, ...config.allowedUserIds]) {
+    await bot.api.setChatMenuButton({
+      ...(chat_id ? { chat_id } : {}),
+      menu_button: { type: "web_app", text: "Мой бот", web_app: { url } },
+    }).catch(error => { if (!chat_id) throw error; });
+  }
 } else {
   // Иначе осталась бы кнопка от прошлого запуска, ведущая в никуда.
   await bot.api.setChatMenuButton({ menu_button: { type: "commands" } });
@@ -2050,15 +2137,18 @@ for (const task of runningTasks()) {
   const текст =
     "⚠️ Бот перезапустился, задача оборвалась" +
     (прошло > 0 ? ` (шла ${прошло} мин)` : "") +
-    ".\n\nКонтекст цел — повтори последнюю просьбу или загляни в /resume.";
+    ".\n\nИстория и этапы сохранены. Открой /continue, чтобы продолжить задачу.";
   try {
-    await bot.api.editMessageText(task.chat_id, task.message_id, текст);
+    await bot.api.editMessageText(task.chat_id, task.message_id, текст, { reply_markup: taskState.list(task.chat_id).length ? new InlineKeyboard().text("Продолжить", "recover:" + taskState.list(task.chat_id)[0]!.id) : undefined });
   } catch {
     // Сообщение могли удалить или оно слишком старое для правки — тогда просто
     // пишем новым, молчать здесь нельзя.
-    await bot.api.sendMessage(task.chat_id, текст).catch(() => {});
+    await bot.api.sendMessage(task.chat_id, текст, { reply_markup: taskState.list(task.chat_id).length ? new InlineKeyboard().text("Продолжить", "recover:" + taskState.list(task.chat_id)[0]!.id) : undefined }).catch(() => {});
   }
 }
 
 console.log("🤖 Бот запущен");
+// Claude-диалоги из рабочей зоны bb идут через этот же движок (см. bb-bridge.ts).
+const bbBridge = startBbBridge({ api: bot.api });
+bbBridge.on("error", (error) => console.error("[bb-bridge]", error));
 await bot.start({ drop_pending_updates: true });

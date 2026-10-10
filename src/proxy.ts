@@ -162,9 +162,13 @@ export async function chooseChannel(
 ): Promise<ChannelChoice> {
   const checked: ChannelStatus[] = [];
 
-  const direct = await probe({ url: "", label: "прямой выход" });
-  checked.push(direct);
-  if (direct.reachable) return { active: direct, checked };
+  if (process.env.REQUIRE_PROXY !== "1") {
+    const direct = await probe({ url: "", label: "прямой выход" });
+    checked.push(direct);
+    if (direct.reachable) return { active: direct, checked };
+  } else if (pool.length === 0) {
+    return { active: null, checked };
+  }
 
   // Пул обходим до трёх раз: между проходами прокси успевает переключить
   // сервер, а балансировщик — выкинуть мёртвый. Сдаёмся, только если за все

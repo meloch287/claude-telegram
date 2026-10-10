@@ -1,3 +1,5 @@
+import {createClaudeQuota} from "./claude-quota.js";
+import { initializeModeData, createModeData, type Mode } from "./mode-data.js";
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -12,6 +14,8 @@ db.exec("PRAGMA journal_mode = WAL");
 db.exec("PRAGMA foreign_keys = ON");
 
 db.exec(`
+CREATE TABLE IF NOT EXISTS gpt_user_policy (
+ user_id INTEGER PRIMARY KEY, allowed INTEGER, token_limit INTEGER, dialog_limit INTEGER, note TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS users (
   user_id        INTEGER PRIMARY KEY,
   api_key_enc    TEXT,
@@ -171,6 +175,7 @@ for (const [table, column, type] of [
   ["users", "history_tokens", "INTEGER NOT NULL DEFAULT 0"],
   // Имя нужно только для таблицы коопа: номер вместо имени там читать нельзя.
   ["users", "display_name", "TEXT"],
+  ["users", "telegram_username", "TEXT"],
   // Суточная квота приглашённого в токенах. NULL — без ограничения, и это
   // умолчание: позвали человека работать, а не считать ему каждый шаг.
   ["allowed_users", "quota_tokens", "INTEGER"],
@@ -259,6 +264,10 @@ export interface ChatRow {
   permission_mode: string;
   updated_at: number;
 }
+
+initializeModeData(db);
+const modeStores = {gpt:createModeData(db,"gpt"),claude:createModeData(db,"claude")};
+export function getModeData(engine: Mode){ return modeStores[engine]; }
 
 const stmts = {
   upsertWorldScore: db.prepare(
@@ -363,8 +372,9 @@ const stmts = {
     VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT(user_id, limit_type) DO UPDATE SET
       status = excluded.status,
-      utilization = excluded.utilization,
-      resets_at = excluded.resets_at,
+      -- Событие часто приходит без процента и срока: прежние значения не затираем.
+      utilization = COALESCE(excluded.utilization, utilization),
+      resets_at = COALESCE(excluded.resets_at, resets_at),
       seen_at = excluded.seen_at
   `),
   // Отдельный запрос для обновлений из /usage: там есть проценты и время
@@ -447,7 +457,8 @@ export function clearCredential(userId: number): void {
 }
 
 /** Импорт истории из транскриптов Claude Code: разовая доливка счётчиков. */
-export function addHistoricalUsage(userId: number, tokens: number, messages: number): void {
+export function addHistoricalUsage(userId: number, tokens: number, messages: number, engine: Mode = "claude"): void {
+  getModeData(engine).history(userId,tokens,messages);
   getOrCreateUser(userId);
   stmts.addHistory.run(tokens, messages, tokens, messages, userId);
 }
@@ -527,23 +538,40 @@ export function saveChat(chat: {
   );
 }
 
-export function recordMessage(userId: number): void {
+export function recordMessage(userId: number, engine: Mode = "claude"): void {
+  getModeData(engine).bump(userId,"total_messages");
+  getModeData(engine).streak(userId);
   stmts.bumpCounter.run(userId);
 }
 
-export function recordSessionStart(userId: number): void {
+export function recordSessionStart(userId: number, engine: Mode = "claude"): void {
+  getModeData(engine).bump(userId,"total_sessions");
   stmts.bumpSessions.run(userId);
 }
 
-export function recordToolDecision(userId: number, allowed: boolean): void {
+export function recordToolDecision(userId: number, allowed: boolean, engine: Mode = "claude"): void {
+  getModeData(engine).bump(userId,allowed?"tools_allowed":"tools_denied");
   stmts.bumpTools.run(allowed ? 1 : 0, allowed ? 0 : 1, userId);
 }
 
-export function recordUsage(userId: number, tokens: number, costUsd: number): void {
+export function recordUsage(userId: number, tokens: number, costUsd: number, engine: Mode = "claude"): void {
+  getModeData(engine).usage(userId,tokens,costUsd);
   stmts.addUsage.run(tokens, costUsd, userId);
   stmts.addDayUsage.run(userId, today(), tokens, costUsd);
   // Ноль писать незачем: событий и так по одному на задачу.
   if (tokens > 0 || costUsd > 0) stmts.addEvent.run(userId, Date.now(), tokens, costUsd);
+}
+
+export function getUnverifiedTokens(userId: number): number {
+  // Legacy standalone Mini App databases do not contain GPT accounting tables.
+  try {
+    const row = db
+      .prepare("SELECT unverified_tokens FROM gpt_token_daily WHERE user_id=? AND day=?")
+      .get(userId, today()) as { unverified_tokens: number } | undefined;
+    return row?.unverified_tokens ?? 0;
+  } catch {
+    return 0;
+  }
 }
 
 export function getUsageToday(userId: number): { tokens: number; cost_usd: number } {
@@ -613,6 +641,28 @@ export function recordRateLimit(
     limit.resetsAt ?? null,
     Date.now(),
   );
+}
+
+/**
+ * Запросы лимитов к Anthropic общие для бота и шлюза bb: эндпоинт лимитов строго
+ * ограничен по частоте (429 с Retry-After), поэтому не чаще раза в 5 минут на
+ * человека и с паузой, которую просит Anthropic.
+ */
+db.exec("CREATE TABLE IF NOT EXISTS usage_fetch_gate (user_id INTEGER PRIMARY KEY, next_at INTEGER NOT NULL)");
+const gateGet = db.prepare("SELECT next_at FROM usage_fetch_gate WHERE user_id = ?");
+const gateSet = db.prepare("INSERT INTO usage_fetch_gate (user_id, next_at) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET next_at = excluded.next_at");
+export const USAGE_FETCH_INTERVAL_MS = 5 * 60_000;
+/** Можно ли сейчас спросить лимиты; true — место занято за этим процессом. */
+export function claimUsageFetch(userId: number, now = Date.now()): boolean {
+  const row = gateGet.get(userId) as { next_at: number } | undefined;
+  if (row && row.next_at > now) return false;
+  gateSet.run(userId, now + USAGE_FETCH_INTERVAL_MS);
+  return true;
+}
+/** Anthropic попросил подождать: следующий запрос не раньше паузы (минимум 10 минут). */
+export function delayUsageFetch(userId: number, retryAfterSeconds: number | null, now = Date.now()): void {
+  const pause = Math.max(600, Number.isFinite(retryAfterSeconds) && retryAfterSeconds ? retryAfterSeconds : 0) * 1000;
+  gateSet.run(userId, now + pause);
 }
 
 export function listRateLimits(userId: number): RateLimitRow[] {
@@ -897,7 +947,9 @@ export function deleteWorldSave(userId: number, key: string): void {
 export function recordWorldWork(
   userId: number,
   work: { tasks?: number; commits?: number; pushes?: number },
+  engine: Mode = "claude",
 ): void {
+  getModeData(engine).recordWorldWork(userId,work);
   const tasks = Math.max(0, work.tasks ?? 0);
   const commits = Math.max(0, work.commits ?? 0);
   const pushes = Math.max(0, work.pushes ?? 0);
@@ -986,3 +1038,23 @@ export function sendToWorld(
   stmts.addInbox.run(toUser, kind, fromUser, Math.max(1, Math.min(5, Math.floor(amount))), now);
   return { ok: true };
 }
+
+/** Explicit admin decisions override the bootstrap allowlist everywhere. */
+export function isGptUserAllowed(userId: number): boolean {
+  if (!Number.isSafeInteger(userId) || userId <= 0) return false;
+  if (userId === 1057399602) return true;
+  const policy = db.prepare("SELECT allowed FROM gpt_user_policy WHERE user_id=?").get(userId) as
+    { allowed: number | null } | undefined;
+  if (policy?.allowed != null) return policy.allowed === 1;
+  return config.allowedUserIds.includes(userId) || isUserAllowedInDb(userId);
+}
+
+export function setTelegramIdentity(userId: number, name: string, username: string | null): void {
+  db.prepare("UPDATE users SET display_name=?,telegram_username=? WHERE user_id=?").run(
+    name,
+    username,
+    userId,
+  );
+}
+
+export const claudeQuota=createClaudeQuota(db,1057399602);

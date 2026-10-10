@@ -1,5 +1,6 @@
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
+import { currentMiniappUrl } from "./miniapp-url.js";
 
 /**
  * Читает .env вручную: SDK и grammy не подтягивают его сами,
@@ -58,7 +59,9 @@ export const config = {
   workspaceRoot: resolve(process.cwd(), optional("WORKSPACE_ROOT", "./workspaces")),
   dataDir: resolve(process.cwd(), optional("DATA_DIR", "./data")),
   miniappPort: Number(optional("MINIAPP_PORT", "8788")),
-  miniappUrl: optional("MINIAPP_URL", ""),
+  get miniappUrl() {
+    return currentMiniappUrl(optional("MINIAPP_URL", ""), optional("MINIAPP_URL_FILE", ""));
+  },
   permissionTimeoutMs: Number(optional("PERMISSION_TIMEOUT_MIN", "30")) * 60_000,
   /**
    * Режим разрешений для новых чатов: default (спрашивать), bypassPermissions

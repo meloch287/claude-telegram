@@ -1,0 +1,359 @@
+{
+ "_comment": "Недостающий русский перевод рабочей зоны bb. literals — точные строковые литералы интерфейса (`...` или \"...\"); code — точечные правки кода. Применяет scripts/patch-bb-ru.py.",
+ "literals": [
+  [
+   "Setting up workspace...",
+   "Готовим рабочее пространство…"
+  ],
+  [
+   "Starting thread...",
+   "Запускаем диалог…"
+  ],
+  [
+   "Queue a message to run after the stop",
+   "Сообщение выполнится после остановки"
+  ],
+  [
+   "Queue a message for when the host reconnects",
+   "Сообщение уйдёт, когда сервер вернётся"
+  ],
+  [
+   "Retry by sending a follow-up message",
+   "Отправь сообщение, чтобы повторить"
+  ],
+  [
+   "Ask for a follow-up. @ to mention files, folders, sections, or threads",
+   "Продолжи диалог. @ — файлы, папки, разделы или диалоги"
+  ],
+  [
+   "Setting up...",
+   "Готовим…"
+  ],
+  [
+   "Starting...",
+   "Запускаем…"
+  ],
+  [
+   "Queue for after the stop",
+   "В очередь после остановки"
+  ],
+  [
+   "Queue for when the host is back",
+   "В очередь до возвращения сервера"
+  ],
+  [
+   "Send a follow-up",
+   "Отправь сообщение"
+  ],
+  [
+   "Ask a follow-up",
+   "Продолжить диалог…"
+  ],
+  [
+   "Submit (Enter)",
+   "Отправить (Enter)"
+  ],
+  [
+   "Submitting...",
+   "Отправляем…"
+  ],
+  [
+   "Loading models...",
+   "Загружаем модели…"
+  ],
+  [
+   "Could not load models.",
+   "Не удалось загрузить модели."
+  ],
+  [
+   "Unavailable",
+   "Недоступно"
+  ],
+  [
+   "Select an environment.",
+   "Выбери окружение."
+  ],
+  [
+   "Enter a prompt or attach a file.",
+   "Напиши задачу или прикрепи файл."
+  ],
+  [
+   "Select a model.",
+   "Выбери модель."
+  ],
+  [
+   "Finish voice input first.",
+   "Сначала закончи голосовой ввод."
+  ],
+  [
+   "Unread thread failed",
+   "Новая ошибка"
+  ],
+  [
+   "Thread needs user input",
+   "Нужен твой ответ"
+  ],
+  [
+   "Thread working with unsubmitted draft",
+   "Работает, есть неотправленный черновик"
+  ],
+  [
+   "Workflow running",
+   "Выполняется сценарий"
+  ],
+  [
+   "Background agent running",
+   "Работает фоновый агент"
+  ],
+  [
+   "Background command running",
+   "Выполняется фоновая команда"
+  ],
+  [
+   "Plan mode active",
+   "Режим планирования"
+  ],
+  [
+   "Goal active",
+   "Цель активна"
+  ],
+  [
+   "Thread working",
+   "Агент работает"
+  ],
+  [
+   "Queued message failed to send",
+   "Сообщение из очереди не отправилось"
+  ],
+  [
+   "Thread has a message waiting to send",
+   "Сообщение ждёт отправки"
+  ],
+  [
+   "Thread has unsubmitted draft",
+   "Есть неотправленный черновик"
+  ],
+  [
+   "Unread thread succeeded",
+   "Новый результат"
+  ],
+  [
+   "All threads",
+   "Все диалоги"
+  ],
+  [
+   "Loading threads",
+   "Загружаем диалоги"
+  ],
+  [
+   "Searching threads",
+   "Ищем диалоги"
+  ],
+  [
+   "Couldn’t load threads",
+   "Не удалось загрузить диалоги"
+  ],
+  [
+   "Open links in the in-app browser",
+   "Открывать ссылки во встроенном браузере"
+  ],
+  [
+   "Rewrite localhost links",
+   "Заменять ссылки localhost"
+  ],
+  [
+   "Navigate to threads on creation",
+   "Сразу открывать новый диалог"
+  ],
+  [
+   "Markdown formatting in prompt box",
+   "Markdown в поле ввода"
+  ],
+  [
+   "Show diagnostic events",
+   "Показывать диагностические события"
+  ],
+  [
+   "Default thread followup behavior",
+   "Сообщение во время работы агента"
+  ],
+  [
+   "Streamer mode",
+   "Режим стримера"
+  ],
+  [
+   "New branch prefix",
+   "Префикс новых веток"
+  ],
+  [
+   "System default",
+   "Как в системе"
+  ],
+  [
+   "Microphone",
+   "Микрофон"
+  ],
+  [
+   "bb CLI skills",
+   "Навыки bb CLI"
+  ],
+  [
+   "Fade inactive splits",
+   "Приглушать неактивные панели"
+  ],
+  [
+   "Palettes change bb's colors, including syntax colors in diffs and file previews. Choose a built-in palette or create one from a prompt.",
+   "Палитры меняют цвета bb, включая подсветку кода в диффах и просмотре файлов. Выбери готовую или создай свою по описанию."
+  ],
+  [
+   "Installed",
+   "Установлено"
+  ],
+  [
+   "Out of date",
+   "Устарело"
+  ],
+  [
+   "Not installed",
+   "Не установлено"
+  ],
+  [
+   "Not installed on this machine.",
+   "Не установлено на этой машине."
+  ],
+  [
+   "Up to date",
+   "Актуально"
+  ],
+  [
+   "In progress",
+   "Выполняется"
+  ],
+  [
+   "Update available",
+   "Есть обновление"
+  ],
+  [
+   "bb app",
+   "Приложение bb"
+  ],
+  [
+   "bb update available",
+   "Есть обновление bb"
+  ],
+  [
+   "bb updates available",
+   "Есть обновления bb"
+  ],
+  [
+   "Online",
+   "В сети"
+  ],
+  [
+   "Offline",
+   "Не в сети"
+  ],
+  [
+   "Machine access",
+   "Доступ к машине"
+  ],
+  [
+   "Repositories bb can work in. Drag to change the order projects appear in the sidebar.",
+   "Репозитории, с которыми работает bb. Перетащи, чтобы поменять порядок проектов в боковой панели."
+  ],
+  [
+   "The plugins installed on this bb host. Turn one on or off, apply updates, or open it for settings and details.",
+   "Плагины, установленные на этом bb. Включай и выключай их, обновляй или открывай настройки и подробности."
+  ],
+  [
+   "Discover plugins for bb. Install one, or describe your own and build it from a prompt.",
+   "Плагины для bb. Установи готовый или опиши свой — bb соберёт его по описанию."
+  ],
+  [
+   "All categories",
+   "Все категории"
+  ],
+  [
+   "Never refreshed",
+   "Ещё не обновлялось"
+  ],
+  [
+   "Hide right panel",
+   "Скрыть правую панель"
+  ],
+  [
+   "Show right panel",
+   "Показать правую панель"
+  ],
+  [
+   " Nothing is ready, so bb falls back.",
+   " Ничего не готово, поэтому bb использует запасной вариант."
+  ],
+  [
+   " Using ${n.displayName}.",
+   " Через ${n.displayName}."
+  ],
+  [
+   "Refreshed ${new Date(e.lastRefreshAt).toLocaleString()}",
+   "Обновлено ${new Date(e.lastRefreshAt).toLocaleString()}"
+  ],
+  [
+   "Open ${d}",
+   "Открыть ${d}"
+  ],
+  [
+   "Sort: ${h}",
+   "Сортировка: ${h}"
+  ],
+  [
+   "Sort: ${E.label}",
+   "Сортировка: ${E.label}"
+  ],
+  [
+   "Sort: ${E.label}, ${D}",
+   "Сортировка: ${E.label}, ${D}"
+  ],
+  [
+   "Filters: ${r.join(`; `)}",
+   "Фильтры: ${r.join(`; `)}"
+  ]
+ ],
+ "code": [
+  {
+   "why": "Вкладка плагинов «Установленные» (а статус ниже — «Установлено»)",
+   "old": "{skills:`My skills`,plugins:`Installed`",
+   "new": "{skills:`Мои навыки`,plugins:`Установленные`",
+   "count": 1
+  },
+  {
+   "why": "«По возрастанию/убыванию» — только в подписи сортировки (в грамматиках подсветки кода эти слова не трогаем)",
+   "old": "r===`asc`?`ascending`:`descending`",
+   "new": "r===`asc`?`по возрастанию`:`по убыванию`",
+   "count": 1
+  },
+  {
+   "why": "«Фильтры» — кнопка фильтров в списках",
+   "old": ":`Filters`;c=b",
+   "new": ":`Фильтры`;c=b",
+   "count": 1
+  },
+  {
+   "why": "В подписи диалога не показывать окружение, если его имя — технический UUID (диалоги из Telegram)",
+   "old": "r!==null&&Br(r,t)?null:r",
+   "new": "r!==null&&(Br(r,t)||/^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$/i.test(r))?null:r",
+   "count": 1
+  },
+  {
+   "why": "«Мой профиль» в боковой панели: отступ между аватаром и текстом, круглый аватар",
+   "old": "className:`bb-personal-profile flex min-h-11 items-center rounded-md px-3 text-sm",
+   "new": "className:`bb-personal-profile flex min-h-11 items-center gap-2.5 rounded-md px-3 text-sm",
+   "count": 1
+  },
+  {
+   "why": "Круглый аватар в боковой панели",
+   "old": "(`img`,{src:`/__web/avatar`,alt:``,width:`30`,height:`30`,loading:`lazy`,",
+   "new": "(`img`,{src:`/__web/avatar`,alt:``,width:`30`,height:`30`,loading:`lazy`,className:`size-7 shrink-0 rounded-full object-cover`,",
+   "count": 1
+  }
+ ]
+}

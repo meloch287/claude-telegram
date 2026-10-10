@@ -1,87 +1,36 @@
 import { fetchTelegramFile } from "./tgFile.js";
-import { mkdirSync, createWriteStream } from "node:fs";
+import { constants, openSync, closeSync, fstatSync, fchmodSync, fchownSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { pipeline } from "node:stream/promises";
-import { Readable } from "node:stream";
+import { randomUUID } from "node:crypto";
+import { workerFor } from "../agent/isolation.js";
 import type { Api } from "grammy";
-
-/**
- * Вложения из Telegram: фото и файлы кладём в рабочую папку проекта, а агенту
- * сообщаем путь. Читать картинки он умеет сам — инструментом Read.
- *
- * Телеграм отдаёт ботам файлы не больше 20 МБ. Больше — честно говорим, а не
- * молча обрезаем.
- */
-
-/**
- * Потолок в 20 МБ — ограничение ОБЛАЧНОГО Bot API, а не бота.
- *
- * Снимается единственным способом: своим сервером Bot API (telegram-bot-api),
- * где предел поднимается до 2 ГБ, а файл вдобавок кладётся на диск — качать по
- * сети вообще не нужно. Отсюда два режима.
- */
-function localApiRoot(): string {
-  return (process.env.TELEGRAM_API_ROOT ?? "").trim();
+export interface SavedAttachment {path:string;name:string;}
+export function saveAttachment(userId:number,cwd:string,suggested:string,bytes:Buffer):SavedAttachment {
+  const worker=workerFor(userId),flags=constants.O_RDONLY|constants.O_DIRECTORY|constants.O_NOFOLLOW;
+  const project=openSync(cwd,flags);
+  let dir:number|undefined,file:number|undefined;
+  const clean=suggested.replace(/[^\w.\-А-Яа-яЁё ]+/g,"_").replace(/^[.\s]+/,"").slice(0,80)||"файл";
+  const name=`${randomUUID().slice(0,8)}-${clean}`;
+  try{
+    if(fstatSync(project).uid!==worker.uid)throw Error("Чужая рабочая папка");
+    const upload=`/proc/self/fd/${project}/вложения`;
+    try{mkdirSync(upload,{mode:0o700});}catch(e){if((e as NodeJS.ErrnoException).code!=="EEXIST")throw e;}
+    dir=openSync(upload,flags);
+    if(![0,worker.uid].includes(fstatSync(dir).uid))throw Error("Чужая папка вложений");
+    fchownSync(dir,worker.uid,worker.gid);fchmodSync(dir,0o700);
+    file=openSync(`/proc/self/fd/${dir}/${name}`,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o600);
+    fchownSync(file,worker.uid,worker.gid);writeFileSync(file,bytes);
+    return {path:join(cwd,"вложения",name),name};
+  }finally{if(file!==undefined)closeSync(file);if(dir!==undefined)closeSync(dir);closeSync(project);}
 }
-
-const MAX_BYTES_CLOUD = 20 * 1024 * 1024;
-const MAX_BYTES_LOCAL = 2000 * 1024 * 1024;
-
-export interface SavedAttachment {
-  path: string;
-  name: string;
-}
-
-/** Имя приходит от пользователя и попадает в путь — режем всё лишнее. */
-function safeName(name: string, fallback: string): string {
-  const cleaned = name
-    .replace(/[^\w.\-А-Яа-яЁё ]+/g, "_")
-    .replace(/^[.\s]+/, "")
-    .slice(0, 80);
-  return cleaned || fallback;
-}
-
-export async function saveTelegramFile(
-  api: Api,
-  fileId: string,
-  cwd: string,
-  suggestedName: string,
-): Promise<SavedAttachment> {
-  const file = await api.getFile(fileId);
-  const local = localApiRoot();
-  const limit = local ? MAX_BYTES_LOCAL : MAX_BYTES_CLOUD;
-  if ((file.file_size ?? 0) > limit) {
-    const mb = Math.round((file.file_size ?? 0) / 1024 / 1024);
-    throw new Error(
-      local
-        ? `Файл ${mb} МБ — больше 2 ГБ не отдаёт даже свой сервер Bot API`
-        : `Файл ${mb} МБ. Облачный Bot API отдаёт ботам не больше 20 МБ — это ограничение ` +
-            `Telegram, а не бота. Снимается своим сервером Bot API: нужны api_id и api_hash ` +
-            `с my.telegram.org.`,
-    );
-  }
-  if (!file.file_path) {
-    throw new Error("Telegram не вернул путь к файлу");
-  }
-
-  const dir = join(cwd, "вложения");
-  mkdirSync(dir, { recursive: true });
-
-  // Имя из file_path сохраняет расширение — по нему агент поймёт тип файла.
-  const extension = file.file_path.includes(".")
-    ? file.file_path.slice(file.file_path.lastIndexOf("."))
-    : "";
-  const name = safeName(suggestedName, `${Date.now()}${extension}`);
-  const target = join(dir, name);
-
-  const token = api.token;
-  const response = await fetchTelegramFile(
-    `https://api.telegram.org/file/bot${token}/${file.file_path}`,
-  );
-  if (!response.ok || !response.body) {
-    throw new Error(`Не удалось скачать файл: HTTP ${response.status}`);
-  }
-  await pipeline(Readable.fromWeb(response.body as never), createWriteStream(target));
-
-  return { path: target, name };
+export async function saveTelegramFile(api:Api,fileId:string,cwd:string,suggestedName:string,userId:number):Promise<SavedAttachment>{
+  const file=await api.getFile(fileId),limit=20*1024*1024;
+  if((file.file_size??0)>limit)throw Error("Вложение больше 20 МБ. Раздели файл или пришли ссылку.");
+  if(!file.file_path)throw Error("Telegram не вернул путь к файлу");
+  const response=await fetchTelegramFile(`https://api.telegram.org/file/bot${api.token}/${file.file_path}`);
+  if(!response.ok||!response.body)throw Error(`Не удалось скачать файл: HTTP ${response.status}`);
+  const reader=response.body.getReader(),chunks:Uint8Array[]=[];let size=0;
+  try{while(true){const {done,value}=await reader.read();if(done)break;size+=value.length;if(size>limit)throw Error("Вложение больше 20 МБ");chunks.push(value);}}
+  finally{await reader.cancel();reader.releaseLock();}
+  return saveAttachment(userId,cwd,suggestedName,Buffer.concat(chunks));
 }

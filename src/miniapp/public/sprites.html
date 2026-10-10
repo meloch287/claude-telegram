@@ -50,11 +50,11 @@
     <div class="grid" id="grid"></div>
     <h1>На тёмном</h1>
     <div class="grid" id="grid-dark"></div>
-    <h1>Звезда Claude</h1>
+    <h1>Звезда GPT</h1>
     <div id="star"></div>
     <script type="module">
-      import { catSvg, claudeStar } from "./cat-art.js";
-      const profile = await (await fetch("/demo-profile.json")).json();
+      import { catSvg, gptMark } from "./cat-art.js";
+      const profile = await (await fetch("./demo-profile.json")).json();
       for (const [id, cls] of [
         ["grid", "big"],
         ["grid-dark", "big dark"],
@@ -72,7 +72,7 @@
           box.append(fig);
         }
       }
-      document.getElementById("star").innerHTML = claudeStar(96);
+      document.getElementById("star").innerHTML = gptMark(96);
     </script>
   </body>
 </html>

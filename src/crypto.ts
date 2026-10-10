@@ -50,7 +50,8 @@ export function maskKey(apiKey: string): string {
 export function verifyInitData(initData: string, botToken: string): Record<string, string> | null {
   const params = new URLSearchParams(initData);
   const hash = params.get("hash");
-  if (!hash) return null;
+  if (!hash || !/^[a-f0-9]{64}$/i.test(hash)) return null;
+  if (new Set(params.keys()).size !== [...params.keys()].length) return null;
   params.delete("hash");
 
   const dataCheckString = [...params.entries()]
@@ -67,7 +68,8 @@ export function verifyInitData(initData: string, botToken: string): Record<strin
 
   // Протухшие initData отбрасываем — иначе перехваченная строка работает вечно.
   const authDate = Number(params.get("auth_date") ?? 0);
-  if (!authDate || Date.now() / 1000 - authDate > 24 * 60 * 60) return null;
+  const age = Date.now() / 1000 - authDate;
+  if (!Number.isFinite(authDate) || !authDate || age > 24 * 60 * 60 || age < -60) return null;
 
   return Object.fromEntries(params.entries());
 }

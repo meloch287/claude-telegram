@@ -52,7 +52,7 @@ function prune(): number {
   let removed = 0;
   const edge = Date.now() - KEEP_DAYS * DAY_MS;
   for (const name of readdirSync(BACKUP_DIR)) {
-    if (!/^bot-\d{4}-\d{2}-\d{2}\.db$/.test(name)) continue;
+    if (!/^bot-\d{4}-\d{2}-\d{2}(?:-pre-token-audit)?\.db$/.test(name)) continue;
     const path = join(BACKUP_DIR, name);
     if (statSync(path).mtimeMs < edge) {
       unlinkSync(path);

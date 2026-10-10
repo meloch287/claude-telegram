@@ -55,7 +55,12 @@ function backends(): Backend[] {
   return list;
 }
 
-async function transcribeWith(backend: Backend, audio: Buffer, fileName: string): Promise<string> {
+async function transcribeWith(
+  backend: Backend,
+  audio: Buffer,
+  fileName: string,
+  signal?: AbortSignal,
+): Promise<string> {
   const form = new FormData();
   form.append("file", new Blob([new Uint8Array(audio)]), fileName);
   if (backend.model) form.append("model", backend.model);
@@ -64,39 +69,43 @@ async function transcribeWith(backend: Backend, audio: Buffer, fileName: string)
   const headers: Record<string, string> = {};
   if (backend.token) headers.Authorization = `Bearer ${backend.token}`;
 
-  // По умолчанию идём напрямую, а не через канал до Anthropic.
-  //
-  // Прокси нужен только самому Anthropic: с российского сервера он отдаёт 403.
-  // Сервис расшифровки выбирает владелец установки, и он обычно доступен без
-  // обхода — проверено на api.polza.ai: HTTP 200 напрямую. Гнать голос через
-  // Германию было бы лишним крюком, а для российского сервиса ещё и риском.
-  // Если сервис всё же закрыт, включается WHISPER_VIA_PROXY=1.
-  const init: RequestInit = { method: "POST", body: form, headers };
-  const proxy = activeProxyUrl();
-  if (backend.viaProxy && proxy) {
-    const { ProxyAgent } = await import("undici");
-    (init as { dispatcher?: unknown }).dispatcher = new ProxyAgent(proxy);
+  const provider = new URL(backend.url).hostname;
+  let body: RequestInit["body"] = form;
+  if(provider==="api.polza.ai"||provider==="polza.ai"){
+    const suffix=fileName.split(".").pop()?.toLowerCase()||"ogg";
+    const mime:Record<string,string>={ogg:"audio/ogg",oga:"audio/ogg",mp3:"audio/mpeg",wav:"audio/wav",webm:"audio/webm",m4a:"audio/mp4",mp4:"audio/mp4",flac:"audio/flac"};
+    headers["content-type"]="application/json";
+    body=JSON.stringify({file:`data:${mime[suffix]||"audio/ogg"};base64,${audio.toString("base64")}`,model:backend.model.includes("/")?backend.model:`openai/${backend.model||"whisper-1"}`,language:"ru"});
+  }
+  const init: RequestInit = { method: "POST", body, headers };
+  const local = ["localhost","127.0.0.1","[::1]"].includes(new URL(backend.url).hostname);
+  let agent: import("undici").ProxyAgent | undefined;
+  if(!local){
+    const proxy=activeProxyUrl()||(process.env.TELEGRAM_PROXY??"").trim();
+    if(!proxy)throw Error("Обязательный прокси недоступен");
+    const {ProxyAgent}=await import("undici");
+    agent=new ProxyAgent(proxy);
+    (init as {dispatcher?:unknown}).dispatcher=agent;
   }
 
   // Локальный whisper на CPU может думать десятки секунд — даём запас, но не
   // вечность: зависший запрос хуже честного отказа.
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 120_000);
-  init.signal = controller.signal;
-  let response: Response;
+  init.signal = signal ? AbortSignal.any([controller.signal, signal]) : controller.signal;
   try {
-    response = await fetch(backend.url, init);
+    const response = agent
+      ? await (await import("undici")).fetch(backend.url,init as never)
+      : await fetch(backend.url, init);
+    if (!response.ok) throw new Error(`сервис расшифровки ответил ${response.status}`);
+    const payload = (await response.json()) as { text?: string; transcription?: string };
+    const text = (payload.text ?? payload.transcription ?? "").trim();
+    if (!text) throw new Error("сервис вернул пустую расшифровку");
+    return text;
   } finally {
     clearTimeout(timer);
+    await agent?.close();
   }
-  if (!response.ok) {
-    throw new Error(`сервис расшифровки ответил ${response.status}`);
-  }
-
-  const payload = (await response.json()) as { text?: string; transcription?: string };
-  const text = (payload.text ?? payload.transcription ?? "").trim();
-  if (!text) throw new Error("сервис вернул пустую расшифровку");
-  return text;
 }
 
 /**
@@ -104,15 +113,20 @@ async function transcribeWith(backend: Backend, audio: Buffer, fileName: string)
  * основного (402 «нет денег», 401, 5xx, сеть, таймаут) — повод перейти к
  * запасному, а не отказывать человеку. В ошибке итог по каждому.
  */
-export async function transcribe(audio: Buffer, fileName: string): Promise<string> {
+export async function transcribe(
+  audio: Buffer,
+  fileName: string,
+  signal?: AbortSignal,
+): Promise<string> {
   const chain = backends();
   if (chain.length === 0) throw new TranscriptionNotConfigured();
 
   const failures: string[] = [];
   for (const backend of chain) {
     try {
-      return await transcribeWith(backend, audio, fileName);
+      return await transcribeWith(backend, audio, fileName, signal);
     } catch (error) {
+      if (signal?.aborted) throw error;
       const reason = error instanceof Error ? error.message : String(error);
       failures.push(`${backend.name}: ${reason}`);
       console.warn(`[voice] ${backend.name} (${backend.url}) не справился: ${reason}`);

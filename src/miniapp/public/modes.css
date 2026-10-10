@@ -1,0 +1,213 @@
+/* Главный экран: режим, модель, глубина размышления и разделы. Основа — ui.css. */
+
+.app-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 4px 0 18px;
+}
+.hero-copy { min-width: 0; }
+.hero-copy .large-title { overflow-wrap: anywhere; }
+
+/* ——— GPT / Claude ——— */
+.engines { margin-bottom: 12px; }
+:root[data-engine="claude"] .engines { --index: 1; }
+.engines > button { min-height: 40px; }
+
+.logo { width: 20px; height: 20px; flex: none; }
+.logo-gpt {
+  background: currentColor;
+  -webkit-mask: url(./openai.svg) center / contain no-repeat;
+  mask: url(./openai.svg) center / contain no-repeat;
+}
+img.logo-claude { object-fit: contain; }
+.engines .logo { transition: filter 300ms var(--ease-out), opacity 300ms var(--ease-out); }
+.engines button[aria-pressed="false"] .logo-claude { filter: grayscale(1); opacity: 0.55; }
+
+/* ——— Строка подключения ——— */
+.status-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 16px;
+}
+.engine-tile {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  flex: none;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+.engine-tile .logo {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  transition: opacity 260ms var(--ease-out), transform 520ms var(--spring);
+}
+.engine-tile .claude-art { opacity: 0; transform: scale(0.5) rotate(-40deg); }
+:root[data-engine="claude"] .engine-tile .gpt-art { opacity: 0; transform: scale(0.5) rotate(40deg); }
+:root[data-engine="claude"] .engine-tile .claude-art { opacity: 1; transform: none; }
+.status-text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.status-caption { font-size: 13px; line-height: 18px; color: var(--hint); }
+.status-model {
+  overflow: hidden;
+  font-size: 16px;
+  line-height: 22px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.connection {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--hint);
+}
+.connection > span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 20%, transparent);
+  transition: background-color 300ms var(--ease-out), box-shadow 300ms var(--ease-out);
+}
+.connection[data-state="off"] > span { background: var(--hint); box-shadow: 0 0 0 3px var(--fill); }
+
+/* ——— Настройки ——— */
+#saved { opacity: 0; transition: opacity 260ms var(--ease-out); }
+#saved[data-state="saving"], #saved[data-state="saved"] { opacity: 1; }
+#saved[data-state="saved"] { color: var(--accent-ink); }
+/* Короткое сохранение не должно мигать серым: гасим только если ждём дольше. */
+.settings-card :is(button, select):disabled { cursor: default; }
+.settings-card .cell:has(select:disabled) .cell-value,
+.settings-card .depth-step:disabled,
+.settings-card .auto-row:disabled { opacity: 0.5; transition: opacity 200ms var(--ease-out) 250ms; }
+#effort-value { color: var(--accent-ink); }
+
+/* ——— Глубина размышления: столбики как уровень сигнала ——— */
+.depth-meter { padding: 16px 16px 12px; }
+.efforts {
+  --count: 5;
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  height: 46px;
+}
+.depth-step {
+  display: flex;
+  align-items: flex-end;
+  flex: 1 1 0;
+  height: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.depth-step i {
+  display: block;
+  width: 100%;
+  height: calc(30% + 70% * var(--i) / (var(--count) - 1));
+  border-radius: 6px;
+  background: var(--fill-2);
+  transform-origin: 50% 100%;
+  /* Гаснут справа налево… */
+  transition:
+    background-color 260ms var(--ease-out) calc((var(--count) - 1 - var(--i)) * 35ms),
+    transform 180ms var(--ease-out);
+}
+/* …а заполняются волной слева направо. */
+.depth-step.is-filled i {
+  background: var(--accent);
+  transition:
+    background-color 260ms var(--ease-out) calc(var(--i) * 35ms),
+    transform 180ms var(--ease-out);
+}
+.depth-step:active:not(:disabled) i { transform: scaleY(0.93); }
+.depth-step:focus-visible { outline: none; }
+.depth-step:focus-visible i { outline: 2px solid var(--accent); outline-offset: 2px; }
+.depth-scale {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 9px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--hint);
+}
+
+/* Переключатель «Подбирать автоматически» (только Claude). */
+.auto-row { gap: 12px; }
+.auto-row .cell-title small { display: block; font-size: 13px; line-height: 18px; color: var(--hint); }
+.switch {
+  position: relative;
+  width: 51px;
+  height: 31px;
+  flex: none;
+  border-radius: 16px;
+  background: var(--fill-2);
+  transition: background-color 250ms var(--ease-out);
+}
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 27px;
+  height: 27px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 3px 8px rgb(0 0 0 / 15%), 0 1px 1px rgb(0 0 0 / 16%);
+  transition: transform 300ms var(--spring);
+}
+.auto-row[aria-checked="true"] .switch { background: var(--accent); }
+.auto-row[aria-checked="true"] .switch::after { transform: translateX(20px); }
+.depth.is-auto .depth-step.is-filled i { background: color-mix(in srgb, var(--accent) 35%, var(--fill-2)); }
+
+/* ——— Разделы и запуск ——— */
+.nav-group .cell { min-height: 52px; padding-top: 10px; padding-bottom: 10px; }
+.back-chat { margin-top: 14px; }
+.launch-bar {
+  position: sticky;
+  z-index: 5;
+  bottom: 0;
+  margin: 6px -16px calc(-1 * var(--safe-bottom) - 24px);
+  padding: 18px 16px calc(var(--safe-bottom) + 14px);
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--bg) 0%, transparent), var(--bg) 18px);
+}
+
+/* ——— Профиль ——— */
+.profile-identity { display: flex; align-items: center; gap: 14px; margin: 4px 0 20px; }
+.profile-identity h3 { font-size: 18px; line-height: 23px; font-weight: 600; }
+.profile-identity p { margin-top: 2px; font-size: 14px; line-height: 19px; color: var(--hint); font-variant-numeric: tabular-nums; }
+
+/* ——— Ошибка и загрузка ——— */
+.error-card { padding: 20px 16px 16px; }
+.error-card h2 { font-size: 18px; line-height: 23px; font-weight: 600; }
+.error-card p { margin: 6px 0 16px; color: var(--hint); line-height: 21px; }
+.loading { display: grid; gap: 12px; }
+.loading .sk-seg { height: 44px; border-radius: 12px; }
+.loading .sk-row { height: 68px; }
+.loading .sk-group { height: 260px; margin-top: 20px; }
+
+@media (max-width: 350px) {
+  .large-title { font-size: 26px; line-height: 32px; }
+  .connection { font-size: 0; gap: 0; }
+}
+.depth-meter + .cell::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 16px;
+  height: 1px;
+  background: var(--sep);
+  transform-origin: top;
+}
+@media (min-resolution: 2dppx) { .depth-meter + .cell::before { transform: scaleY(0.5); } }

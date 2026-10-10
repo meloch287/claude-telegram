@@ -16,22 +16,29 @@ import { activeProxyUrl } from "../proxy.js";
  * пакета undici, что и ProxyAgent, иначе версии диспетчера расходятся.
  * TELEGRAM_PROXY заставляет идти через прокси сразу.
  */
-export async function fetchTelegramFile(url: string): Promise<Response> {
-  const forced = (process.env.TELEGRAM_PROXY ?? "").trim();
+export async function fetchTelegramFile(url: string, signal?: AbortSignal): Promise<Response> {
+  const forced = (process.env.TELEGRAM_PROXY ?? "").trim() || (process.env.REQUIRE_PROXY === "1" ? activeProxyUrl() : "");
+  if (!forced && process.env.REQUIRE_PROXY === "1") throw Error("Обязательный прокси недоступен");
+  const timeout = AbortSignal.timeout(60000);
+  signal = signal ? AbortSignal.any([signal, timeout]) : timeout;
   if (!forced) {
     try {
-      return await fetch(url);
+      return await fetch(url, { signal });
     } catch (error) {
       const proxy = activeProxyUrl();
       if (!proxy) throw error;
-      return viaProxy(url, proxy);
+      signal.throwIfAborted();
+      return viaProxy(url, proxy, signal);
     }
   }
-  return viaProxy(url, forced);
+  return viaProxy(url, forced, signal);
 }
 
-async function viaProxy(url: string, proxy: string): Promise<Response> {
+async function viaProxy(url: string, proxy: string, signal?: AbortSignal): Promise<Response> {
   const { fetch: undiciFetch, ProxyAgent } = await import("undici");
-  const response = await undiciFetch(url, { dispatcher: new ProxyAgent(proxy) });
+  const dispatcher = new ProxyAgent(proxy);
+  const response = await undiciFetch(url, { dispatcher, signal });
+  // Closing drains the response before releasing pooled sockets.
+  void dispatcher.close().catch(() => {});
   return response as unknown as Response;
 }

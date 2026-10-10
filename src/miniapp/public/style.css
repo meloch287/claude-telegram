@@ -2,7 +2,7 @@
   Мини-апп живёт внутри Telegram, поэтому цвета берём из темы клиента: фон,
   карточки, текст, подсказки и разделители. Так страница выглядит продолжением
   Telegram, а не чужим сайтом внутри него. Пары «фон + текст» Telegram задаёт
-  сам и проверяет на контраст; у нас — только фирменная глина Claude как акцент.
+  сам и проверяет на контраст; у нас — только мятный акцент GPT как акцент.
 
   Вне Telegram (демо в браузере) работают запасные значения: светлая и тёмная
   схема ниже. Схему ставит app.js в data-scheme — из Telegram, а вне его из
@@ -12,17 +12,17 @@
 :root {
   color-scheme: light;
 
-  --fb-bg: #f1eee7;
-  --fb-card: #fffdf8;
+  --fb-bg: #edf3ef;
+  --fb-card: #fbfefb;
   --fb-text: #191816;
   --fb-hint: #8a8378;
   --fb-sep: rgb(25 24 22 / 8%);
 
-  /* Глина на креме даёт 3.0:1 — для текста темнее, для графики как есть. */
-  --clay: #d97757;
-  --clay-ink: #b0512e;
-  --clay-soft: #f6e4da;
-  --on-clay: #fffaf5;
+  /* Мятная палитра GPT с отдельным контрастным цветом текста. */
+  --accent: #10a37f;
+  --accent-ink: #08785e;
+  --accent-soft: #ddf5eb;
+  --on-accent: #ffffff;
 
   --good: #2f8f5b;
   --danger: #d6453d;
@@ -33,15 +33,15 @@
   color-scheme: dark;
   --thumb: color-mix(in srgb, var(--text) 20%, var(--card));
 
-  --fb-bg: #121110;
-  --fb-card: #1e1d1b;
+  --fb-bg: #101815;
+  --fb-card: #1a2520;
   --fb-text: #f2efe8;
   --fb-hint: #9b958a;
   --fb-sep: rgb(242 239 232 / 9%);
 
-  --clay-ink: #ec9a78;
-  --clay-soft: #3a2a22;
-  --on-clay: #1a120c;
+  --accent-ink: #79e7c5;
+  --accent-soft: #163d32;
+  --on-accent: #10291f;
   --good: #5fd08f;
   --danger: #ff7a6e;
   --shadow: 0 1px 2px rgb(0 0 0 / 30%);
@@ -160,8 +160,8 @@ button {
   top: 0;
   z-index: 50;
   padding: 12px 16px;
-  background: var(--clay);
-  color: var(--on-clay);
+  background: var(--accent);
+  color: var(--on-accent);
   border-radius: 0 0 var(--radius-sm) 0;
   text-decoration: none;
 }
@@ -172,7 +172,7 @@ button {
 
 /* Двойное кольцо: хотя бы одна его половина видна на любом фоне темы. */
 :focus-visible {
-  outline: 2px solid var(--clay-ink);
+  outline: 2px solid var(--accent-ink);
   outline-offset: 2px;
   border-radius: 6px;
 }
@@ -259,8 +259,8 @@ main:focus,
 }
 
 .chip--accent {
-  background: var(--clay-soft);
-  color: var(--clay-ink);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
 }
 
 .chip:empty {
@@ -274,8 +274,8 @@ main:focus,
   gap: 8px;
   min-height: 50px;
   padding: 12px 22px;
-  background: var(--clay);
-  color: var(--on-clay);
+  background: var(--accent);
+  color: var(--on-accent);
   border: none;
   border-radius: var(--radius-md);
   font-weight: 650;
@@ -438,7 +438,7 @@ main:focus,
   inset: -40px;
   background: radial-gradient(
     closest-side,
-    color-mix(in srgb, var(--clay) 26%, transparent),
+    color-mix(in srgb, var(--accent) 26%, transparent),
     transparent 72%
   );
   pointer-events: none;
@@ -463,7 +463,7 @@ main:focus,
 }
 
 .hero-ring-fill {
-  stroke: var(--clay);
+  stroke: var(--accent);
   stroke-dasharray: 339.3;
   stroke-dashoffset: 339.3;
   transition: stroke-dashoffset 1100ms var(--ease) 150ms;
@@ -527,7 +527,7 @@ main:focus,
 }
 
 .progress-percent {
-  color: var(--clay-ink);
+  color: var(--accent-ink);
   font-variant-numeric: tabular-nums;
 }
 
@@ -543,7 +543,7 @@ main:focus,
 .progress-fill {
   height: 100%;
   width: 100%;
-  background: linear-gradient(90deg, color-mix(in srgb, var(--clay) 75%, #f2b48f), var(--clay));
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 75%, #b8ef97), var(--accent));
   border-radius: inherit;
   transform: scaleX(0);
   transform-origin: left center;
@@ -604,7 +604,7 @@ main:focus,
   width: 44px;
   height: 44px;
   border-radius: 14px;
-  background: var(--clay-soft);
+  background: var(--accent-soft);
 }
 
 .stat-icon svg {
@@ -675,18 +675,18 @@ main:focus,
 }
 
 .chart .bar {
-  fill: color-mix(in srgb, var(--clay) 42%, var(--card));
+  fill: color-mix(in srgb, var(--accent) 42%, var(--card));
   transform-box: fill-box;
   transform-origin: 50% 100%;
   transition: fill 200ms var(--ease);
 }
 
 .chart .bar--today {
-  fill: var(--clay);
+  fill: var(--accent);
 }
 
 .chart .bar--on {
-  fill: var(--clay-ink);
+  fill: var(--accent-ink);
 }
 
 .chart .bar-empty {
@@ -832,8 +832,8 @@ main:focus,
 .tag {
   padding: 1px 7px;
   border-radius: 999px;
-  background: var(--clay-soft);
-  color: var(--clay-ink);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
   font-size: 0.6875rem;
   font-weight: 700;
 }
@@ -880,7 +880,7 @@ main:focus,
 
 .cat-card--current {
   box-shadow:
-    inset 0 0 0 2px var(--clay),
+    inset 0 0 0 2px var(--accent),
     var(--shadow);
 }
 
@@ -895,7 +895,7 @@ main:focus,
 }
 
 .cat-card-level {
-  color: var(--clay-ink);
+  color: var(--accent-ink);
   font-size: 0.6875rem;
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -966,7 +966,7 @@ main:focus,
   width: 48px;
   height: 48px;
   border-radius: 15px;
-  background: var(--clay-soft);
+  background: var(--accent-soft);
 }
 
 .badge-icon svg {
@@ -980,7 +980,7 @@ main:focus,
 }
 
 :root[data-scheme="dark"] .badge-icon {
-  background: color-mix(in srgb, var(--clay) 18%, #45423d);
+  background: color-mix(in srgb, var(--accent) 18%, #45423d);
 }
 
 .badge--locked .badge-icon,
@@ -1138,7 +1138,7 @@ main:focus,
   --wb-line: rgb(255 255 255 / 8%);
   --wb-ink: #f3f1ec;
   --wb-muted: #9aa0ab;
-  --wb-hot: var(--clay);
+  --wb-hot: var(--accent);
   /* Плашки поверх карты без размытия: карта перерисовывается 30 раз в
      секунду, и blur под ними пересчитывался бы каждый кадр. */
   --wb-glass: rgb(14 16 20 / 80%);
@@ -1704,8 +1704,8 @@ main:focus,
 }
 
 .timeline li:first-child .chronicle-day {
-  background: var(--clay);
-  color: var(--on-clay);
+  background: var(--accent);
+  color: var(--on-accent);
   box-shadow: none;
 }
 
@@ -1946,7 +1946,7 @@ main:focus,
 }
 
 .wb-map-card--on {
-  box-shadow: inset 0 0 0 2px var(--clay);
+  box-shadow: inset 0 0 0 2px var(--accent);
 }
 
 .wb-map-card--locked {
@@ -2014,7 +2014,7 @@ main:focus,
 
 .wb-top-me {
   font-weight: 700;
-  color: var(--clay-ink);
+  color: var(--accent-ink);
 }
 
 .sheet-actions {
@@ -2346,7 +2346,7 @@ main:focus,
   height: 32px;
   padding: 0 4px 0 12px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--clay) 85%, #000);
+  background: color-mix(in srgb, var(--accent) 85%, #000);
   color: #fff;
   font-size: 0.8125rem;
   font-weight: 700;
@@ -2511,7 +2511,7 @@ main:focus,
 }
 
 .quest-rank {
-  color: var(--clay-ink);
+  color: var(--accent-ink);
   font-size: 0.75rem;
   font-weight: 800;
   letter-spacing: 0.06em;
@@ -2549,7 +2549,7 @@ main:focus,
 .quest-fill {
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, #f2b48f, var(--clay));
+  background: linear-gradient(90deg, #b8ef97, var(--accent));
   transform: scaleX(0);
   transform-origin: left center;
   transition: transform 700ms var(--spring);
@@ -2584,11 +2584,11 @@ main:focus,
 }
 
 .quest-dots li.is-done {
-  background: var(--clay);
+  background: var(--accent);
 }
 
 .quest-dots li.is-now {
-  background: color-mix(in srgb, var(--clay) 40%, var(--fill-strong));
+  background: color-mix(in srgb, var(--accent) 40%, var(--fill-strong));
 }
 
 /* Выполнено: карточка вспыхивает, по ней разлетаются искры. */
@@ -2602,7 +2602,7 @@ main:focus,
   inset: 0;
   display: grid;
   place-items: center;
-  color: var(--clay);
+  color: var(--accent);
   font-size: 1.75rem;
   letter-spacing: 0.5em;
   pointer-events: none;
@@ -2613,7 +2613,7 @@ main:focus,
   30% {
     transform: scale(1.03);
     box-shadow:
-      0 0 0 3px color-mix(in srgb, var(--clay) 50%, transparent),
+      0 0 0 3px color-mix(in srgb, var(--accent) 50%, transparent),
       var(--shadow);
   }
 }
@@ -2769,7 +2769,7 @@ main:focus,
   height: 36px;
   padding: 0 4px 0 14px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--clay) 85%, #000);
+  background: color-mix(in srgb, var(--accent) 85%, #000);
   color: #fff;
   font-size: 0.8125rem;
   font-weight: 700;
@@ -2865,3 +2865,316 @@ main:focus,
     padding: 8px 6px 6px;
   }
 }
+
+.gpt-dialog-link {
+  display: block;
+  margin: 0 0 12px;
+  text-align: center;
+  color: inherit;
+  font-size: 14px;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+/* Each cat has a different habit; breathing, tail and blinking have separate clocks. */
+.cat-animated {
+  animation: var(--cat-motion, cat-sway) var(--cat-duration, 6s) ease-in-out var(--cat-delay, 0s)
+    infinite;
+}
+.cat-animated .cat-tail {
+  animation: cat-tail var(--tail-duration, 3s) ease-in-out var(--cat-delay, 0s) infinite;
+}
+.cat-animated .cat-eyes,
+.cat-animated .cat-eyes-shut,
+.cat-animated .cat-mouth,
+.cat-animated .cat-mouth-open {
+  animation-duration: var(--blink-duration, 5s);
+  animation-delay: var(--cat-delay, 0s);
+}
+.cat-animated .cat-hat {
+  animation-duration: var(--cat-duration, 6s);
+  animation-delay: var(--cat-delay, 0s);
+  animation-timing-function: ease-in-out;
+}
+.cat-motion-peek {
+  --cat-motion: cat-peek;
+}
+.cat-motion-bounce {
+  --cat-motion: cat-bounce;
+}
+.cat-motion-stretch {
+  --cat-motion: cat-stretch;
+}
+.cat-motion-look {
+  --cat-motion: cat-look;
+}
+.cat-motion-proud {
+  --cat-motion: cat-proud;
+}
+.cat-motion-step {
+  --cat-motion: cat-step;
+}
+.cat-motion-float {
+  --cat-motion: cat-float;
+}
+.cat-motion-royal {
+  --cat-motion: cat-royal;
+}
+.cat-motion-spell {
+  --cat-motion: cat-spell;
+}
+@keyframes cat-peek {
+  0%,
+  55%,
+  100% {
+    transform: rotate(0);
+  }
+  20%,
+  35% {
+    transform: rotate(-4deg) translateX(-1px);
+  }
+  75%,
+  85% {
+    transform: rotate(2deg);
+  }
+}
+@keyframes cat-bounce {
+  0%,
+  35%,
+  70%,
+  100% {
+    transform: translateY(0) scaleY(1);
+  }
+  43% {
+    transform: scaleY(0.96);
+  }
+  52% {
+    transform: translateY(-4px) scaleY(1.02);
+  }
+  60% {
+    transform: translateY(0) scaleY(0.97);
+  }
+}
+@keyframes cat-stretch {
+  0%,
+  45%,
+  100% {
+    transform: scale(1);
+  }
+  65%,
+  78% {
+    transform: scale(0.97, 1.05) rotate(-2deg);
+  }
+}
+@keyframes cat-look {
+  0%,
+  20%,
+  100% {
+    transform: translateX(0);
+  }
+  35%,
+  48% {
+    transform: translateX(2px) rotate(3deg);
+  }
+  70%,
+  83% {
+    transform: translateX(-2px) rotate(-2deg);
+  }
+}
+@keyframes cat-proud {
+  0%,
+  100% {
+    transform: scaleY(1);
+  }
+  35%,
+  55% {
+    transform: translateY(-1px) scaleY(1.035);
+  }
+  80% {
+    transform: rotate(1.5deg);
+  }
+}
+@keyframes cat-step {
+  0%,
+  20%,
+  75%,
+  100% {
+    transform: translateX(0) rotate(0);
+  }
+  32% {
+    transform: translateX(-2px) rotate(-3deg);
+  }
+  44% {
+    transform: translateX(0) translateY(-1px);
+  }
+  56% {
+    transform: translateX(2px) rotate(3deg);
+  }
+}
+@keyframes cat-float {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-1deg);
+  }
+  50% {
+    transform: translateY(-3px) rotate(2deg);
+  }
+}
+@keyframes cat-royal {
+  0%,
+  30%,
+  100% {
+    transform: rotate(0);
+  }
+  50%,
+  65% {
+    transform: rotate(-2deg) scaleY(0.98);
+  }
+  80% {
+    transform: rotate(1deg);
+  }
+}
+@keyframes cat-spell {
+  0%,
+  100% {
+    transform: rotate(0) translateY(0);
+  }
+  25% {
+    transform: rotate(-3deg) translateY(-2px);
+  }
+  50% {
+    transform: rotate(0) translateY(-4px);
+  }
+  75% {
+    transform: rotate(3deg) translateY(-2px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cat-animated,
+  .cat-animated g {
+    animation: none !important;
+  }
+}
+
+.gpt-dialog-link[hidden] {
+  display: none;
+}
+
+.stat--wide {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  column-gap: 12px;
+  row-gap: 10px;
+}
+.stat--wide .stat-icon {
+  grid-column: 1;
+  grid-row: 1;
+}
+.stat--wide .stat-body {
+  grid-column: 2;
+  grid-row: 1;
+}
+.stat--wide .stat-side {
+  grid-column: 3;
+  grid-row: 1;
+}
+.stat-accounting-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--hint);
+  font-size: 0.75rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 420px) {
+  .stat--wide {
+    grid-template-columns: 44px minmax(0, 1fr);
+  }
+  .stat--wide .stat-side {
+    grid-column: 2;
+    grid-row: 2;
+    justify-items: start;
+    text-align: left;
+  }
+  .stat--wide .stat-value {
+    font-size: clamp(1.2rem, 6vw, 1.75rem);
+  }
+}
+.personal-quota {
+  background: var(--card);
+  border-radius: 18px;
+  padding: 18px;
+  margin: 16px 0;
+  box-shadow: var(--shadow);
+}
+.personal-quota h3 {
+  font-size: 16px;
+  margin: 0 0 14px;
+}
+.personal-quota .quota-window {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 10px 0 0;
+  font-size: 13px;
+}
+.personal-quota .quota-window strong {
+  font-variant-numeric: tabular-nums;
+}
+.personal-quota .quota-progress {
+  width: 100%;
+  height: 6px;
+  margin: 8px 0;
+  appearance: none;
+  border: 0;
+  border-radius: 20px;
+  overflow: hidden;
+}
+.personal-quota progress::-webkit-progress-bar {
+  background: var(--fill);
+}
+.personal-quota progress::-webkit-progress-value {
+  background: var(--accent);
+  border-radius: 20px;
+}
+.personal-quota .note {
+  color: var(--hint);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 10px 0 0;
+}
+
+:root[data-engine=claude]{--accent:#B96A49;--brand:#B96A49;--mint:#B96A49}.hero-cat:has(svg[data-engine=claude]){filter:none}:root[data-engine=claude] .hero-glow{background:radial-gradient(ellipse,#D99A6440,transparent 70%)}
+
+/* ── Единая система мини-аппа (как ui.css): нейтральная база, один акцент,
+   плоские секции, системный шрифт. Свечение, засечки и лаймовые градиенты
+   убраны — они делали экран «сгенерированным». ───────────────────────── */
+:root {
+  --fb-bg: #f2f2f6;
+  --fb-card: #ffffff;
+  --fb-text: #111114;
+  --fb-hint: #8a8a92;
+  --fb-sep: rgb(60 60 67 / 16%);
+  --accent: #0b7d61;
+  --brand: #0b7d61;
+  --mint: #0b7d61;
+  --accent-ink: #0a7358;
+  --accent-soft: #dcefe8;
+  --shadow: none;
+  --radius: 16px;
+  --radius-md: 12px;
+  --radius-sm: 10px;
+}
+:root[data-engine="claude"] { --accent: #c0603f; --brand: #c0603f; --mint: #c0603f; --accent-ink: #ae5232; --accent-soft: #f6e3db; }
+:root[data-scheme="dark"] { --fb-bg: #0e0e10; --fb-card: #1c1c1f; --fb-text: #f3f3f5; --fb-hint: #8e8e96; --fb-sep: rgb(255 255 255 / 9%); --accent: #13a07c; --brand: #13a07c; --mint: #13a07c; --accent-ink: #4fd1a9; --accent-soft: #163d32; --on-accent: #ffffff; }
+:root[data-scheme="dark"][data-engine="claude"] { --accent: #c9663f; --brand: #c9663f; --mint: #c9663f; --accent-ink: #f09a7b; --accent-soft: #3d2419; }
+body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, Roboto, "Segoe UI", "Helvetica Neue", sans-serif; }
+.hero-glow { display: none; }
+.hero-name { font-family: inherit; font-size: 1.625rem; letter-spacing: -0.02em; }
+.hero-quote { font-family: inherit; font-style: normal; color: var(--sub); font-size: 0.9375rem; }
+.wb-era-num { font-family: inherit; font-weight: 600; }
+.progress-fill, .quest-fill { background: var(--accent); }
+/* Размытие под шапкой перерисовывается каждый кадр на Android — плотный фон. */
+.topbar { -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--bg); }

@@ -1,18 +1,18 @@
 {
-  "name": "claude-telegram",
+  "name": "ai-bot",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Полноценный Claude Code в Telegram: агент, пермишены кнопками, Mini App с котами",
+  "description": "GPT Codex Telegram bot with isolated user containers and migrated conversations",
   "engines": {
     "node": ">=22.5"
   },
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "start": "node --experimental-sqlite dist/index.js",
-    "build": "tsc -p tsconfig.json",
+    "dev": "node --watch gpt/main.mjs",
+    "start": "node gpt/main.mjs",
+    "build": "tsc -p tsconfig.json && node scripts/build-miniapp.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tsx --test test/logic.test.ts",
+    "test": "node --test gpt/*.test.mjs",
     "test:e2e": "tsx --test test/miniapp.e2e.ts",
     "miniapp": "tsx scripts/serve-miniapp.ts",
     "cats": "tsx scripts/render-cats.ts",
@@ -20,10 +20,11 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "lint:sh": "shellcheck scripts/*.sh"
+    "lint:sh": "shellcheck scripts/*.sh",
+    "test:gpt": "node --test gpt/*.test.mjs",
+    "test:legacy": "tsx --test test/logic.test.ts"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.3.280",
     "grammy": "^1.30.0",
     "https-proxy-agent": "^7.0.6",
     "undici": "^8.10.0"
@@ -37,6 +38,7 @@
     "shellcheck": "^4.1.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
-    "typescript-eslint": "^8.67.0"
+    "typescript-eslint": "^8.67.0",
+    "@anthropic-ai/claude-agent-sdk": "^0.3.280"
   }
 }

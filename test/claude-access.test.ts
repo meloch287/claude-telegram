@@ -1,0 +1,20 @@
+import {test,after} from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtempSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+const dir=mkdtempSync(join(tmpdir(),'claude-access-'));
+Object.assign(process.env,{BOT_TOKEN:'test-token',ENCRYPTION_KEY:Buffer.alloc(32,9).toString('base64'),DATA_DIR:dir,ALLOWED_USER_IDS:'10001',CLAUDE_WORKER_UID_MAP:'10001:61001,10002:61002,10003:61003'});
+const db=await import('../src/db.js');
+const {claudeState}=await import('../src/claude-settings.js');
+after(()=>rmSync(dir,{recursive:true,force:true}));
+test('invited users see the same Claude connection as the Telegram runner',()=>{
+ for(const id of [10001,10002,10003])db.getOrCreateUser(id);
+ db.setCredential(10001,{kind:'subscription',secret:'sk-ant-oat01-test-credential-only'});
+ db.allowUser(10002,10001,null);
+ assert.equal(db.getCredential(10002),null);
+ assert.ok(db.credentialFor(10002));
+ assert.equal(claudeState(10002).available,true);
+ assert.equal(claudeState(10003).available,false);
+ assert.equal(JSON.stringify(claudeState(10002)).includes('test-credential-only'),false);
+});

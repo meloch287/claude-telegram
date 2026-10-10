@@ -1,0 +1,19 @@
+[Unit]
+Description=GPT Mini App encrypted connection through existing domain
+After=network-online.target ai-bot.service
+Wants=network-online.target
+[Service]
+DynamicUser=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+EnvironmentFile=/opt/ai-ingress/client.env
+ExecStart=/usr/local/bin/gpt-chisel client --fingerprint QOz584oambym8/DbF4D0Arf7NGpkIHVMMMLs7M+Cbx8= --keepalive 20s https://daktntgos.ru/gpt-connect R:127.0.0.1:18788:127.0.0.1:8788
+Restart=always
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+MemoryMax=128M
+[Install]
+WantedBy=multi-user.target

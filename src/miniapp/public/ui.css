@@ -1,0 +1,415 @@
+/*
+  Общая дизайн-система мини-аппа.
+
+  Поверхности, текст и разделители берём из темы Telegram (--tg-theme-*),
+  поэтому мини-апп выглядит продолжением клиента, а не сайтом внутри него.
+  Свой у нас только акцент: зелёный у GPT, глиняный у Claude. Один акцент
+  на экран, всё остальное — иерархия размером, насыщенностью и цветом текста.
+
+  Вне Telegram (стенд, браузер) работают запасные значения --fb-*.
+*/
+
+@property --accent { syntax: "<color>"; inherits: true; initial-value: #0b7d61; }
+@property --accent-ink { syntax: "<color>"; inherits: true; initial-value: #0a7358; }
+
+:root {
+  color-scheme: light;
+  --fb-bg: #f2f2f6;
+  --fb-card: #ffffff;
+  --fb-text: #111114;
+  --fb-hint: #8a8a92;
+  --fb-header: #6d6d74;
+  --fb-sep: rgb(60 60 67 / 16%);
+
+  --accent: #0b7d61;
+  --accent-ink: #0a7358;
+  --on-accent: #ffffff;
+  --ok: #30b55c;
+  --danger: var(--tg-theme-destructive-text-color, #e5484d);
+}
+:root[data-engine="claude"] { --accent: #c0603f; --accent-ink: #ae5232; }
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --fb-bg: #0e0e10;
+  --fb-card: #1c1c1f;
+  --fb-text: #f3f3f5;
+  --fb-hint: #8e8e96;
+  --fb-header: #8e8e96;
+  --fb-sep: rgb(255 255 255 / 9%);
+  --accent: #13a07c;
+  --accent-ink: #4fd1a9;
+  --ok: #3ccf6e;
+}
+:root[data-theme="dark"][data-engine="claude"] { --accent: #c9663f; --accent-ink: #f09a7b; }
+
+:root {
+  --bg: var(--tg-theme-secondary-bg-color, var(--fb-bg));
+  --card: var(--tg-theme-section-bg-color, var(--tg-theme-bg-color, var(--fb-card)));
+  --text: var(--tg-theme-text-color, var(--fb-text));
+  --hint: var(--tg-theme-hint-color, var(--fb-hint));
+  --header: var(--tg-theme-section-header-text-color, var(--fb-header));
+  --sep: var(--tg-theme-section-separator-color, var(--fb-sep));
+  --fill: color-mix(in srgb, var(--text) 6%, transparent);
+  --fill-2: color-mix(in srgb, var(--text) 9%, transparent);
+  --press: color-mix(in srgb, var(--text) 7%, transparent);
+  --accent-soft: color-mix(in srgb, var(--accent) 13%, transparent);
+  --thumb: var(--card);
+
+  --r-sm: 10px;
+  --r: 14px;
+  --r-lg: 22px;
+
+  --safe-top: calc(var(--tg-safe-area-inset-top, 0px) + var(--tg-content-safe-area-inset-top, 0px));
+  --safe-bottom: max(env(safe-area-inset-bottom), var(--tg-safe-area-inset-bottom, 0px));
+
+  /* Появление: быстро стартует и мягко садится. */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  /* Перемещение по экрану. */
+  --ease-move: cubic-bezier(0.65, 0, 0.35, 1);
+  /* Шторка как в iOS. */
+  --ease-sheet: cubic-bezier(0.32, 0.72, 0, 1);
+  /* Пружина с еле заметным перелётом — для ползунков. */
+  --spring: cubic-bezier(0.3, 1.25, 0.5, 1);
+  --spring: linear(0, 0.006, 0.025 2.8%, 0.101 6.1%, 0.539 18.9%, 0.721 25.3%, 0.849 31.5%, 0.937 38.1%, 0.968 41.8%, 0.991 45.7%, 1.006 50.1%, 1.015 55%, 1.017 63.9%, 1.001 85.9%, 1);
+
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, Roboto, "Segoe UI", "Helvetica Neue", sans-serif;
+  font-size: 16px;
+  line-height: 1.375;
+  font-kerning: normal;
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  color: var(--text);
+  background: var(--bg);
+  transition: --accent 500ms var(--ease-out), --accent-ink 500ms var(--ease-out), background-color 300ms var(--ease-out);
+}
+:root[data-theme="dark"] { --thumb: color-mix(in srgb, var(--text) 16%, var(--card)); }
+
+*, *::before, *::after { box-sizing: border-box; }
+html { overscroll-behavior-y: none; }
+body { margin: 0; min-width: 280px; min-height: 100dvh; -webkit-tap-highlight-color: transparent; }
+button, input, select, textarea { font: inherit; color: inherit; letter-spacing: inherit; }
+button, a, select, label, summary { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+button { cursor: pointer; }
+a { color: inherit; text-decoration: none; }
+img, svg { display: block; }
+h1, h2, h3, p { margin: 0; }
+[hidden] { display: none !important; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+::selection { background: var(--accent-soft); }
+
+/* ——— Каркас ——— */
+.shell {
+  width: min(100%, 560px);
+  margin: 0 auto;
+  padding: calc(var(--safe-top) + 14px) 16px calc(var(--safe-bottom) + 24px);
+}
+.large-title {
+  font-size: 30px;
+  line-height: 36px;
+  font-weight: 700;
+  letter-spacing: -0.022em;
+  text-wrap: balance;
+}
+.kicker { font-size: 15px; line-height: 20px; color: var(--hint); }
+
+/* ——— Секции в стиле настроек Telegram ——— */
+.section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 26px 16px 7px;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--header);
+}
+.section-head h2 { font-size: inherit; font-weight: 400; text-transform: uppercase; letter-spacing: 0.02em; }
+.section-head > span { color: var(--hint); font-variant-numeric: tabular-nums; transition: color 200ms var(--ease-out); }
+.section-foot { margin: 7px 16px 0; font-size: 13px; line-height: 18px; color: var(--hint); }
+
+.group {
+  position: relative;
+  background: var(--card);
+  border-radius: var(--r);
+  overflow: clip;
+  transition: background-color 300ms var(--ease-out);
+}
+
+/* Строка. Подсветка под пальцем — мгновенно, гаснет плавно. */
+.cell {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 48px;
+  padding: 11px 16px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+  font-size: 16px;
+  line-height: 22px;
+  color: var(--text);
+  transition: background-color 350ms var(--ease-out);
+}
+.cell:active { background: var(--press); transition: none; }
+.cell + .cell::before,
+.cell + [hidden] + .cell::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: var(--sep-inset, 16px);
+  height: 1px;
+  background: var(--sep);
+  transform-origin: top;
+}
+@media (min-resolution: 2dppx) { .cell + .cell::before, .cell + [hidden] + .cell::before { transform: scaleY(0.5); } }
+.group:has(.icon-tile) { --sep-inset: 60px; }
+.cell-title { flex: 1 1 auto; min-width: 0; }
+.cell-value {
+  flex: 0 1 auto;
+  max-width: 62%;
+  color: var(--hint);
+  text-align: right;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  text-wrap: balance;
+  overflow-wrap: anywhere;
+}
+.chev { width: 8px; height: 14px; flex: none; fill: none; stroke: var(--hint); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; opacity: 0.6; }
+.cell .ext { width: 16px; height: 16px; flex: none; fill: none; stroke: var(--hint); stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; opacity: 0.75; }
+
+/* Нативный выбор: прозрачный select поверх строки открывает системный список. */
+.select-cell { cursor: pointer; }
+.select-cell select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  font-size: 16px;
+  cursor: pointer;
+}
+.select-cell:has(select:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: var(--r); }
+.select-cell:has(select:disabled) { cursor: default; }
+
+.icon-tile {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+.icon-tile svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ——— Кнопки ——— */
+.btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 50px;
+  padding: 12px 18px;
+  border: 0;
+  border-radius: var(--r);
+  background: var(--fill-2);
+  color: var(--text);
+  font-size: 16px;
+  line-height: 22px;
+  font-weight: 600;
+  transition: transform 160ms var(--ease-out), opacity 200ms var(--ease-out), background-color 300ms var(--ease-out);
+}
+.btn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.btn-primary { background: var(--accent); color: var(--on-accent); }
+.btn:active:not(:disabled) { transform: scale(0.97); }
+.btn:disabled { opacity: 0.55; cursor: default; }
+.btn-plain {
+  display: block;
+  margin: 0 auto;
+  min-height: 44px;
+  padding: 10px 16px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--accent-ink);
+  font-size: 15px;
+  font-weight: 500;
+  transition: opacity 200ms var(--ease-out), background-color 300ms var(--ease-out);
+}
+.btn-plain:active { background: var(--accent-soft); transition: none; }
+.icon-button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--fill-2);
+  color: var(--hint);
+  transition: transform 160ms var(--ease-out);
+}
+.icon-button svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; }
+.icon-button:active { transform: scale(0.92); }
+
+/* ——— Сегментный переключатель с ползунком ——— */
+.segmented {
+  --count: 2;
+  --index: 0;
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(var(--count), minmax(0, 1fr));
+  padding: 3px;
+  border-radius: 12px;
+  background: var(--fill-2);
+  isolation: isolate;
+}
+.segmented .seg-thumb {
+  position: absolute;
+  z-index: -1;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc((100% - 6px) / var(--count));
+  border-radius: 9px;
+  background: var(--thumb);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 8%), 0 3px 10px rgb(0 0 0 / 6%);
+  transform: translateX(calc(100% * var(--index)));
+  transition: transform 420ms var(--spring), background-color 300ms var(--ease-out);
+}
+.segmented > button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 38px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--hint);
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 600;
+  transition: color 250ms var(--ease-out), transform 160ms var(--ease-out);
+}
+.segmented > button[aria-pressed="true"] { color: var(--text); }
+.segmented > button:active { transform: scale(0.96); }
+.segmented > button:disabled { cursor: default; }
+
+/* ——— Аватар ——— */
+.avatar {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: 16px;
+  font-weight: 600;
+  transition: transform 160ms var(--ease-out), background-color 300ms var(--ease-out);
+}
+.avatar img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+button.avatar:active { transform: scale(0.94); }
+.avatar.large { width: 60px; height: 60px; font-size: 24px; }
+
+/* ——— Шторка (dialog.sheet) ——— */
+dialog.sheet {
+  position: fixed;
+  inset: auto 0 0 0;
+  width: min(100%, 560px);
+  max-width: 100%;
+  max-height: min(86dvh, 720px);
+  margin: 0 auto;
+  padding: 8px 16px calc(var(--safe-bottom) + 16px);
+  border: 0;
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+  background: var(--card);
+  color: var(--text);
+  box-shadow: 0 -8px 40px rgb(0 0 0 / 12%);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+dialog.sheet::backdrop { background: rgb(0 0 0 / 38%); animation: ui-fade 300ms var(--ease-out); }
+.sheet-grabber { width: 36px; height: 5px; margin: 0 auto 10px; border-radius: 3px; background: var(--fill-2); }
+.sheet-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.sheet-header h2 { font-size: 20px; line-height: 25px; font-weight: 700; letter-spacing: -0.01em; }
+
+/* ——— Тост ——— */
+.toast {
+  position: fixed;
+  z-index: 50;
+  left: 50%;
+  bottom: calc(var(--safe-bottom) + 92px);
+  width: max-content;
+  max-width: calc(100% - 32px);
+  margin: 0;
+  padding: 11px 16px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--text) 92%, var(--bg));
+  color: var(--bg);
+  font-size: 14px;
+  line-height: 19px;
+  box-shadow: 0 8px 28px rgb(0 0 0 / 18%);
+  transform: translateX(-50%);
+}
+.toast:not([hidden]) { animation: ui-toast 320ms var(--ease-out); }
+
+/* ——— Скелетоны ——— */
+.sk { border-radius: var(--r); background: var(--fill); animation: ui-pulse 1.6s ease-in-out infinite; }
+
+/* ——— Движение ——— */
+@keyframes ui-fade { from { opacity: 0; } }
+@keyframes ui-rise { from { opacity: 0; transform: translateY(10px); } }
+@keyframes ui-toast { from { opacity: 0; transform: translate(-50%, 10px) scale(0.97); } }
+@keyframes ui-pulse { 50% { opacity: 0.55; } }
+
+/* Первое появление экрана: секции встают по очереди, суммарно до ~300 мс. */
+.stagger > * { animation: ui-rise 520ms var(--ease-out) backwards; }
+.stagger > :nth-child(2) { animation-delay: 40ms; }
+.stagger > :nth-child(3) { animation-delay: 80ms; }
+.stagger > :nth-child(4) { animation-delay: 120ms; }
+.stagger > :nth-child(5) { animation-delay: 160ms; }
+.stagger > :nth-child(6) { animation-delay: 200ms; }
+.stagger > :nth-child(7) { animation-delay: 240ms; }
+.stagger > :nth-child(n + 8) { animation-delay: 280ms; }
+
+@media (hover: hover) and (pointer: fine) {
+  .cell:hover { background: var(--press); }
+  .btn-primary:hover { filter: brightness(1.05); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 120ms !important; animation-delay: 0ms !important; transition-duration: 120ms !important; transition-delay: 0ms !important; }
+  .stagger > *, .toast:not([hidden]) { animation-name: ui-fade !important; }
+}
+
+/* Жест «смахнуть шторку» — за ручку, заголовок и шапку профиля. */
+.sheet-grabber, .sheet-header, .profile-identity { touch-action: none; }
+.sheet-grabber { box-sizing: content-box; padding: 6px 40px; margin: -6px auto 4px; background: none; }
+.sheet-grabber::before { content: ""; display: block; height: 100%; border-radius: 3px; background: var(--fill-2); }
+/* Название строки — в одну строку, значение прижато вправо и переносится само. */
+.select-cell .cell-title { flex: 0 0 auto; white-space: nowrap; }
+.select-cell .cell-value { margin-left: auto; }

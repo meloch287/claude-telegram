@@ -1,0 +1,43 @@
+/* Переходы между страницами и общие правила движения. */
+@view-transition { navigation: auto; }
+:root { --motion-ease: cubic-bezier(.23, 1, .32, 1); }
+::view-transition-group(root) { animation: none; }
+::view-transition-old(root) { animation: page-out 140ms var(--motion-ease) both; }
+::view-transition-new(root) { animation: page-in 280ms var(--motion-ease) both; }
+::view-transition-old(root), ::view-transition-new(root) { width: 100%; height: auto; object-fit: cover; object-position: top left; mix-blend-mode: normal; }
+@keyframes page-out { to { opacity: 0; } }
+@keyframes page-in { from { opacity: 0; } }
+@keyframes motion-in { from { opacity: 0; transform: translateY(10px); } }
+
+/* Уход со страницы без View Transitions: короткое затухание. */
+body { transition: opacity 150ms var(--motion-ease), background-color 300ms var(--motion-ease); }
+html[data-leaving] body { opacity: 0; pointer-events: none; }
+
+/* Статистика, «Мой мир» и админка. */
+.topbar, .segmented-item, .nav-card { transition: background-color 300ms var(--motion-ease), color 250ms var(--motion-ease), transform 160ms var(--motion-ease); }
+.quick-tabs a:active, .nav-card:active { transform: scale(.97); }
+.topbar-actions { display: flex; align-items: center; margin-bottom: 8px; }
+.topbar-actions .gpt-dialog-link, .admin-home-link { display: inline-flex; align-items: center; gap: 7px; min-height: 40px; min-width: 44px; padding: 8px 5px; margin: 0; border: 0; border-radius: 12px; background: transparent; box-shadow: none; color: var(--accent-ink, var(--accent)); font-size: 15px; font-weight: 500; text-decoration: none; }
+.admin-footer { display: flex; justify-content: center; padding: 26px 12px max(24px, env(safe-area-inset-bottom)); font-size: 14px; color: var(--hint); }
+.admin-footer a { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 8px 16px; border-radius: 12px; text-decoration: none; color: var(--accent-ink, inherit); background: transparent; transition: background-color 300ms; }
+.admin-footer a:active { background: var(--fill, rgb(0 0 0 / 6%)); transition: none; }
+.nav-card svg { width: 19px; height: 19px; flex: none; stroke: currentColor; stroke-width: 1.8; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.segmented-item { min-height: 40px; font-size: 15px; }
+.topbar .segmented { border-radius: 12px; padding: 3px; }
+.topbar .segmented-thumb { top: 3px; bottom: 3px; left: 3px; width: calc(50% - 3px); border-radius: 9px; transition: transform 420ms var(--spring, var(--motion-ease)); }
+
+/* Тост центрирован через translateX(-50%) — анимация обязана его сохранить. */
+.toast:not([hidden]) { animation: motion-toast 320ms var(--motion-ease); }
+@keyframes motion-toast { from { opacity: 0; transform: translate(-50%, 10px) scale(.97); } }
+@supports (interpolate-size: allow-keywords) {
+  details { interpolate-size: allow-keywords; }
+  details::details-content { height: 0; opacity: 0; overflow: clip; transition: height 320ms var(--motion-ease), opacity 240ms, content-visibility 320ms; transition-behavior: allow-discrete; }
+  details[open]::details-content { height: auto; opacity: 1; }
+}
+.settings-card { overflow-anchor: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root), ::view-transition-new(root) { animation: none !important; }
+  *, *::before, *::after { transition-duration: 120ms !important; transition-delay: 0ms !important; animation-duration: 120ms !important; animation-delay: 0ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; }
+}
+[hidden] { display: none !important; }

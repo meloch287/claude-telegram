@@ -18,6 +18,24 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
+    files: ["gpt/**/*.mjs"],
+    languageOptions: {
+      globals: {
+        process: "readonly",
+        Buffer: "readonly",
+        console: "readonly",
+        URL: "readonly",
+        URLSearchParams: "readonly",
+        fetch: "readonly",
+        AbortSignal: "readonly",
+        setTimeout: "readonly",
+        clearTimeout: "readonly",
+        setInterval: "readonly",
+        clearInterval: "readonly",
+      },
+    },
+  },
+  {
     // Фронт мини-аппа — обычный браузерный JS без сборки и без модулей.
     files: ["src/miniapp/public/**/*.js"],
     languageOptions: {
@@ -33,6 +51,7 @@ export default tseslint.config(
         URLSearchParams: "readonly",
         setTimeout: "readonly",
         clearTimeout: "readonly",
+        setInterval: "readonly",
         requestAnimationFrame: "readonly",
       },
     },

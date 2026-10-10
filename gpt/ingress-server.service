@@ -1,0 +1,18 @@
+[Unit]
+Description=Private GPT Mini App bridge
+After=network-online.target
+[Service]
+User=gpt-ingress
+Group=gpt-ingress
+ExecStart=/usr/local/bin/gpt-chisel server --host 127.0.0.1 --port 18789 --reverse --authfile /opt/ai-ingress/auth.json --keyfile /opt/ai-ingress/server.pem
+Restart=always
+RestartSec=5
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+MemoryMax=128M
+[Install]
+WantedBy=multi-user.target
