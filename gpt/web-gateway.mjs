@@ -88,18 +88,19 @@ export function brandBridgeProviders(list) {
  */
 const BRIDGE_PERMISSIONS = new Set(["accept-edits", "full"]);
 export const BRIDGE_TURN = /^\/api\/v1\/threads(?:\/fork|\/([^/]+)\/(?:send|retry|compact|edit-message))?$/;
-export function fitBridgePermission(value) {
-  let changed = false;
-  const walk = (node) => {
-    if (Array.isArray(node)) return node.forEach(walk);
-    if (!node || typeof node !== "object") return;
-    for (const [key, child] of Object.entries(node)) {
-      if (key === "permissionMode" && typeof child === "string" && !BRIDGE_PERMISSIONS.has(child)) { node[key] = "full"; changed = true; }
-      else walk(child);
-    }
-  };
-  walk(value);
-  return changed;
+/**
+ * Только сам режим на верхнем уровне запроса (send / create). В executionInputSources
+ * поле permissionMode — источник режима («explicit» | «client-preference»), его не трогаем.
+ */
+export function fitBridgePermission(body, { addMissing = false } = {}) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return false;
+  const bad = typeof body.permissionMode === "string" && !BRIDGE_PERMISSIONS.has(body.permissionMode);
+  const missing = addMissing && body.permissionMode === undefined;
+  if (!bad && !missing) return false;
+  body.permissionMode = "full";
+  // Режим задали мы — пусть bb считает его явным, а не берёт из прошлого хода.
+  if (body.executionInputSources && typeof body.executionInputSources === "object") body.executionInputSources.permissionMode = "explicit";
+  return true;
 }
 export async function bridgeTurnBody(req, pathname, target) {
   const chunks = [];
@@ -119,13 +120,9 @@ export async function bridgeTurnBody(req, pathname, target) {
     bridge = info?.providerId === "acp-tgclaude";
   }
   if (!bridge) return raw;
-  let changed = fitBridgePermission(body);
   // Режима в запросе нет — bb возьмёт его из прошлого хода (у чатов от «Claude Code» это
   // auto) и отклонит. Явный full главнее прошлого хода.
-  if (thread && body && typeof body === "object" && !Array.isArray(body) && body.permissionMode === undefined && /\/(?:send|compact|edit-message)$/.test(pathname)) {
-    body.permissionMode = "full";
-    changed = true;
-  }
+  const changed = fitBridgePermission(body, { addMissing: Boolean(thread) && /\/(?:send|compact|edit-message)$/.test(pathname) });
   return changed ? Buffer.from(JSON.stringify(body)) : raw;
 }
 

@@ -19,9 +19,17 @@ test("неподходящий режим для Claude бота станови�
     assert.equal(claude.reasoningLevel, "high");
     const gpt = JSON.parse(await bridgeTurnBody(reqOf(send), "/api/v1/threads/thr_gpt/send", target));
     assert.equal(gpt.permissionMode, "auto", "GPT-ветку не трогаем");
-    const created = JSON.parse(await bridgeTurnBody(reqOf({ execution: { providerId: "acp-tgclaude", permissionMode: "plan" } }), "/api/v1/threads", target));
-    assert.equal(created.execution.permissionMode, "full", "новая ветка Claude бота");
-    const ok = { execution: { providerId: "acp-tgclaude", permissionMode: "accept-edits" } };
+    const created = JSON.parse(await bridgeTurnBody(reqOf({ providerId: "acp-tgclaude", permissionMode: "auto", executionInputSources: { permissionMode: "client-preference", model: "client-preference" } }), "/api/v1/threads", target));
+    assert.equal(created.permissionMode, "full", "новая ветка Claude бота");
+    assert.equal(created.executionInputSources.permissionMode, "explicit");
+    assert.equal(created.executionInputSources.model, "client-preference", "источники прочего не трогаем");
+    // Ровно запрос интерфейса bb: источник режима — не режим, «full» туда ставить нельзя.
+    const ui = JSON.parse(await bridgeTurnBody(reqOf({ input: [{ type: "text", text: "x" }], mode: "auto", model: "default", reasoningLevel: "high", executionInputSources: { model: "client-preference", reasoningLevel: "client-preference", permissionMode: "client-preference" } }), "/api/v1/threads/thr_claude/send", target));
+    assert.equal(ui.permissionMode, "full");
+    assert.equal(ui.executionInputSources.permissionMode, "explicit");
+    assert.equal(ui.executionInputSources.reasoningLevel, "client-preference");
+    assert.equal(ui.mode, "auto", "режим отправки (mode) не трогаем");
+    const ok = { providerId: "acp-tgclaude", permissionMode: "accept-edits" };
     assert.deepEqual(JSON.parse(await bridgeTurnBody(reqOf(ok), "/api/v1/threads", target)), ok);
     const bare = JSON.parse(await bridgeTurnBody(reqOf({ input: [{ type: "text", text: "без режима" }] }), "/api/v1/threads/thr_claude/send", target));
     assert.equal(bare.permissionMode, "full", "режима нет — явный full, иначе bb возьмёт auto из прошлого хода");
@@ -29,7 +37,8 @@ test("неподходящий режим для Claude бота станови�
     assert.equal(bareGpt.permissionMode, undefined);
     assert.ok(BRIDGE_TURN.test("/api/v1/threads/thr_x/retry"));
     assert.ok(!BRIDGE_TURN.test("/api/v1/threads/thr_x/archive"));
-    assert.equal(fitBridgePermission({ a: [{ permissionMode: "full" }] }), false);
+    assert.equal(fitBridgePermission({ permissionMode: "full" }), false);
+    assert.equal(fitBridgePermission({ executionInputSources: { permissionMode: "explicit" } }), false, "источник — не режим");
   } finally {
     bb.close();
   }
