@@ -59,7 +59,10 @@ export function createWebRuntime({ auth, allowed, settings, credential = () => n
     if (configured.has(uid)) return target.url;
     await docker(["exec", target.name, "bb", "plugin", "disable", "connect", "--json"]);
     const hasClaude = credential(uid)?.kind === "subscription";
-    if (hasClaude)
+    // «Claude Code» контейнера — только пока нет моста к Claude бота: с мостом он
+    // выключен (claude-bb.mjs), иначе чаты из bb шли бы мимо бота.
+    const bridged = await docker(["exec", target.name, "test", "-f", "/home/agent/.bb/tg-claude-acp.mjs"]).then(() => true, () => false);
+    if (hasClaude && !bridged)
       await docker(["exec", target.name, "bb", "provider", "enable", "claude-code", "--json"]);
     const marked = await docker([
       "exec",

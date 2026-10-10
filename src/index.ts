@@ -625,22 +625,24 @@ bot.callbackQuery(/^disk:/, async ctx => {
   else await claudeStorageMenu.show(ctx);
 });
 
-bot.command("resume", async (ctx) => {
+bot.command("resume", async (ctx) => showResume(ctx, /^(все|всё|all)$/i.test(ctx.match?.toString().trim() ?? "")));
+bot.callbackQuery("rs:all", async (ctx) => { await ctx.answerCallbackQuery(); await showResume(ctx, true); });
+
+// «/resume все» — чаты из всех проектов пользователя. Без этого чат,
+// начатый в другом проекте, найти было нельзя вовсе.
+async function showResume(ctx: Context, wantsAll: boolean) {
   const userId = ctx.from!.id;
-  const chatRow = getChat(ctx.chat.id);
+  const chatRow = getChat(ctx.chat!.id);
   const project = chatRow?.project ?? "default";
 
-  // «/resume все» — чаты из всех проектов пользователя. Без этого чат,
-  // начатый в другом проекте, найти было нельзя вовсе.
-  const wantsAll = /^(все|всё|all)$/i.test(ctx.match?.toString().trim() ?? "");
-
-  let sessions;
+  let sessions, elsewhere: { project: string; title: string }[] = [];
   try {
-    sessions = (await listAllUserSessions(userId))
+    const all = (await listAllUserSessions(userId))
       .map(item => ({ ...item, project: dialogRecord(userId, item.sessionId)?.project ?? "default" }))
-      .filter(item => wantsAll || item.project === project)
-      .sort((a, b) => b.lastModified - a.lastModified)
-      .slice(0, 10);
+      .sort((a, b) => b.lastModified - a.lastModified);
+    // Чаты других проектов (в том числе пришедшие из bb) не прячем молча: говорим, что они есть.
+    if (!wantsAll) elsewhere = all.filter(item => item.project !== project).map(item => ({ project: item.project, title: (item.customTitle || item.summary || "без названия").slice(0, 40) }));
+    sessions = all.filter(item => wantsAll || item.project === project).slice(0, 10);
   } catch (error) {
     await ctx.reply(`⚠️ Не смог прочитать список чатов: ${esc(String(error).slice(0, 200))}`, {
       parse_mode: "HTML",
@@ -648,12 +650,16 @@ bot.command("resume", async (ctx) => {
     return;
   }
 
+  const others = elsewhere.length
+    ? `\n\n📁 Ещё ${elsewhere.length} в других проектах — свежий «${esc(elsewhere[0]!.title)}» в <code>${esc(elsewhere[0]!.project)}</code>.`
+    : "";
+  const allButton = elsewhere.length ? new InlineKeyboard().text("📁 Все проекты", "rs:all") : undefined;
   if (sessions.length === 0) {
     await ctx.reply(
-      wantsAll
+      (wantsAll
         ? "Прошлых чатов нет ни в одном проекте. Напиши что-нибудь — начнётся первый."
-        : `В проекте <code>${esc(project)}</code> прошлых чатов нет. Напиши что-нибудь — начнётся первый.`,
-      { parse_mode: "HTML" },
+        : `В проекте <code>${esc(project)}</code> прошлых чатов нет. Напиши что-нибудь — начнётся первый.`) + others,
+      { parse_mode: "HTML", ...(allButton ? { reply_markup: allButton } : {}) },
     );
     return;
   }
@@ -673,14 +679,15 @@ bot.command("resume", async (ctx) => {
     kb.text(`${index + 1}. ${title.slice(0, 28)}`, `rs:${s.sessionId}`).row();
   });
 
+  if (elsewhere.length) kb.text("📁 Все проекты", "rs:all").row();
   const heading = wantsAll
     ? "Чаты по всем проектам:"
     : `Чаты проекта <code>${esc(project)}</code> (все — <code>/resume все</code>):`;
-  await ctx.reply(`${heading}\n\n${lines.join("\n")}`, {
+  await ctx.reply(`${heading}\n\n${lines.join("\n")}${others}`, {
     parse_mode: "HTML",
     reply_markup: kb,
   });
-});
+}
 
 /**
  * Чем закончился прошлый чат.

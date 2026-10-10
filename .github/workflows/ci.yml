@@ -54,3 +54,5 @@ jobs:
         run: |
           python3 scripts/ops.test.py
           python3 gpt/team-history.test.py
+          python3 gpt/claude-bb-sync.test.py
+          python3 scripts/worker-update.test.py

@@ -180,10 +180,31 @@ def problems():
     for unit in failed:
         if unit.startswith('ai-') and unit.endswith(('.service', '.timer')):
             found.append(f'упал юнит {unit}')
+    found += sync_problems()
     backup_at = load_state().get('backup', {}).get('at')
     if backup_at and time.time() - backup_at > 36 * 3600:
         found.append('ночной бэкап не делался больше полутора суток')
     return sorted(set(found))
+
+
+SYNC_ERROR = re.compile(r'\[(claude-bb|bb-sync)\][^0-9]*(\d{5,15})\s+(.*)')
+
+
+def sync_problems(lines=None):
+    """Синхронизация с bb падает у человека 3+ раз за 15 минут — без этого она ломается молча."""
+    if lines is None:
+        out = run(['journalctl', '-u', 'ai-gpt-backend', '--since', '-15min', '-o', 'cat', '--no-pager'], timeout=30)
+        lines = out.stdout.splitlines() if out.returncode == 0 else []
+    errors = {}
+    for line in lines:
+        match = SYNC_ERROR.search(line)
+        if match:
+            errors.setdefault(match.group(2), []).append(match.group(3).strip())
+    # Текст стабильный: одна и та же поломка — одна тревога, а не сообщение на каждую ошибку.
+    for uid, texts in errors.items():
+        if len(texts) >= 3:
+            log(f'синхронизация с bb у {uid}: {texts[-1][:300]}')
+    return [f'синхронизация чатов с bb падает у {uid} (подробности: journalctl -u ai-gpt-backend | grep {uid})' for uid, texts in sorted(errors.items()) if len(texts) >= 3]
 
 
 def watchdog():

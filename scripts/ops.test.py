@@ -81,6 +81,18 @@ class Watchdog(unittest.TestCase):
             self.assertIn('Починилось', sent[0])
 
 
+class SyncErrors(unittest.TestCase):
+    def test_repeated_sync_failures_become_a_problem(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ops = load(Path(tmp))
+            line = '[claude-bb] 844820548 docker завершился с кодом 1: UNIQUE constraint failed: environments.path'
+            self.assertEqual(ops.sync_problems([line, line]), [], 'два сбоя — ещё не тревога')
+            found = ops.sync_problems([line] * 3 + ['[bb-sync] 5 ok-ish', '[claude-bb] мост: 1057399602 timeout'])
+            self.assertEqual(len(found), 1)
+            self.assertIn('844820548', found[0])
+            self.assertEqual(found, ops.sync_problems([line] * 5), 'текст стабильный — без повторных тревог')
+
+
 class Backup(unittest.TestCase):
     def test_database_snapshot_is_consistent(self):
         with tempfile.TemporaryDirectory() as tmp:

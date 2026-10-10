@@ -90,6 +90,17 @@ export function createClaudeMirror({ workerFor, workspaceRoot, endpoint, exportA
       const saved = await request(url, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ values: { customAgents: next } }), signal: AbortSignal.timeout(10_000) });
       if (!saved.ok) return false;
     }
+    // Старый «Claude Code» контейнера выключаем, как только Claude бота виден в bb:
+    // иначе в нём можно начать чат мимо бота, и в Telegram он не попадёт.
+    const providers = await request(`${target}/api/v1/system/providers`, { signal: AbortSignal.timeout(10_000) }).catch(() => null);
+    const list = providers?.ok ? await providers.json().catch(() => []) : [];
+    const bridge = Array.isArray(list) && list.find((p) => p?.id === BRIDGE_PROVIDER && p.available !== false && p.enabled !== false);
+    if (bridge && list.some((p) => p?.id === "claude-code" && p.enabled !== false)) {
+      const off = await request(`${target}/api/v1/system/providers/claude-code/enabled`, {
+        method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: false }), signal: AbortSignal.timeout(10_000),
+      }).catch(() => null);
+      if (!off?.ok) console.error("[claude-bb] не выключил Claude Code контейнера:", uid);
+    }
     bridged.set(uid, agentHash);
     return true;
   }
