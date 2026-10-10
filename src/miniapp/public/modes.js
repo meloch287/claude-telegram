@@ -111,6 +111,8 @@
     const permission=$('permission');permission.replaceChildren();
     for(const [id,label]of permissions[engine]){if(claude&&id==='auto'&&!selectedModel?.supportsAutoMode)continue;option(permission,id,label);}
     permission.value=claude?data.permissionMode:data.mode;permission.disabled=working||!data.available;
+    // Ответ голосом — общий для обоих движков; без озвучки на сервере строки нет.
+    $('voice-cell').hidden=!state.voice?.available;$('voice-mode').value=state.voice?.mode||'off';$('voice-mode').disabled=working;
     syncValues();
     $('admin-link').hidden=!state.profile.admin;
     $('profile-name').textContent=state.profile.name;$('profile-id').textContent='Telegram ID · '+state.profile.id;
@@ -163,6 +165,12 @@
   function onSelect(id,patch){$(id).onchange=()=>{syncValues();haptic('selectionChanged');save(patch());};}
   onSelect('model',()=>({model:$('model').value}));
   onSelect('permission',()=>({[state.engine==='claude'?'permissionMode':'mode']:$('permission').value}));
+  $('voice-mode').onchange=async()=>{
+    if(!state||working)return;syncValues();haptic('selectionChanged');busy(true);setSaved('saving');let ok=false;
+    try{await api('/api/miniapp/voice',{mode:$('voice-mode').value});state=await api('/api/miniapp/state');ok=true;haptic('notificationOccurred','success');if($('voice-mode').value==='voice')notify('Ответ на голосовое придёт и текстом, и голосом.');}
+    catch(error){notify(error.message);haptic('notificationOccurred','error');}
+    finally{busy(false);setSaved(ok?'saved':'idle');await redraw();}
+  };
   $('orchestration').onclick=()=>{
     if(!state||working||engineSync||state.engine!=='claude')return;
     const next=state.claude.orchestration!==true;haptic('impactOccurred','light');

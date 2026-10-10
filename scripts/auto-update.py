@@ -9,8 +9,9 @@ Claude (Agent SDK со встроенным Claude Code) обновляется 
      перезапускаем ai-bot и ai-gpt-backend, healthz; любая ошибка → откат.
 Новые модели Claude после этого подтянутся сами (каталог берётся из Claude Code).
 
-Codex и bb живут в контейнерах пользователей и в пропатченном фронте bb — их на лету
-не подменяем: про новые версии приходит уведомление админу (раз на версию).
+Codex (GPT) обновляется сам через scripts/worker-update.py: новый образ ai-worker,
+проверочный ход в отдельном контейнере, переключение в тишине со снимками баз и откатом.
+bb — только уведомление админу (раз на версию): его фронт — пропатченная русская сборка.
 Каталог моделей GPT обновляется без этого скрипта (gpt-models.mjs).
 
 Отчёт — сообщением админу в Telegram. Запуск: python3 auto-update.py [--check]
@@ -206,11 +207,31 @@ def main():
             report.append(f'🔴 Claude {target} не встал, остаётся {current}: {error}')
     image = __import__('re').search(r'ai-worker:([0-9.]+)-bb([0-9.]+)', (APP / 'gpt/web-runtime.mjs').read_text())
     codex_now, bb_now = (image.group(1), image.group(2)) if image else ('0', '0')
-    for package, now_version, title in [('@openai/codex', codex_now, 'Codex (GPT)'), ('bb-app', bb_now, 'bb')]:
-        version = latest(package)
-        if newer(version, now_version) and state.get(package) != version:
-            state[package] = version
-            report.append(f'🆕 {title}: вышла {version}, у нас {now_version}. Сам не ставлю — это пересборка контейнеров{" и фронта bb" if package == "bb-app" else ""}. Скажи Claude «обнови {title}», когда будет удобно.')
+    # Codex (GPT) — сам: новый образ, проверка ходом, переключение в тишине, откат (worker-update.py).
+    codex = latest('@openai/codex')
+    if image and newer(codex, codex_now) and state.get('codex_failed') != codex:
+        args = ['python3', str(APP / 'scripts/worker-update.py'), '--to', codex] + (['--check'] if CHECK else [])
+        try:
+            done = subprocess.run(args, capture_output=True, text=True, timeout=8 * 3600)
+            result = json.loads((done.stdout.strip().splitlines() or ['{}'])[-1])
+        except Exception as error:
+            result = {'status': 'failed', 'error': str(error)}
+        if result.get('status') == 'updated':
+            state.pop('codex_failed', None)
+            report.append(f'🟢 Codex (GPT) обновлён: {codex_now} → {codex}. Контейнеры пересозданы, проверочный ход прошёл. Откат: sh {result.get("rollback")}')
+        elif result.get('status') == 'checked':
+            report.append(f'🧪 Codex {codex}: образ собран и проверен, без переключения (--check).')
+        elif result.get('status') == 'deferred':
+            report.append(f'⏳ Codex {codex}: {result.get("error")}')
+        elif result.get('status') != 'current':
+            state['codex_failed'] = codex
+            report.append(f'🔴 Codex {codex} не встал, остаётся {codex_now}: {str(result.get("error"))[:500]}')
+    # bb — только сообщение: фронт собран из русской сборки исходников и пропатчен,
+    # каждый патч сверяет точный код — на новой версии их нужно переносить руками.
+    version = latest('bb-app')
+    if newer(version, bb_now) and state.get('bb-app') != version:
+        state['bb-app'] = version
+        report.append(f'🆕 bb: вышла {version}, у нас {bb_now}. Сам не ставлю: фронт bb — русская сборка с патчами, их надо переносить на новую версию. Скажи Claude «обнови bb», когда будет удобно.')
     if not CHECK:
         save_state(state)
     if report:

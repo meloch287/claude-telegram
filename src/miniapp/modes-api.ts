@@ -10,6 +10,8 @@ import { engineFor, setEngine, gptApi } from "../engine.js";
 import { claudePreferences, claudeState, refreshClaudeModels, saveClaudePreferences } from "../claude-settings.js";
 import { CACHE_RESET_NOTICE, claudeCacheWarm, getSession, reloadClaudeSettings } from "../bot/session.js";
 import { activeProxyUrl } from "../proxy.js";
+import { taskState, type VoiceMode } from "../bot/task-state.js";
+import { speechConfigured } from "../bot/speak.js";
 
 function reply(res: ServerResponse, status: number, data: unknown) {
   res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" });
@@ -74,11 +76,19 @@ export async function handleModesApi(req: IncomingMessage, res: ServerResponse):
         network: { proxyRequired: true, ready: !!activeProxyUrl() },
         gpt: gpt.status === "fulfilled" ? gpt.value : { available: false, error: "GPT временно недоступен" },
         claude: { ...claudeState(uid), permissionMode: getChat(uid)?.permission_mode ?? config.defaultPermissionMode, catalogCurrent: catalog.status === "fulfilled" },
+        voice: { mode: taskState.voiceMode(uid), available: speechConfigured() },
       }); return true;
     }
     if (req.method !== "POST") { reply(res, 404, { error: "Не найдено" }); return true; }
     const patch = await body(req);
     if (!isGptUserAllowed(uid)) { reply(res, 403, { error: "Доступ отозван" }); return true; }
+    if (url.pathname === "/api/miniapp/voice") {
+      // Ответ голосом — общий для GPT и Claude: выкл, на голосовые, всегда.
+      if (Object.keys(patch).some(k => k !== "mode") || !["off", "voice", "always"].includes(String(patch.mode))) throw Error("Выбери: текстом, на голосовые или всегда");
+      if (!speechConfigured()) { reply(res, 409, { error: "Озвучка ответов на сервере не настроена" }); return true; }
+      taskState.setVoiceMode(uid, patch.mode as VoiceMode);
+      reply(res, 200, { mode: taskState.voiceMode(uid) }); return true;
+    }
     if (url.pathname === "/api/miniapp/engine") {
       if (Object.keys(patch).some(k => k !== "engine") || !["gpt", "claude"].includes(String(patch.engine))) throw Error("Выбери GPT или Claude");
       const engine = patch.engine as "gpt" | "claude";

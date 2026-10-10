@@ -765,6 +765,8 @@ async function turn(job) {
   const { uid, threadId } = job,
     row = store.getThread(uid, threadId);
   if (!row || job.cancelled || shuttingDown || !allowed(uid) || isDeleting(uid)) return;
+  // Голосом — по режиму озвучки (выкл / на голосовые / всегда); отметку голосового забираем один раз.
+  const speakAnswer = taskState.replyByVoice(uid);
   store.assertDialogCount(uid);
   store.assertTokenBudget(uid);
   await storageGuard.admit(uid);
@@ -918,7 +920,7 @@ async function turn(job) {
           store.addMessage(uid, row.id, "assistant", body);
           const {files,visible}=outgoingFiles(body);
           if (visible) await sendFormatted(bot.api, uid, visible);
-          if (visible && taskState.voice(uid) && speechConfigured()) {
+          if (visible && speakAnswer && speechConfigured()) {
             try { const audio = await synthesize(visible); if (audio) await bot.api.sendVoice(uid, new InputFile(audio, "answer.ogg")); } catch {}
           }
           for (const file of files.slice(0,5)) {

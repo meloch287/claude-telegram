@@ -1,0 +1,56 @@
+# Проверки на каждый пуш и PR. Выкатки здесь нет намеренно: на сервер код
+# попадает релизами с ожиданием тишины и автооткатом (см. КАРТА.md), а не из CI.
+name: Проверки
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Сборка и тесты
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # Тестовые значения: модули бота читают конфиг при импорте.
+      BOT_TOKEN: "1:ci"
+      ENCRYPTION_KEY: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+      DATA_DIR: /tmp/ci-data
+      WORKSPACE_ROOT: /tmp/ci-ws
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Как на сервере: node:sqlite и его поведение зависят от версии.
+          node-version: 22.22.1
+          cache: npm
+
+      # --include=optional: нативный бинарь Claude Code приезжает опциональной зависимостью.
+      - run: npm ci --include=optional
+
+      - name: Сборка (типы + мини-апп)
+        run: npm run build
+
+      - name: Тесты бэкенда и движков
+        run: npm test
+
+      - name: Логика бота
+        run: npx tsx --test test/logic.test.ts test/claude-access.test.ts test/miniapp-url.test.ts
+
+      - name: Переключатель bb
+        run: node --test scripts/bb-engine/engine.test.mjs
+
+      - name: Служебные скрипты (Python)
+        run: |
+          python3 scripts/ops.test.py
+          python3 gpt/team-history.test.py

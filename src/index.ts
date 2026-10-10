@@ -1609,10 +1609,9 @@ async function runTask(ctx: Context, prompt: string, images: string[] = []): Pro
       userId,
       notify: (html) => ctx.reply(html, { parse_mode: "HTML" }),
     });
-    // Голосом — только если о том попросили командой /voice. Отвечать голосом
-    // на голосовое казалось удобным, но это догадка за пользователя: он прислал
-    // голосовое, потому что так быстрее набрать, а не потому что хочет слушать.
-    session.output.voiceReply = taskState.voice(userId);
+    // Голосом — по выбору человека (/voice или мини-апп): выкл, на голосовые
+    // (задача пришла голосовым черновиком) или всегда. По умолчанию — текстом.
+    session.output.voiceReply = taskState.replyByVoice(userId);
     await session.conversation.send(prompt,images);
     return true;
   } catch (error) {

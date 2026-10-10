@@ -5,7 +5,7 @@ import { config } from "../config.js";
 import { verifyInitData } from "../crypto.js";
 import { isGptUserAllowed, getChat } from "../db.js";
 import { engineFor, libraryCall, type Engine } from "../engine.js";
-import { taskState, continuationPrompt } from "./task-state.js";
+import { taskState, continuationPrompt, type VoiceMode } from "./task-state.js";
 import { esc, hideSecrets } from "../agent/render.js";
 import { transcriptionConfigured, transcribe } from "./voice.js";
 import { fetchTelegramFile } from "./tgFile.js";
@@ -13,6 +13,16 @@ import { speechConfigured } from "./speak.js";
 
 type Draft = { id: string; uid: number; engine: Engine; dialog: string; text: string; edit: boolean; expires: number };
 type Action = { uid: number; action: string; body: any; expires: number };
+const VOICE_LABELS: Record<VoiceMode, string> = { off: "Текстом", voice: "На голосовые", always: "Всегда голосом" };
+export function voiceModeText(mode: VoiceMode): string {
+  return `🔊 Ответ голосом: ${VOICE_LABELS[mode].toLowerCase()}.\n\n` +
+    "• Текстом — только текст.\n• На голосовые — на голосовое сообщение ответ придёт и текстом, и голосом.\n• Всегда голосом — к каждому ответу голосовое (начало ответа, до 900 символов).\n\nТо же есть в мини-аппе.";
+}
+export function voiceModeKeyboard(mode: VoiceMode): InlineKeyboard {
+  const keyboard = new InlineKeyboard();
+  for (const value of ["off", "voice", "always"] as VoiceMode[]) keyboard.text(`${value === mode ? "✓ " : ""}${VOICE_LABELS[value]}`, `voice:mode:${value}`);
+  return keyboard;
+}
 export function createToolsMenu(options: {
   api: Api;
   backend?: typeof libraryCall;
@@ -122,6 +132,10 @@ export function createToolsMenu(options: {
         voiceTasks.set(uid, task); void task.finally(() => { if (voiceTasks.get(uid) === task) voiceTasks.delete(uid); });
       } else if (editing) {
         const next = drafts.get(uid)!; next.text = command; next.edit = false; await showDraft(ctx, next);
+      } else if (cb.startsWith("voice:mode:")) {
+        const mode = cb.slice("voice:mode:".length) as VoiceMode;
+        taskState.setVoiceMode(uid, mode);
+        await ctx.editMessageText(voiceModeText(mode), { reply_markup: voiceModeKeyboard(mode) }).catch(() => {});
       } else if (cb.startsWith("voice:")) {
         const [, verb, id] = cb.split(":"), draft = drafts.get(uid);
         if (!draft || draft.id !== id) throw Error("Черновик устарел. Отправь новую запись.");
@@ -129,7 +143,10 @@ export function createToolsMenu(options: {
         else if (verb === "edit") { draft.edit = true; await ctx.reply("Пришли исправленный текст одним сообщением. Затем нажми «Отправить»."); }
         else if (verb === "send") {
           if (draft.edit) throw Error("Сначала пришли исправленный текст.");
-          await submit(ctx, draft.engine, draft.dialog, draft.text);
+          // Задача пришла голосом: в режиме «на голосовые» ответ тоже будет голосом.
+          taskState.markVoiceTurn(uid);
+          try { await submit(ctx, draft.engine, draft.dialog, draft.text); }
+          catch (error) { taskState.clearVoiceTurn(uid); throw error; }
           drafts.delete(uid); await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => {});
         }
       } else if (cb.startsWith("recover:")) await recover(ctx, cb.slice(8));
@@ -139,8 +156,8 @@ export function createToolsMenu(options: {
         await ctx.reply(rows.length ? "↻ Прерванные задачи\n\nВыбери задачу. Бот проверит историю и файлы и продолжит оставшиеся шаги." : "Прерванных задач нет.", { reply_markup: kb });
       } else if (/^\/voice(?:@\w+)?(?:\s|$)/i.test(command)) {
         if (!speechConfigured()) throw Error("Озвучка ответов пока не настроена. Голосовой ввод с подтверждением уже доступен.");
-        taskState.setVoice(uid, !taskState.voice(uid));
-        await ctx.reply(taskState.voice(uid) ? "🔊 Озвучка включена для GPT и Claude. Озвучивается начало ответа, до 900 символов. Выключить — /voice." : "Озвучка выключена. Ответы будут текстом.");
+        const mode = taskState.voiceMode(uid);
+        await ctx.reply(voiceModeText(mode), { reply_markup: voiceModeKeyboard(mode) });
       } else if (/^\/files(?:@\w+)?(?:\s|$)/i.test(command)) await gallery(ctx);
       else if (/^\/search(?:@\w+)?(?:\s|$)/i.test(command)) {
         const query = command.replace(/^\S+\s*/, "");
