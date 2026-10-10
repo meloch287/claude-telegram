@@ -4,7 +4,7 @@
 import { request } from "node:http";
 
 const SOCKET = process.env.CLAUDE_BB_SOCKET || "/opt/ai-bot/data/claude-bb.sock";
-const ROUTE = /^\/claude-bb\/(?:(new)|([0-9a-f-]{36})\/(check|turn|cancel))$/;
+const ROUTE = /^\/claude-bb\/(?:(new|settings)|([0-9a-f-]{36})\/(check|turn|cancel))$/;
 
 export function createClaudeBridgeHandler({ identify, socket = SOCKET }) {
   return async (req, res) => {
@@ -18,7 +18,7 @@ export function createClaudeBridgeHandler({ identify, socket = SOCKET }) {
     if (req.method !== "POST") return fail(405, "Нужен POST");
     const uid = await identify(req.headers.authorization?.match(/^Bearer ([a-f0-9]{64})$/)?.[1]);
     if (!uid) return fail(401, "Нет доступа");
-    const path = `/v1/${uid}/` + (match[1] ? "new" : `${match[2]}/${match[3]}`);
+    const path = `/v1/${uid}/` + (match[1] ? match[1] : `${match[2]}/${match[3]}`);
     const upstream = request({ socketPath: socket, path, method: "POST", headers: { "content-type": "application/json" } }, (answer) => {
       res.writeHead(answer.statusCode || 502, {
         "content-type": answer.headers["content-type"] || "application/json",

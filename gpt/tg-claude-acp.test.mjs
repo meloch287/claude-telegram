@@ -45,7 +45,8 @@ test("ACP agent speaks to bb and forwards turns to the bot bridge", async () => 
     assert.equal(init.result.protocolVersion, 1);
     assert.equal(init.result.agentCapabilities.loadSession, true);
     assert.equal((await rpc("session/new", { cwd: "/w", mcpServers: [] })).result.sessionId, SID);
-    assert.equal((await rpc("session/load", { sessionId: SID, cwd: "/w", mcpServers: [] })).result, null);
+    // Без списка моделей от моста — пустое состояние, история уже в bb.
+    assert.deepEqual((await rpc("session/load", { sessionId: SID, cwd: "/w", mcpServers: [] })).result, {});
     assert.ok((await rpc("session/load", { sessionId: "99999999-2222-4333-8444-555555555555", cwd: "/w" })).error, "неизвестный диалог — ошибка, bb начнёт новый");
     const done = await rpc("session/prompt", { sessionId: SID, prompt: [{ type: "text", text: "Почини тесты" }] });
     assert.equal(done.result.stopReason, "end_turn");

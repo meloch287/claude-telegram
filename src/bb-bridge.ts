@@ -20,13 +20,13 @@ import type { Api } from "grammy";
 import type { PermissionMode } from "@anthropic-ai/claude-agent-sdk";
 import { Conversation, type ConversationOutput } from "./agent/conversation.js";
 import type { PermissionBridgeHooks } from "./agent/permissions.js";
-import { createDialog, dialogRecord, prepareDialog, updateDialog } from "./agent/dialog-workspace.js";
+import { createDialog, dialogRecord, dialogRecords, prepareDialog, updateDialog, type DialogRecord } from "./agent/dialog-workspace.js";
 import { TelegramOutput } from "./bot/output.js";
 import { getSession, releaseIdleSession } from "./bot/session.js";
 import { bbAcquire, bbHolds, bbRelease, bbStop } from "./bb-locks.js";
 import { engineAllowed, engineClosedText } from "./engine-access.js";
 import { adoptBbDialog, parseAdopt } from "./bb-adopt.js";
-import { claudePreferences } from "./claude-settings.js";
+import { claudeModelLabel, claudeModels, claudePreferences, saveClaudePreferences } from "./claude-settings.js";
 import { config } from "./config.js";
 import {
   credentialFor,
@@ -161,6 +161,35 @@ export interface BridgeDeps {
 }
 /** Один перенос на тред bb за раз: повторный запрос ждёт первый, а не создаёт второй диалог. */
 const adopting = new Map<string, Promise<string>>();
+/** Выданные недавно пустые диалоги: bb ещё может прислать в них первый ход. */
+const handedOut = new Map<string, number>();
+const HAND_OUT_MS = 10 * 60_000;
+
+/**
+ * Диалог для новой ветки bb. bb создаёт и пробные сессии (узнать модели), в которых
+ * никто не пишет, — поэтому пустой диалог, выданный больше 10 минут назад и так и не
+ * начатый, отдаём снова, а не плодим «Новые диалоги». Открытый в Telegram не трогаем.
+ */
+function dialogForBb(userId: number, create: typeof createDialog): DialogRecord {
+  const now = Date.now();
+  for (const [id, at] of handedOut) if (now - at > HAND_OUT_MS) handedOut.delete(id);
+  const project = getChat(userId)?.project ?? "default";
+  const open = getSession(userId)?.conversation.sessionId ?? getChat(userId)?.session_id;
+  const spare = dialogRecords(userId).find((r) => !r.started && !r.deleted && !r.origin && r.project === project && r.id !== open && !handedOut.has(`${userId}:${r.id}`));
+  const record = spare ?? create(userId, project);
+  handedOut.set(`${userId}:${record.id}`, now);
+  return record;
+}
+
+/** Модели и глубина Claude для меню bb (агент tg-claude-acp). */
+function settingsFor(userId: number) {
+  const prefs = claudePreferences(userId);
+  return {
+    models: claudeModels(userId).map((m) => ({ value: m.value, name: claudeModelLabel(m), efforts: m.supportedEffortLevels ?? [] })),
+    model: prefs.model,
+    effort: prefs.effort,
+  };
+}
 
 async function runTurn(deps: BridgeDeps, userId: number, sessionId: string, text: string, res: ServerResponse): Promise<void> {
   const record = dialogRecord(userId, sessionId);
@@ -256,15 +285,20 @@ export function createBbBridgeHandler(deps: BridgeDeps) {
         res.end(JSON.stringify({ sessionId }));
         return;
       }
-      const match = /^\/v1\/(\d{1,15})\/(?:(new)|([0-9a-f-]{36})\/(check|turn|cancel))$/.exec(req.url ?? "");
+      const match = /^\/v1\/(\d{1,15})\/(?:(new|settings)|([0-9a-f-]{36})\/(check|turn|cancel))$/.exec(req.url ?? "");
       if (!match) throw new BridgeError(404, "Неизвестный адрес");
       const userId = Number(match[1]);
       if (!Number.isSafeInteger(userId) || userId <= 0) throw new BridgeError(400, "Неверный пользователь");
       const body = await readJson(req);
       if (!engineAllowed("claude", userId) && match[4] !== "check" && match[4] !== "cancel") throw new BridgeError(403, engineClosedText("claude"));
+      if (match[2] === "settings") {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify(settingsFor(userId)));
+        return;
+      }
       if (match[2]) {
         if (!credentialFor(userId)) throw new BridgeError(403, "Claude не подключён: открой бота и выполни /start.");
-        const record = create(userId, getChat(userId)?.project ?? "default");
+        const record = dialogForBb(userId, create);
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify({ sessionId: record.id }));
         return;
@@ -284,6 +318,15 @@ export function createBbBridgeHandler(deps: BridgeDeps) {
       }
       const text = typeof body.text === "string" ? body.text.trim() : "";
       if (!text) throw new BridgeError(400, "Пустое сообщение");
+      // Модель и глубина, выбранные в меню bb, — общие с Telegram: выбрал там — так и в боте.
+      const prefs = claudePreferences(userId);
+      const patch: Record<string, unknown> = {};
+      if (typeof body.model === "string" && body.model !== prefs.model) patch.model = body.model;
+      if ((body.effort === null || typeof body.effort === "string") && body.effort !== prefs.effort && "effort" in body) patch.effort = body.effort;
+      if (Object.keys(patch).length) {
+        try { saveClaudePreferences(userId, patch); } catch (error) { console.error("[bb-bridge] настройки из bb:", error instanceof Error ? error.message : error); }
+      }
+      handedOut.delete(`${userId}:${sessionId}`);
       await runTurn(deps, userId, sessionId, text, res);
     } catch (error) {
       if (res.headersSent) {

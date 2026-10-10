@@ -1,4 +1,5 @@
 import { createServer, request } from "node:http";
+import { readFileSync } from "node:fs";
 import { WEB_COOKIE } from "./web-auth.mjs";
 import { profileHtml } from "./web-profile.mjs";
 import { serveRussianAsset, russianIndex, publicAppAsset } from "./web-assets.mjs";
@@ -58,6 +59,27 @@ export function proxyHeaders(req, target) {
       delete headers[key];
   return headers;
 }
+/**
+ * Claude бота (агент ACP «acp-tgclaude») bb рисует безликим портфелем, как любой
+ * сторонний агент. В ответе списка провайдеров даём ему логотип и цвет Claude —
+ * в меню он выглядит как Claude, а не как отдельная непонятная вкладка.
+ */
+export const BRIDGE_LOGO_PATH = "/api/v1/system/providers/acp-tgclaude/logo";
+const bridgeLogo = readFileSync(new URL("./claude-logo.svg", import.meta.url));
+export function brandBridgeProviders(list) {
+  if (!Array.isArray(list)) return list;
+  return list.map((p) => {
+    if (p?.id !== "acp-tgclaude") return p;
+    const { icon, ...rest } = p;
+    return {
+      ...rest,
+      logoUrl: `${BRIDGE_LOGO_PATH}?h=claude1`,
+      strings: { ...(p.strings || {}), brandPrefix: "Claude ", iconTint: { light: "#D97757", dark: "#D97757" } },
+      ...(Array.isArray(p.reasoningLevels) ? { reasoningLevels: p.reasoningLevels.filter((l) => l?.id !== "max" && l?.id !== "ultracode") } : {}),
+    };
+  });
+}
+
 export function createWebGateway({ auth, runtime, allowed, usage, avatar=async()=>null, beforeMutation = async () => {} }) {
   const sockets = new Map();
   function track(uid, socket) {
@@ -186,6 +208,10 @@ export function createWebGateway({ auth, runtime, allowed, usage, avatar=async()
         res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
         return res.end(JSON.stringify({ ok: true, result }));
       }
+      if (["GET", "HEAD"].includes(req.method) && routeUrl.pathname === BRIDGE_LOGO_PATH) {
+        res.writeHead(200, { "content-type": "image/svg+xml", "cache-control": "private, max-age=86400", "x-content-type-options": "nosniff" });
+        return res.end(req.method === "HEAD" ? undefined : bridgeLogo);
+      }
       if (!["GET", "HEAD"].includes(req.method)) {
         const release = await beforeMutation(uid, req.method, new URL(requestPath, "http://localhost").pathname);
         if (release) res.once("close", release);
@@ -201,6 +227,22 @@ export function createWebGateway({ auth, runtime, allowed, usage, avatar=async()
             "x-frame-options": "SAMEORIGIN",
           };
           delete headers["set-cookie"];
+          if (req.method === "GET" && routeUrl.pathname === "/api/v1/system/providers" && response.statusCode === 200 && (response.headers["content-type"] || "").includes("application/json")) {
+            const chunks = [];
+            let size = 0;
+            response.on("data", (chunk) => { size += chunk.length; if (size > 2 * 1024 * 1024) { response.destroy(); res.destroy(); } else chunks.push(chunk); });
+            response.on("end", () => {
+              let body = Buffer.concat(chunks).toString();
+              try { body = JSON.stringify(brandBridgeProviders(JSON.parse(body))); } catch { /* не JSON — отдаём как есть */ }
+              delete headers["content-length"];
+              delete headers["content-encoding"];
+              delete headers.etag;
+              res.writeHead(200, headers);
+              res.end(body);
+            });
+            response.on("error", () => res.destroy());
+            return;
+          }
           if (device && routeUrl.pathname === "/api/v1/system/config" && response.statusCode === 200 && (response.headers["content-type"] || "").includes("application/json")) {
             const chunks = [];
             let size = 0;

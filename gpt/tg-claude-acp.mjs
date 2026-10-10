@@ -13,6 +13,44 @@ const config = JSON.parse(readFileSync(process.env.TG_CLAUDE_CONFIG, "utf8"));
 const base = String(config.url).replace(/\/team$/, "/claude-bb");
 const headers = { authorization: `Bearer ${config.token}`, "content-type": "application/json" };
 const running = new Map(); // sessionId → AbortController
+// Модель и глубина — у каждой сессии свои и уходят в бота только с настоящим ходом:
+// bb, чтобы узнать модели, создаёт пробную сессию и перебирает их, — бот это не трогает.
+const chosen = new Map(); // sessionId → { model, effort }
+let catalog = null; // { models: [{ value, name, efforts }], model, effort } из бота
+const EFFORT_NAMES = { low: "Низкая", medium: "Средняя", high: "Высокая", xhigh: "Очень высокая" };
+
+async function loadCatalog() {
+  try {
+    catalog = await (await call("settings")).json();
+  } catch {
+    catalog = catalog ?? null; // мост недоступен — работаем без списка моделей
+  }
+  return catalog;
+}
+
+/** Модели и глубина бота в формате ACP: bb показывает их в меню модели. */
+function configState(sessionId) {
+  if (!catalog?.models?.length) return {};
+  const sel = chosen.get(sessionId) ?? { model: catalog.model, effort: catalog.effort };
+  const model = catalog.models.find((m) => m.value === sel.model) ?? catalog.models[0];
+  const effort = model.efforts.includes(sel.effort) ? sel.effort : "auto";
+  return {
+    configOptions: [
+      { id: "model", name: "Модель", category: "model", type: "select", currentValue: model.value, options: catalog.models.map((m) => ({ value: m.value, name: m.name })) },
+      { id: "effort", name: "Глубина", category: "thought_level", type: "select", currentValue: effort, options: [{ value: "auto", name: "Авто" }, ...model.efforts.map((v) => ({ value: v, name: EFFORT_NAMES[v] ?? v }))] },
+    ],
+    models: { currentModelId: model.value, availableModels: catalog.models.map((m) => ({ modelId: m.value, name: m.name })) },
+  };
+}
+
+function choose(sessionId, patch) {
+  const sel = chosen.get(sessionId) ?? { model: catalog?.model, effort: catalog?.effort ?? null };
+  // Неизвестную модель (старая настройка ветки) не отвергаем — остаёмся на текущей.
+  if (patch.model !== undefined && (!catalog || catalog.models.some((m) => m.value === patch.model))) sel.model = patch.model;
+  if (patch.effort !== undefined) sel.effort = patch.effort === "auto" ? null : patch.effort;
+  chosen.set(sessionId, sel);
+  return configState(sessionId);
+}
 
 const out = (message) => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", ...message }) + "\n");
 const update = (sessionId, value) => out({ method: "session/update", params: { sessionId, update: value } });
@@ -46,7 +84,8 @@ async function prompt(sessionId, blocks) {
   let step = 0;
   let wrote = false;
   try {
-    const response = await call(`${sessionId}/turn`, { text }, abort.signal);
+    const sel = chosen.get(sessionId);
+    const response = await call(`${sessionId}/turn`, { text, ...(sel ? { model: sel.model, effort: sel.effort } : {}) }, abort.signal);
     const decoder = new TextDecoder();
     let buffer = "";
     let stopReason = "end_turn";
@@ -96,12 +135,15 @@ async function handle(message) {
       return {};
     case "session/new": {
       const response = await call("new");
-      return { sessionId: (await response.json()).sessionId };
+      const { sessionId } = await response.json();
+      await loadCatalog();
+      return { sessionId, ...configState(sessionId) };
     }
     case "session/load": {
       const response = await call(`${params.sessionId}/check`);
       if (!(await response.json()).ok) throw new Error("Диалог не найден в боте");
-      return null; // история уже в bb — повторять её не нужно
+      await loadCatalog();
+      return configState(params.sessionId); // история уже в bb — повторять её не нужно
     }
     case "session/prompt":
       return prompt(params.sessionId, params.prompt);
@@ -111,9 +153,13 @@ async function handle(message) {
       return null;
     }
     case "session/set_mode":
-    case "session/set_model":
-    case "session/set_config_option":
       return {};
+    case "session/set_model":
+      return choose(params.sessionId, { model: params.modelId });
+    case "session/set_config_option":
+      if (params.configId === "model") return choose(params.sessionId, { model: params.value });
+      if (params.configId === "effort") return choose(params.sessionId, { effort: params.value });
+      return configState(params.sessionId);
     default:
       throw Object.assign(new Error(`Метод ${method} не поддерживается`), { code: -32601 });
   }
