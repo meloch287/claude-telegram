@@ -51,7 +51,13 @@ export function setupWeb({
     allowed: webAllowed,
     settings: (uid) => legacy.getOrCreateUser(uid),
     credential: (uid) => legacy.credentialFor(uid),
-    onReady: (uid) => {
+    onReady: async (uid) => {
+      // Мост Claude бота — до того, как человек увидит bb: иначе первые секунды
+      // там старый «Claude Code» контейнера, и чат в нём пошёл бы мимо бота.
+      await Promise.race([
+        claudeMirror.bridge(uid).catch((error) => console.error("[claude-bb] мост:", uid, error.message)),
+        new Promise((resolve) => setTimeout(resolve, 15_000)),
+      ]);
       // Claude-диалоги из Telegram — во вкладку Claude; не задерживает открытие bb.
       claudeMirror.sync(uid).catch((error) => console.error("[claude-bb]", uid, error.message));
       engineWeb.apply(uid).catch((error) => console.error("[engine-access]", uid, error.message));

@@ -149,6 +149,11 @@ export function createClaudeMirror({ workerFor, workspaceRoot, endpoint, exportA
   }
 
   return {
+    /** Только мост (агент + запись в bb + выключить старый Claude Code) — быстро, до открытия bb. */
+    async bridge(uid) {
+      try { workerFor(uid); } catch { return false; } // у человека нет Claude
+      return ensureBridge(uid, await ensure(uid));
+    },
     sync(uid, { force = false } = {}) {
       if (active.has(uid)) return active.get(uid);
       if (!force && now() - (state.get(uid)?.at ?? 0) < INTERVAL) return Promise.resolve(null);

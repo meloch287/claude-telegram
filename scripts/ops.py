@@ -11,6 +11,9 @@
   python3 ops.py watchdog   — сторож (ai-bot-watchdog.timer, каждые 2 минуты):
       службы, healthz, место на диске, упавшие ai-* юниты. Пишет владельцу в
       Telegram при поломке (если она держится две проверки подряд) и при починке.
+      Заодно сверяет провайдеров bb у каждого: лишние (Pi, Cursor…) и старый
+      «Claude Code» при живом мосте выключает сам; нет моста или появился
+      неизвестный провайдер — тревога.
   python3 ops.py status     — что сторож видит сейчас (без отправки).
 """
 import json, os, re, shutil, sqlite3, subprocess, sys, tempfile, time, urllib.parse, urllib.request
@@ -182,6 +185,7 @@ def problems():
             found.append(f'упал юнит {unit}')
     found += sync_problems()
     found += image_problems()
+    found += bb_problems()
     backup_at = load_state().get('backup', {}).get('at')
     if backup_at and time.time() - backup_at > 36 * 3600:
         found.append('ночной бэкап не делался больше полутора суток')
@@ -231,6 +235,72 @@ def image_problems(containers=None):
     stale = sorted(name for name, image in containers if image != want)
     if stale:
         found.append(f'контейнеры не на образе из кода ({want}): {", ".join(stale)} — у них не откроется /web')
+    return found
+
+
+BB_KNOWN = {'codex', 'acp-tgclaude', 'claude-code'}
+
+
+def unused_providers():
+    """Список из кода (web-runtime.mjs) — один на bootstrap и сторожа, чтобы не разъехались."""
+    try:
+        match = re.search(r'UNUSED_PROVIDERS = (\[[^\]]*\])', (APP / 'gpt/web-runtime.mjs').read_text())
+        return set(json.loads(match.group(1))) if match else set()
+    except (OSError, ValueError):
+        return set()
+
+
+def bb_providers(name):
+    """Включённые провайдеры bb в контейнере; None — bb сейчас не запущен."""
+    ip = run(['docker', 'inspect', '-f', '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}', name], timeout=20).stdout.strip()
+    if not ip:
+        return None
+    try:
+        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(f'http://{ip}:38886/api/v1/system/providers', timeout=5) as r:
+            return [p['id'] for p in json.load(r) if p.get('enabled') is not False]
+    except Exception:
+        return None
+
+
+def bb_disable(name, provider):
+    return run(['docker', 'exec', name, 'bb', 'provider', 'disable', provider, '--json'], timeout=60).returncode == 0
+
+
+def claude_expected(uid):
+    """Claude человеку положен: есть Claude-воркер и движок не закрыт админом (админу — всегда)."""
+    if run(['getent', 'passwd', f'claude-{uid}']).returncode != 0:
+        return False
+    try:
+        access = json.loads((DATA / 'engine-access.json').read_text())
+    except (OSError, ValueError):
+        access = {}
+    return uid == ADMIN_ID or access.get('claude', True) is not False
+
+
+def bb_problems(containers=None, providers=bb_providers, disable=bb_disable, expected=claude_expected):
+    """bb у всех одинаковый: только GPT (codex) и Claude бота. Чинит, что может, о прочем — тревога."""
+    if containers is None:
+        out = run(['docker', 'ps', '--filter', 'label=ai-bot.managed=v1', '--format', '{{.Names}}'], timeout=30)
+        containers = [n for n in out.stdout.split() if n.startswith('ai-user-')] if out.returncode == 0 else []
+    unused, found = unused_providers(), []
+    for name in containers:
+        uid = int(name.removeprefix('ai-user-'))
+        ids = providers(name)
+        if ids is None:
+            continue  # bb не запущен — проверим, когда откроют
+        off = [p for p in ids if p in unused]
+        if 'claude-code' in ids and 'acp-tgclaude' in ids:
+            off.append('claude-code')  # чат в нём шёл бы мимо бота
+        for p in off:
+            if disable(name, p):
+                log(f'bb {uid}: выключил провайдера {p}')
+            else:
+                found.append(f'у {uid} в bb не выключается провайдер {p}')
+        strange = sorted(p for p in ids if p not in BB_KNOWN and p not in unused)
+        if strange:
+            found.append(f'у {uid} в bb неизвестные провайдеры: {", ".join(strange)} — добавить в UNUSED_PROVIDERS (gpt/web-runtime.mjs) или разрешить')
+        if expected(uid) and 'acp-tgclaude' not in ids:
+            found.append(f'у {uid} в bb нет «Claude бота» (мост не поставлен)' + (' — открыт старый Claude Code мимо бота' if 'claude-code' in ids else ''))
     return found
 
 

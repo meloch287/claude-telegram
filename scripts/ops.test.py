@@ -110,6 +110,46 @@ class Images(unittest.TestCase):
             self.assertIn('разошёлся', ops.image_problems([['ai-user-1', 'ai-worker:0.162.1-bb']])[0])
 
 
+class BbProviders(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        (root / 'app' / 'gpt').mkdir(parents=True)
+        (root / 'data').mkdir()
+        (root / 'app/gpt/web-runtime.mjs').write_text('export const UNUSED_PROVIDERS = ["pi", "acp-cursor"];\n')
+        self.ops = load(root)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def check(self, lists, expected=lambda uid: True, fails=()):
+        off = []
+        def disable(name, p):
+            off.append((name, p))
+            return p not in fails
+        found = self.ops.bb_problems(list(lists), providers=lambda n: lists[n], disable=disable, expected=expected)
+        return found, off
+
+    def test_extra_providers_and_old_claude_code_are_switched_off(self):
+        # ровно случай Лизы: пришла позже ручной чистки — у неё Pi и Cursor
+        found, off = self.check({'ai-user-978309662': ['codex', 'pi', 'acp-cursor', 'acp-tgclaude', 'claude-code']})
+        self.assertEqual(found, [])
+        self.assertEqual(sorted(p for _, p in off), ['acp-cursor', 'claude-code', 'pi'])
+
+    def test_missing_bridge_and_unknown_provider_alert(self):
+        found, off = self.check({'ai-user-445821298': ['codex', 'claude-code'], 'ai-user-1': ['codex', 'acp-tgclaude', 'acp-newthing'], 'ai-user-2': None})
+        self.assertEqual(off, [], 'без моста старый Claude Code не выключаем — иначе Claude пропадёт совсем')
+        self.assertTrue(any('445821298' in f and 'мимо бота' in f for f in found))
+        self.assertTrue(any('acp-newthing' in f for f in found))
+        self.assertEqual(len(found), 2, 'bb не запущен — не тревога')
+
+    def test_no_claude_expected_no_alert_and_failed_disable_alerts(self):
+        found, _ = self.check({'ai-user-7': ['codex']}, expected=lambda uid: False)
+        self.assertEqual(found, [])
+        found, _ = self.check({'ai-user-8': ['codex', 'acp-tgclaude', 'pi']}, fails={'pi'})
+        self.assertEqual(found, ['у 8 в bb не выключается провайдер pi'])
+
+
 class Backup(unittest.TestCase):
     def test_database_snapshot_is_consistent(self):
         with tempfile.TemporaryDirectory() as tmp:
