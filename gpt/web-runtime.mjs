@@ -6,6 +6,7 @@ import { docker, ensureWorker } from "./worker.mjs";
 import { issueInference } from "./inference-gateway.mjs";
 import { readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
+export const UNUSED_PROVIDERS = ["pi", "acp-cursor", "acp-opencode", "acp-omp", "acp-grok", "acp-hermes-agent"];
 export const BB_IMAGE = "ai-worker:0.162.1-bb0.45.0-r33-claude";
 
 // BB and its Codex children run as UID 1000 inside the EXISTING user worker.
@@ -58,6 +59,10 @@ export function createWebRuntime({ auth, allowed, settings, credential = () => n
   async function bootstrap(uid, target) {
     if (configured.has(uid)) return target.url;
     await docker(["exec", target.name, "bb", "plugin", "disable", "connect", "--json"]);
+    // Провайдеры bb, которым нужны свои аккаунты (Pi, Cursor, OpenCode…): у нас ими не
+    // воспользоваться, а в выборе модели они путают значками. Раньше их выключали
+    // руками, и новички (Лиза, 10.10) видели их. Повторно выключать безопасно.
+    await docker(["exec", target.name, "sh", "-c", `for p in ${UNUSED_PROVIDERS.join(" ")}; do bb provider disable "$p" --json >/dev/null 2>&1; done; true`]);
     const hasClaude = credential(uid)?.kind === "subscription";
     // «Claude Code» контейнера — только пока нет моста к Claude бота: с мостом он
     // выключен (claude-bb.mjs), иначе чаты из bb шли бы мимо бота.
