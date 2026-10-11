@@ -15,6 +15,8 @@
  *   {type:"done", stopReason} — ход закончен.
  */
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { execFile } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { chmodSync, existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import type { Api } from "grammy";
@@ -58,6 +60,34 @@ export function plainText(html: string): string {
     .trim();
 }
 
+/** Сохранить файл в рабочую зону bb; путь внутри контейнера или null (bb у человека нет). */
+export type BbFileSaver = (name: string, bytes: Uint8Array) => Promise<string | null>;
+
+/** Ссылка на файл рабочей зоны, которую bb открывает в просмотре со скачиванием. */
+export function bbFileLink(name: string, containerPath: string): string {
+  const href = containerPath.split("/").map((part) => encodeURIComponent(part).replace(/\(/g, "%28").replace(/\)/g, "%29")).join("/");
+  return `📎 [${name.replace(/[[\]]/g, "")}](${href})`;
+}
+
+/**
+ * Файлы Claude бота в bb: раньше в чат приходило только «📎 Файл: plan.html», а сам
+ * файл лежал в папке диалога бота, которую контейнер bb не видит (у Лизы — html без
+ * скачивания). Теперь файл кладётся в «Файлы Claude» рабочей зоны, в чат — ссылка.
+ */
+export function workspaceFileSaver(userId: number, root = `/opt/ai-bot/tenants/${userId}/workspace`): BbFileSaver {
+  const helper = fileURLToPath(new URL("../gpt/bb-save-file.py", import.meta.url));
+  return (name, bytes) =>
+    new Promise((resolve) => {
+      if (!existsSync(root)) return resolve(null);
+      const child = execFile("python3", [helper, root, name], { timeout: 60_000, maxBuffer: 1 << 16 }, (error, stdout) => {
+        const saved = String(stdout).trim();
+        resolve(error || !saved ? null : `/app/workspaces/${userId}/${saved}`);
+      });
+      child.stdin?.on("error", () => undefined);
+      child.stdin?.end(Buffer.from(bytes));
+    });
+}
+
 /**
  * Вывод хода в bb. Реплики агента уходят как текст; журнал задачи, который
  * Telegram получает после результата, bb не нужен — у него свой журнал.
@@ -67,11 +97,19 @@ export class BbOutput implements ConversationOutput {
   #emit: (event: Event) => void;
   #telegram: PermissionBridgeHooks;
   #active: () => boolean;
+  #save: BbFileSaver;
 
-  constructor(emit: (event: Event) => void, telegramHooks: PermissionBridgeHooks, active: () => boolean) {
+  constructor(emit: (event: Event) => void, telegramHooks: PermissionBridgeHooks, active: () => boolean, save: BbFileSaver = async () => null) {
     this.#emit = emit;
     this.#telegram = telegramHooks;
     this.#active = active;
+    this.#save = save;
+  }
+
+  async #file(name: string, bytes: Uint8Array): Promise<void> {
+    const path = await this.#save(name, bytes).catch(() => null);
+    if (path) this.#emit({ type: "text", text: bbFileLink(path.split("/").pop() ?? name, path) });
+    else this.#emit({ type: "note", text: `📎 Файл: ${name} — в bb не сохранился, попроси прислать его в Telegram` });
   }
 
   async send(html: string): Promise<number | undefined> {
@@ -91,11 +129,11 @@ export class BbOutput implements ConversationOutput {
   async document(path: string, caption?: string, fileName?: string): Promise<void> {
     this.#emit({ type: "note", text: `📎 Файл: ${fileName ?? path.split("/").pop()}${caption ? ` — ${plainText(caption)}` : ""} (лежит в папке диалога, в Telegram придёт по запросу)` });
   }
-  async documentBytes(_bytes: Uint8Array, fileName: string): Promise<void> {
-    this.#emit({ type: "note", text: `📎 Файл: ${fileName}` });
+  async documentBytes(bytes: Uint8Array, fileName: string): Promise<void> {
+    await this.#file(fileName, bytes);
   }
-  async documentFromText(_text: string, fileName: string): Promise<void> {
-    this.#emit({ type: "note", text: `📎 Файл: ${fileName}` });
+  async documentFromText(text: string, fileName: string): Promise<void> {
+    await this.#file(fileName, new TextEncoder().encode(text));
   }
   async typing(): Promise<void> {}
   startTyping(): void {}
@@ -159,6 +197,7 @@ export interface BridgeDeps {
   prepare?: typeof prepareDialog;
   create?: typeof createDialog;
   adopt?: typeof adoptBbDialog;
+  saveFile?: (userId: number) => BbFileSaver;
 }
 /** Один перенос на тред bb за раз: повторный запрос ждёт первый, а не создаёт второй диалог. */
 const adopting = new Map<string, Promise<string>>();
@@ -225,7 +264,7 @@ async function runTurn(deps: BridgeDeps, userId: number, sessionId: string, text
   });
   try {
     const cwd = (deps.prepare ?? prepareDialog)(userId, record);
-    const output = new BbOutput(emit, new TelegramOutput(deps.api, userId).permissionHooks, () => !!conversation?.busy);
+    const output = new BbOutput(emit, new TelegramOutput(deps.api, userId).permissionHooks, () => !!conversation?.busy, (deps.saveFile ?? workspaceFileSaver)(userId));
     const options: ConstructorParameters<typeof Conversation>[0] = {
       chatId: userId,
       userId,
