@@ -623,6 +623,10 @@ export function recordRateLimit(
   userId: number,
   limit: { limitType: string; status?: string; utilization?: number; resetsAt?: number },
 ): void {
+  // Лимиты — у подписки, а не у человека: все позванные работают на подписке
+  // плательщика. Раньше запись велась на того, кто сделал ход, и упор Али в
+  // пятичасовое окно из bb не доходил до экрана владельца и расчёта долей.
+  userId = payerFor(userId);
   if (limit.status === undefined) {
     stmts.upsertLimitUsage.run(
       userId,
@@ -667,8 +671,18 @@ export function delayUsageFetch(userId: number, retryAfterSeconds: number | null
   gateSet.run(userId, now + pause);
 }
 
+/** Лимиты подписки, на которой работает человек: свежайшая запись по каждому окну
+ * среди плательщика и позванных (старые записи велись на каждого отдельно). */
 export function listRateLimits(userId: number): RateLimitRow[] {
-  return stmts.listLimits.all(userId) as unknown as RateLimitRow[];
+  const payer = payerFor(userId);
+  const ids = [payer, ...listAllowedUsers(payer).map((r) => r.user_id).filter((id) => payerFor(id) === payer)];
+  const latest = new Map<string, RateLimitRow>();
+  for (const id of ids)
+    for (const row of stmts.listLimits.all(id) as unknown as RateLimitRow[]) {
+      const seen = latest.get(row.limit_type);
+      if (!seen || row.seen_at > seen.seen_at) latest.set(row.limit_type, row);
+    }
+  return [...latest.values()].sort((a, b) => a.limit_type.localeCompare(b.limit_type));
 }
 
 export function seeProject(userId: number, project: string): number {

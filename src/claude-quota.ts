@@ -22,7 +22,7 @@ export function createClaudeQuota(db:DatabaseSync,owner:number){
  /** Недельное окно общей подписки: процент и начало (сброс − 7 дней). */
  function subscriptionWeek(now:number){
   let row:{utilization:number|null;resets_at:number|null}|undefined;
-  try{row=db.prepare("SELECT utilization,resets_at FROM rate_limits WHERE user_id=? AND limit_type='seven_day'").get(owner) as typeof row;}catch{row=undefined;} // нет таблицы — процент неизвестен
+  try{row=db.prepare("SELECT utilization,resets_at FROM rate_limits WHERE limit_type='seven_day' AND (user_id=? OR user_id IN (SELECT user_id FROM allowed_users WHERE added_by=?)) AND user_id NOT IN (SELECT user_id FROM users WHERE api_key_enc IS NOT NULL AND user_id<>?) ORDER BY seen_at DESC LIMIT 1").get(owner,owner,owner) as typeof row;}catch{row=undefined;} // нет таблицы — процент неизвестен
   const resets=row?.resets_at==null?null:row.resets_at<1e12?row.resets_at*1000:row.resets_at;
   if(resets===null||resets<=now)return {utilization:null,start:now-WEEK,resetsAt:null};
   return {utilization:row?.utilization??null,start:resets-WEEK,resetsAt:resets};

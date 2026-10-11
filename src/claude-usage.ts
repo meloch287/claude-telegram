@@ -1,5 +1,5 @@
 import {fetch,ProxyAgent} from "undici";
-import {credentialFor,listRateLimits,recordRateLimit,getModeData,claimUsageFetch,delayUsageFetch} from "./db.js";
+import {credentialFor,payerFor,listRateLimits,recordRateLimit,getModeData,claimUsageFetch,delayUsageFetch} from "./db.js";
 import {activeProxyUrl} from "./proxy.js";
 import {limitTitle,toMillis} from "./limits.js";
 const refreshing=new Map<number,Promise<void>>(),checked=new Map<number,number>(),failures=new Map<number,string>();
@@ -30,7 +30,9 @@ export async function refreshClaudeUsage(uid:number,options:{httpOnly?:boolean}=
     const credential=credentialFor(uid),proxy=activeProxyUrl()||process.env.TELEGRAM_PROXY||"";
     if(!credential||!proxy)throw Error("Claude или обязательный прокси недоступен");
     if(credential.kind!=="subscription"){checked.set(uid,Date.now());failures.delete(uid);return;} // у API-ключа нет лимитов плана
-    if(!claimUsageFetch(uid)){checked.set(uid,Date.now());failures.delete(uid);return;}
+    // Окно общее на подписку — и пауза после 429 тоже.
+    const gate=payerFor(uid);
+    if(!claimUsageFetch(gate)){checked.set(uid,Date.now());failures.delete(uid);return;}
     const agent=new ProxyAgent(proxy);
     try{
       const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",dispatcher:agent,signal:AbortSignal.timeout(15000),
@@ -38,7 +40,7 @@ export async function refreshClaudeUsage(uid:number,options:{httpOnly?:boolean}=
         body:JSON.stringify({model:PROBE_MODEL,max_tokens:1,messages:[{role:"user",content:"."}]})});
       const limits=limitsFromHeaders(r.headers);
       await r.body?.cancel();
-      if(r.status===429)delayUsageFetch(uid,Number(r.headers.get("retry-after"))||null);
+      if(r.status===429)delayUsageFetch(gate,Number(r.headers.get("retry-after"))||null);
       if(!limits.length)throw Error(r.status===429?"Лимит подписки исчерпан — показаны последние известные цифры":"Подписка не прислала лимиты");
       for(const limit of limits)recordRateLimit(uid,limit);
       checked.set(uid,Date.now());failures.delete(uid);
