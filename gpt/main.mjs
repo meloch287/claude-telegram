@@ -21,7 +21,7 @@ import { createTaskProgress } from "./task-progress.mjs";
 import { setupWeb } from "./web.mjs";
 import { registerChatActions } from "./chat-actions.mjs";
 import { createUserScheduler } from "./user-scheduler.mjs";
-import { createStorageGuard, storageAction } from "./storage.mjs";
+import { createStorageGuard, storageAction, CLEAN_ACTIONS } from "./storage.mjs";
 import { registerStorageMenu } from "./storage-menu.mjs";
 import { LEARNING_STYLE } from "./learning-style.mjs";
 import { createPercentController } from "./percent-quota.mjs";
@@ -286,6 +286,7 @@ const storageMenu = registerStorageMenu(bot, {
   guard: storageGuard,
   threads: store.allThreads,
   openDelete: deleteMenu.open,
+  preview: (uid) => storageAction(uid, "preview"),
 });
 registerSettingsMenu(bot, {
   homeText:
@@ -1180,14 +1181,15 @@ await bot.start({ drop_pending_updates: false });
         res.writeHead(200,{"content-type":"application/json"});res.end(JSON.stringify(result));
       }catch(e){res.writeHead(400);res.end(e.message||"Не удалось выполнить запрос");}return;
     }
-    const storageRequest = req.url?.match(/^\/storage\/([1-9][0-9]*)\/(scan|admit|cache)$/);
+    const storageRequest = req.url?.match(/^\/storage\/([1-9][0-9]*)\/(scan|admit|cache|bb_copies|claude_env|preview)$/);
     if (req.method === "POST" && storageRequest) {
       const uid = Number(storageRequest[1]), action = storageRequest[2];
       if (!Number.isSafeInteger(uid) || !allowed(uid) || store.userDeletion(uid)) { res.writeHead(403); res.end("Нет доступа"); return; }
       try {
         let report;
         if (action === "admit") { await storageGuard.admit(uid); report = store.storageLedger.get(uid); }
-        else if (action === "cache") report = await storageGuard.clean(uid, "cache");
+        else if (CLEAN_ACTIONS.includes(action)) report = await storageGuard.clean(uid, action);
+        else if (action === "preview") report = await storageAction(uid, "preview");
         else report = await storageGuard.refresh(uid);
         res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify(report));
       } catch (e) { res.writeHead(409); res.end(e.message || "Не удалось проверить место на диске"); }

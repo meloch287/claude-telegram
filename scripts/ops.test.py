@@ -1,5 +1,5 @@
 """Тесты ops.py: чистка релизов и сторож (без systemd и Telegram). python3 scripts/ops.test.py"""
-import importlib.util, os, sqlite3, tempfile, time, unittest
+import importlib.util, json, os, sqlite3, tempfile, time, unittest
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -155,6 +155,18 @@ class BbProviders(unittest.TestCase):
         self.assertEqual(found, [])
         found, _ = self.check({'ai-user-8': ['codex', 'acp-tgclaude', 'pi']}, fails={'pi'})
         self.assertEqual(found, ['у 8 в bb не выключается провайдер pi'])
+
+
+class Storage(unittest.TestCase):
+    def test_unsorted_other_files_alert(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ops = load(Path(tmp))
+            gb = 1 << 30
+            rows = [(844820548, json.dumps({'categories': {'other': int(6.5 * gb), 'projects': 6 * gb}})),
+                    (7, json.dumps({'categories': {'other': gb // 2, 'bb_copies': 5 * gb}})), (8, None), (9, '{не json')]
+            found = ops.storage_problems(rows)
+            self.assertEqual(len(found), 1)
+            self.assertIn('844820548', found[0]); self.assertIn('6.5 ГБ', found[0])
 
 
 class Backup(unittest.TestCase):

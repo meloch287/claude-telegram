@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { registerStorageMenu, storageReport } from "./storage-menu.mjs";
+import { registerStorageMenu, storageReport, cleanupPreview } from "./storage-menu.mjs";
 test("storage cleanup requires a fresh confirmation owned by the caller; cannot replay", async () => {
   let callback,
     pattern,
@@ -31,6 +31,7 @@ test("storage cleanup requires a fresh confirmation owned by the caller; cannot 
       },
       threads: () => [{ id: "a", title: "<private>" }],
       openDelete: async () => {},
+      preview: async () => ({ bb_copies: [{ name: "thr_x", bytes: 4.8e9, items: ["IngCheckUp"] }], claude_env: [] }),
     },
   );
   const ctx = {
@@ -53,8 +54,20 @@ test("storage cleanup requires a fresh confirmation owned by the caller; cannot 
   assert.deepEqual(cleared, [{ uid: 202, kind: "cache" }]);
   await click(action);
   assert.equal(cleared.length, 1);
-  await click("disk:ask:other");
+  assert.equal("disk:ask:other".match(pattern), null, "опасной «прочие файлы» больше нет");
+  // копии проектов bb: перед удалением видно, что и сколько
+  await click("disk:ask:bb_copies");
+  assert.match(last, /IngCheckUp\s+4\.80 ГБ/);
+  assert.match(last, /треды, переписка и твои проекты .* останутся/);
+  await click(kb.inline_keyboard[0][0].callback_data);
+  assert.deepEqual(cleared.at(-1), { uid: 202, kind: "bb_copies" });
+  // удалять нечего — не просим подтверждения
+  await click("disk:ask:claude_env");
+  assert.match(last, /удалять нечего/);
+  assert.equal(cleared.length, 2);
   await click("disk:cancel");
-  assert.equal(cleared.length, 1);
+  assert.equal(cleared.length, 2);
   assert.ok(storageReport(report, [{ id: "a", title: "<private>" }]).includes("&lt;private&gt;"));
+  assert.ok(storageReport({ bytes: 1e9, categories: { bb_copies: 4.8e9, service: 1e9 }, dialogs: { "bb:thr_x": 4.8e9 } }).includes("Копия проекта bb"));
+  assert.equal(cleanupPreview("claude_env", { claude_env: [{ name: ".mamba", bytes: 9e8 }] }).total, 9e8);
 });

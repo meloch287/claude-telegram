@@ -59,11 +59,18 @@ export function createStorageLedger(db, now = Date.now) {
     },
   };
 }
+/**
+ * Что умеет storage-files.py. «other» (удалить «прочие файлы» целиком) убран: он сносил
+ * базу bb и проекты рабочей зоны. Вместо него — понятные части с предпросмотром:
+ * bb_copies — копии проектов, сделанные bb для тредов; claude_env — окружения Claude.
+ */
+export const STORAGE_ACTIONS = ["scan", "cache", "bb_copies", "claude_env", "preview"];
+export const CLEAN_ACTIONS = ["cache", "bb_copies", "claude_env"];
 export function createStorageRunner(execute = exec) {
   let chain = Promise.resolve();
   return async (uid, action = "scan") => {
     userId(uid);
-    if (!["scan", "cache", "other"].includes(action)) throw Error("Invalid storage action");
+    if (!STORAGE_ACTIONS.includes(action)) throw Error("Invalid storage action");
     const work = chain.then(async () => {
       const root = process.env.TENANT_ROOT || "/opt/ai-bot/tenants";
       const claudeWork = process.env.WORKSPACE_ROOT || "/opt/ai-bot/unused-controller-workspaces";

@@ -186,6 +186,7 @@ def problems():
     found += sync_problems()
     found += image_problems()
     found += bb_problems()
+    found += storage_problems()
     backup_at = load_state().get('backup', {}).get('at')
     if backup_at and time.time() - backup_at > 36 * 3600:
         found.append('ночной бэкап не делался больше полутора суток')
@@ -235,6 +236,26 @@ def image_problems(containers=None):
     stale = sorted(name for name, image in containers if image != want)
     if stale:
         found.append(f'контейнеры не на образе из кода ({want}): {", ".join(stale)} — у них не откроется /web')
+    return found
+
+
+def storage_problems(rows=None, limit=1 << 30):
+    """Место, которое не разложено по понятным частям, человек не может ни понять, ни удалить
+    (у Али 6,5 ГБ «прочих» — копия проекта bb). Больше 1 ГБ «прочих» — новая дыра в учёте."""
+    if rows is None:
+        try:
+            with sqlite3.connect(f'file:{DATA}/bot.db?mode=ro', uri=True) as db:
+                rows = db.execute('select user_id, report from gpt_storage').fetchall()
+        except sqlite3.Error:
+            return []
+    found = []
+    for uid, report in rows:
+        try:
+            other = json.loads(report or '{}').get('categories', {}).get('other', 0)
+        except ValueError:
+            continue
+        if other > limit:
+            found.append(f'у {uid} {other / (1 << 30):.1f} ГБ «прочих файлов» не разобраны по частям — их не видно и не удалить: добавить категорию в gpt/storage-files.py')
     return found
 
 

@@ -91,7 +91,14 @@ export function gptApi(path: string, initData: string, method: "GET" | "POST" = 
 }
 
 export interface StorageReport { bytes: number; warning: boolean; blocked: boolean; checkedAt: number; categories: Record<string, number>; dialogs: Record<string, number> }
-export async function gptStorage(uid: number, action: "scan" | "admit" | "cache" = "scan"): Promise<StorageReport> {
+export type StorageCleanup = "cache" | "bb_copies" | "claude_env";
+export interface StoragePreviewItem { name: string; bytes: number; items?: string[] }
+/** Что удалят кнопки «Копии проектов bb» и «Программы Claude» — до подтверждения. */
+export async function gptStoragePreview(uid: number): Promise<Record<"bb_copies" | "claude_env", StoragePreviewItem[]>> {
+  if (!Number.isSafeInteger(uid) || uid <= 0) throw Error("Недоступный профиль");
+  return JSON.parse(await callBackend("POST", `/storage/${uid}/preview`));
+}
+export async function gptStorage(uid: number, action: "scan" | "admit" | StorageCleanup = "scan"): Promise<StorageReport> {
   if (!Number.isSafeInteger(uid) || uid <= 0) throw Error("Недоступный профиль");
   try { return JSON.parse(await callBackend("POST", `/storage/${uid}/${action}`)) as StorageReport; }
   catch (e) { throw new Error(e instanceof Error ? e.message : "Не удалось проверить место на диске. Открой /storage."); }
