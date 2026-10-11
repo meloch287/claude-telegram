@@ -11,6 +11,7 @@
  *   {type:"text", text}   — реплика агента (Markdown);
  *   {type:"status", text} — строка хода работы (шаги);
  *   {type:"note", text}   — служебное сообщение (ошибка, файл, просьба подтвердить);
+ *   {type:"context", used, size} — заполненность контекста после хода (для индикатора bb);
  *   {type:"done", stopReason} — ход закончен.
  */
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -41,7 +42,7 @@ import {
 const ID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 export const BB_BRIDGE_SOCKET = join(config.dataDir, "claude-bb.sock");
 
-type Event = { type: "text" | "status" | "note"; text: string } | { type: "done"; stopReason: "end_turn" | "cancelled" | "refusal" };
+type Event = { type: "text" | "status" | "note"; text: string } | { type: "context"; used: number; size: number } | { type: "done"; stopReason: "end_turn" | "cancelled" | "refusal" };
 
 export function plainText(html: string): string {
   return html
@@ -253,6 +254,17 @@ async function runTurn(deps: BridgeDeps, userId: number, sessionId: string, text
     conversation = deps.createConversation ? deps.createConversation(options) : new Conversation(options);
     await conversation.send(text);
     await waitIdle(conversation);
+    // Индикатор контекста в bb: без этого он навсегда застывал на цифре старого
+    // провайдера (у Али 87% три дня).
+    const context = await Promise.race([
+      conversation.contextUsage?.().catch(() => null) ?? Promise.resolve(null),
+      new Promise<null>((resolve) => setTimeout(resolve, 5000, null)),
+    ]);
+    if (context && context.max > 0) {
+      const value = { used: context.total, size: context.max };
+      try { updateDialog(userId, sessionId, { context: value }); } catch { /* диалог удалён */ }
+      emit({ type: "context", ...value });
+    }
     emit({ type: "done", stopReason: stopped ? "cancelled" : "end_turn" });
   } catch (error) {
     emit({ type: "note", text: `⚠️ ${error instanceof Error ? error.message : String(error)}` });
@@ -307,7 +319,8 @@ export function createBbBridgeHandler(deps: BridgeDeps) {
       if (!ID.test(sessionId)) throw new BridgeError(400, "Неверный диалог");
       if (match[4] === "check") {
         res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify({ ok: !!dialogRecord(userId, sessionId), busy: bbHolds(userId, sessionId) }));
+        const record = dialogRecord(userId, sessionId);
+        res.end(JSON.stringify({ ok: !!record, busy: bbHolds(userId, sessionId), context: record?.context ?? null }));
         return;
       }
       if (match[4] === "cancel") {

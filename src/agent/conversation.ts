@@ -110,6 +110,8 @@ export interface ConversationDeps {
   onSessionId(sessionId: string): void;
   /** Сохранённой сессии не оказалось на диске — забыть её в базе. */
   onResumeLost(): void;
+  /** Заполненность контекста после хода (токены и окно модели). */
+  onContext?(context: { used: number; size: number }): void;
   onToolDecision(toolName: string, allowed: boolean): void;
   /** Лимиты подписки. Приходят событием по ходу работы, а не по запросу. */
   onRateLimit(limit: RateLimitUpdate): void;
@@ -880,6 +882,11 @@ export class Conversation {
         // Задача закончилась — самое время узнать, сколько осталось.
         // Не ждём: пользователю важен ответ, а не свежесть счётчика.
         void this.refreshRateLimits();
+        const onContext = this.#deps.onContext;
+        if (onContext)
+          void this.contextUsage()
+            .then((c) => { if (c && c.max > 0) onContext({ used: c.total, size: c.max }); })
+            .catch(() => undefined);
 
         this.#deps.onUsage({
           tokens: deltaTokens,

@@ -41,6 +41,7 @@ function fakeConversation(options) {
       await options.output.sendRich("Привет из бота");
       setTimeout(() => { busy = false; }, 300); },
     async interrupt() { busy = false; }, async close() {},
+    async contextUsage() { return { percentage: 12, total: 120000, max: 1000000 }; },
   };
 }
 const server = createServer(createBbBridgeHandler({ api: {}, createConversation: fakeConversation, prepare: () => "/tmp/dialog", create: () => ({ id: "22222222-3333-4444-8555-666666666666", project: "default", title: "Новый диалог", started: false }) }));
@@ -59,6 +60,7 @@ results.check = JSON.parse((await call("/v1/4242/" + sid + "/check")).body);
 const turn = await call("/v1/4242/" + sid + "/turn", { text: "Привет" });
 results.turn = { status: turn.status, events: turn.body.trim().split("\n").map((l) => JSON.parse(l)), seen, holdsDuring, holdsAfter: bbHolds(uid, sid) };
 bbAcquire(uid, sid, async () => {});
+results.checkAfter = JSON.parse((await call("/v1/4242/" + sid + "/check")).body);
 results.busy = (await call("/v1/4242/" + sid + "/turn", { text: "ещё" })).status;
 bbRelease(uid, sid);
 const created = await call("/v1/4242/new");
@@ -83,9 +85,11 @@ test("bridge routes, streaming turn, locks and new dialogs", () => {
     assert.equal(r.unknown, 404);
     assert.equal(r.badPath, 404);
     assert.equal(r.empty, 400);
-    assert.deepEqual(r.check, { ok: true, busy: false });
+    assert.deepEqual(r.check, { ok: true, busy: false, context: null });
     assert.equal(r.turn.status, 200);
-    assert.deepEqual(r.turn.events.map((e) => e.type), ["status", "text", "done"]);
+    assert.deepEqual(r.turn.events.map((e) => e.type), ["status", "text", "context", "done"]);
+    assert.deepEqual(r.turn.events[2], { type: "context", used: 120000, size: 1000000 }, "заполненность контекста — для индикатора bb");
+    assert.deepEqual(r.checkAfter.context, { used: 120000, size: 1000000 }, "запомнена у диалога — при открытии треда bb увидит её сразу");
     assert.equal(r.turn.events.at(-1).stopReason, "end_turn");
     assert.equal(r.turn.seen.text, "Привет");
     assert.equal(r.turn.seen.resume, "11111111-2222-4333-8444-555555555555", "начатый диалог продолжается той же сессией");

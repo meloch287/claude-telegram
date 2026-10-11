@@ -147,6 +147,11 @@ export function ensureSession(options: EnsureOptions): ChatSession {
       const unlocked = checkAchievements(userId, { type: "tool", toolName, allowed });
       if (unlocked.length > 0) void notify(renderUnlocked(unlocked));
     },
+    onContext: (context) => {
+      // Индикатор контекста в bb берёт цифру отсюда, когда тред открывают.
+      const id = getChat(chatId)?.session_id;
+      if (id) try { updateDialog(userId, id, { context }); } catch { /* диалог удалён */ }
+    },
     onRateLimit: (limit) => {
       // Только запись для /status и мини-аппа. В чат про лимиты не пишем:
       // SDK присылал «лимит исчерпан», когда по факту запаса было полно, и

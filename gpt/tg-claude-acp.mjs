@@ -111,6 +111,8 @@ async function prompt(sessionId, blocks) {
             seen.add(title);
             update(sessionId, { sessionUpdate: "tool_call", toolCallId: `step-${++step}`, title, kind: "other", status: "completed" });
           }
+        } else if (event.type === "context") {
+          update(sessionId, { sessionUpdate: "usage_update", used: event.used, size: event.size });
         } else if (event.type === "done") {
           stopReason = event.stopReason || "end_turn";
         }
@@ -141,7 +143,10 @@ async function handle(message) {
     }
     case "session/load": {
       const response = await call(`${params.sessionId}/check`);
-      if (!(await response.json()).ok) throw new Error("Диалог не найден в боте");
+      const found = await response.json();
+      if (!found.ok) throw new Error("Диалог не найден в боте");
+      // bb применит это после загрузки — индикатор контекста сразу свежий.
+      if (found.context) update(params.sessionId, { sessionUpdate: "usage_update", used: found.context.used, size: found.context.size });
       await loadCatalog();
       return configState(params.sessionId); // история уже в bb — повторять её не нужно
     }
