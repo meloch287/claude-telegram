@@ -1,5 +1,5 @@
 import { taskState } from "../bot/task-state.js";
-import { readContextUsage } from "./context-usage.js";
+import { contextFromTurn, readContextUsage } from "./context-usage.js";
 import { gptStorage } from "../engine.js";
 import {claudeTeamContext,cancelClaudeTeam} from "../team-context.js";
 import {claudeQuota} from "../db.js";
@@ -329,6 +329,8 @@ export class Conversation {
    * запрос ходит в API и может не ответить, а показать что-то надо всегда.
    */
   #context: { percentage: number; total: number; max: number } | null = null;
+  /** usage последнего ответа основной ветки — для мгновенной заполненности контекста. */
+  #lastUsage: unknown = null;
 
   constructor(deps: ConversationDeps) {
     this.#deps = deps;
@@ -420,6 +422,11 @@ export class Conversation {
     this.#deps.permissionMode = mode;
     if (!this.#query) return;
     await this.#query.setPermissionMode(mode);
+  }
+
+  /** Заполненность по итогу последнего хода — без запроса к API. */
+  lastContext(): { percentage: number; total: number; max: number } | null {
+    return this.#context;
   }
 
   /** Насколько заполнено окно контекста. null — узнать не удалось. */
@@ -744,6 +751,7 @@ export class Conversation {
       case "assistant": {
         const usage = readContextUsage((message as unknown as { context_usage?: unknown }).context_usage);
         if (usage) this.#context = usage;
+        if (!message.parent_tool_use_id && message.message.usage) this.#lastUsage = message.message.usage;
 
         for (const block of message.message.content) {
           if (block.type === "text" && block.text.trim()) {
@@ -868,8 +876,11 @@ export class Conversation {
         // Задача закончилась — самое время узнать, сколько осталось.
         // Не ждём: пользователю важен ответ, а не свежесть счётчика.
         void this.refreshRateLimits();
+        const fast = contextFromTurn(this.#lastUsage, (message as { modelUsage?: unknown }).modelUsage);
+        if (fast) this.#context = fast;
         const onContext = this.#deps.onContext;
-        if (onContext)
+        if (onContext && fast) onContext({ used: fast.total, size: fast.max });
+        else if (onContext)
           void this.contextUsage()
             .then((c) => { if (c && c.max > 0) onContext({ used: c.total, size: c.max }); })
             .catch(() => undefined);

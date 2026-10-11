@@ -256,10 +256,13 @@ async function runTurn(deps: BridgeDeps, userId: number, sessionId: string, text
     await waitIdle(conversation);
     // Индикатор контекста в bb: без этого он навсегда застывал на цифре старого
     // провайдера (у Али 87% три дня).
-    const context = await Promise.race([
+    // Обычно цифра уже есть из итога хода; полный пересчёт SDK (~12 с) — только запасной путь.
+    const known = conversation.lastContext?.();
+    let timer: NodeJS.Timeout | undefined;
+    const context = known && known.max > 0 ? known : await Promise.race([
       conversation.contextUsage?.().catch(() => null) ?? Promise.resolve(null),
-      new Promise<null>((resolve) => setTimeout(resolve, 5000, null)),
-    ]);
+      new Promise<null>((resolve) => { timer = setTimeout(resolve, 20000, null); }),
+    ]).finally(() => clearTimeout(timer));
     if (context && context.max > 0) {
       const value = { used: context.total, size: context.max };
       try { updateDialog(userId, sessionId, { context: value }); } catch { /* диалог удалён */ }

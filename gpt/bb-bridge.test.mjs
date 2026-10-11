@@ -41,7 +41,9 @@ function fakeConversation(options) {
       await options.output.sendRich("Привет из бота");
       setTimeout(() => { busy = false; }, 300); },
     async interrupt() { busy = false; }, async close() {},
-    async contextUsage() { return { percentage: 12, total: 120000, max: 1000000 }; },
+    // как в жизни: полный пересчёт SDK долгий (~12 с) — мост не должен его ждать
+    contextUsage() { return new Promise(() => {}); },
+    lastContext() { return { percentage: 12, total: 120000, max: 1000000 }; },
   };
 }
 const server = createServer(createBbBridgeHandler({ api: {}, createConversation: fakeConversation, prepare: () => "/tmp/dialog", create: () => ({ id: "22222222-3333-4444-8555-666666666666", project: "default", title: "Новый диалог", started: false }) }));
