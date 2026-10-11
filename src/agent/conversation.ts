@@ -1,4 +1,5 @@
 import { taskState } from "../bot/task-state.js";
+import { readContextUsage } from "./context-usage.js";
 import { gptStorage } from "../engine.js";
 import {claudeTeamContext,cancelClaudeTeam} from "../team-context.js";
 import {claudeQuota} from "../db.js";
@@ -426,14 +427,9 @@ export class Conversation {
     if (!this.#query) return this.#context;
     try {
       const response = await this.#query.getContextUsage();
-      const usage = (response as { context_usage?: unknown }).context_usage ?? response;
-      const u = usage as { percentage?: number; total_tokens?: number; raw_max_tokens?: number };
-      if (typeof u.percentage !== "number") return this.#context;
-      this.#context = {
-        percentage: u.percentage,
-        total: u.total_tokens ?? 0,
-        max: u.raw_max_tokens ?? 0,
-      };
+      const usage = readContextUsage((response as { context_usage?: unknown }).context_usage ?? response);
+      if (!usage) return this.#context;
+      this.#context = usage;
       return this.#context;
     } catch {
       // Запрос ходит в API и может не ответить. Тогда отдаём последнее, что
@@ -746,18 +742,8 @@ export class Conversation {
       }
 
       case "assistant": {
-        const usage = (
-          message as unknown as {
-            context_usage?: { percentage?: number; total_tokens?: number; raw_max_tokens?: number };
-          }
-        ).context_usage;
-        if (usage && typeof usage.percentage === "number") {
-          this.#context = {
-            percentage: usage.percentage,
-            total: usage.total_tokens ?? 0,
-            max: usage.raw_max_tokens ?? 0,
-          };
-        }
+        const usage = readContextUsage((message as unknown as { context_usage?: unknown }).context_usage);
+        if (usage) this.#context = usage;
 
         for (const block of message.message.content) {
           if (block.type === "text" && block.text.trim()) {
