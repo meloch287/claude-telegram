@@ -262,6 +262,31 @@ def bb_providers(name):
         return None
 
 
+def blocked_plugins():
+    try:
+        match = re.search(r'BLOCKED_PLUGINS = (\[[^\]]*\])', (APP / 'gpt/web-runtime.mjs').read_text())
+        return set(json.loads(match.group(1))) if match else set()
+    except (OSError, ValueError):
+        return set()
+
+
+def bb_plugins_on(name, plugins):
+    """Какие из плагинов включены в bb контейнера (по его базе)."""
+    if not plugins:
+        return []
+    code = ("import sqlite3,json,sys;d=sqlite3.connect('file:/home/agent/.bb/bb.db?mode=ro',uri=True);"
+            "w=json.loads(sys.argv[1]);print(json.dumps([r[0] for r in d.execute('select id from plugins where enabled=1') if r[0] in w]))")
+    out = run(['docker', 'exec', name, 'python3', '-c', code, json.dumps(sorted(plugins))], timeout=30)
+    try:
+        return json.loads(out.stdout) if out.returncode == 0 else []
+    except ValueError:
+        return []
+
+
+def bb_plugin_disable(name, plugin):
+    return run(['docker', 'exec', name, 'bb', 'plugin', 'disable', plugin, '--json'], timeout=60).returncode == 0
+
+
 def bb_disable(name, provider):
     return run(['docker', 'exec', name, 'bb', 'provider', 'disable', provider, '--json'], timeout=60).returncode == 0
 
@@ -277,17 +302,24 @@ def claude_expected(uid):
     return uid == ADMIN_ID or access.get('claude', True) is not False
 
 
-def bb_problems(containers=None, providers=bb_providers, disable=bb_disable, expected=claude_expected):
+def bb_problems(containers=None, providers=bb_providers, disable=bb_disable, expected=claude_expected,
+                plugins_on=bb_plugins_on, plugin_disable=bb_plugin_disable):
     """bb у всех одинаковый: только GPT (codex) и Claude бота. Чинит, что может, о прочем — тревога."""
     if containers is None:
         out = run(['docker', 'ps', '--filter', 'label=ai-bot.managed=v1', '--format', '{{.Names}}'], timeout=30)
         containers = [n for n in out.stdout.split() if n.startswith('ai-user-')] if out.returncode == 0 else []
-    unused, found = unused_providers(), []
+    unused, blocked, found = unused_providers(), blocked_plugins(), []
     for name in containers:
         uid = int(name.removeprefix('ai-user-'))
         ids = providers(name)
         if ids is None:
             continue  # bb не запущен — проверим, когда откроют
+        # concurrency-limit пускал один диалог за раз; после обновления bb он мог включиться снова
+        for plugin in plugins_on(name, blocked):
+            if plugin_disable(name, plugin):
+                log(f'bb {uid}: выключил плагин {plugin}')
+            else:
+                found.append(f'у {uid} в bb не выключается плагин {plugin}')
         off = [p for p in ids if p in unused]
         if 'claude-code' in ids and 'acp-tgclaude' in ids:
             off.append('claude-code')  # чат в нём шёл бы мимо бота

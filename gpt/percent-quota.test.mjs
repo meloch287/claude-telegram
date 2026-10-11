@@ -105,3 +105,23 @@ test("нет данных OpenAI или процент пошёл назад в�
   await f.controller.finish("a");
   assert.equal(f.ledger.active(), undefined);
 });
+
+test("несколько задач одного человека параллельно (диалоги bb, Telegram + bb)", async () => {
+  const f = fixture();
+  await f.controller.begin(202, "web:a");
+  await f.controller.begin(202, "web:b");
+  await f.controller.begin(202, "tg");
+  assert.equal(f.ledger.activeJobs().filter((j) => j.user_id === 202).length, 3);
+  await f.controller.before(202, "web:b");
+  await Promise.all([f.controller.finish("web:a"), f.controller.finish("web:b"), f.controller.finish("tg")]);
+  assert.equal(f.ledger.activeJobs().length, 0);
+});
+
+test("старая таблица с UNIQUE(user_id) переделывается без потери задач", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec("CREATE TABLE gpt_percent_jobs(job_id TEXT PRIMARY KEY,user_id INTEGER UNIQUE NOT NULL,weight REAL NOT NULL DEFAULT 0); INSERT INTO gpt_percent_jobs VALUES('old',7,1.5)");
+  const ledger = percent.createPercentLedger(db, owner, () => 1791000000000, () => 10, () => 0);
+  assert.deepEqual(ledger.activeJobs().map((j) => [j.job_id, j.user_id, j.weight]), [["old", 7, 1.5]]);
+  db.prepare("INSERT INTO gpt_percent_jobs(job_id,user_id) VALUES('second',7)").run();
+  assert.equal(ledger.activeJobs().length, 2);
+});

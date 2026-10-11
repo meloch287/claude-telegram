@@ -6,6 +6,9 @@ import { docker, ensureWorker } from "./worker.mjs";
 import { issueInference } from "./inference-gateway.mjs";
 import { readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
+// Плагины bb, которые мешают: connect (вход в облако bb) и concurrency-limit —
+// он пускает один работающий диалог на ядро, а у контейнера одно ядро.
+export const BLOCKED_PLUGINS = ["connect", "concurrency-limit"];
 export const UNUSED_PROVIDERS = ["pi", "acp-cursor", "acp-opencode", "acp-omp", "acp-grok", "acp-hermes-agent"];
 export const BB_IMAGE = "ai-worker:0.162.1-bb0.45.0-r33-claude";
 
@@ -58,7 +61,7 @@ export function createWebRuntime({ auth, allowed, settings, credential = () => n
   }
   async function bootstrap(uid, target) {
     if (configured.has(uid)) return target.url;
-    await docker(["exec", target.name, "bb", "plugin", "disable", "connect", "--json"]);
+    for (const plugin of BLOCKED_PLUGINS) await docker(["exec", target.name, "bb", "plugin", "disable", plugin, "--json"]);
     // Провайдеры bb, которым нужны свои аккаунты (Pi, Cursor, OpenCode…): у нас ими не
     // воспользоваться, а в выборе модели они путают значками. Раньше их выключали
     // руками, и новички (Лиза, 10.10) видели их. Повторно выключать безопасно.

@@ -116,19 +116,26 @@ class BbProviders(unittest.TestCase):
         root = Path(self.tmp.name)
         (root / 'app' / 'gpt').mkdir(parents=True)
         (root / 'data').mkdir()
-        (root / 'app/gpt/web-runtime.mjs').write_text('export const UNUSED_PROVIDERS = ["pi", "acp-cursor"];\n')
+        (root / 'app/gpt/web-runtime.mjs').write_text('export const BLOCKED_PLUGINS = ["connect", "concurrency-limit"];\nexport const UNUSED_PROVIDERS = ["pi", "acp-cursor"];\n')
         self.ops = load(root)
 
     def tearDown(self):
         self.tmp.cleanup()
 
-    def check(self, lists, expected=lambda uid: True, fails=()):
+    def check(self, lists, expected=lambda uid: True, fails=(), plugins=None):
         off = []
         def disable(name, p):
             off.append((name, p))
             return p not in fails
-        found = self.ops.bb_problems(list(lists), providers=lambda n: lists[n], disable=disable, expected=expected)
+        found = self.ops.bb_problems(list(lists), providers=lambda n: lists[n], disable=disable, expected=expected,
+                                     plugins_on=lambda n, want: [p for p in (plugins or {}).get(n, []) if p in want], plugin_disable=disable)
         return found, off
+
+    def test_concurrency_limit_plugin_is_switched_off(self):
+        # лимит «один диалог за раз» включился снова (обновление bb) — сторож выключает
+        found, off = self.check({'ai-user-5': ['codex', 'acp-tgclaude']}, plugins={'ai-user-5': ['concurrency-limit', 'bb-guide']})
+        self.assertEqual(found, [])
+        self.assertEqual(off, [('ai-user-5', 'concurrency-limit')])
 
     def test_extra_providers_and_old_claude_code_are_switched_off(self):
         # ровно случай Лизы: пришла позже ручной чистки — у неё Pi и Cursor

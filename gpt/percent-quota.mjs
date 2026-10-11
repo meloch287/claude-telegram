@@ -42,8 +42,17 @@ export function createPercentLedger(db, owner, now = Date.now, limitFor = () => 
     CREATE TABLE IF NOT EXISTS gpt_percent_usage(user_id INTEGER NOT NULL,reset_at INTEGER NOT NULL,used REAL NOT NULL,PRIMARY KEY(user_id,reset_at));
     CREATE TABLE IF NOT EXISTS gpt_percent_active(id INTEGER PRIMARY KEY CHECK(id=1),user_id INTEGER NOT NULL,job_id TEXT NOT NULL,reset_at INTEGER NOT NULL,last_percent REAL NOT NULL,observed_at INTEGER NOT NULL);`);
   db.prepare("INSERT OR IGNORE INTO gpt_percent_meta(id,started_at) VALUES(1,?)").run(now());
-  db.exec(`CREATE TABLE IF NOT EXISTS gpt_percent_jobs(job_id TEXT PRIMARY KEY,user_id INTEGER UNIQUE NOT NULL,weight REAL NOT NULL DEFAULT 0);
+  db.exec(`CREATE TABLE IF NOT EXISTS gpt_percent_jobs(job_id TEXT PRIMARY KEY,user_id INTEGER NOT NULL,weight REAL NOT NULL DEFAULT 0);
     CREATE TABLE IF NOT EXISTS gpt_percent_sample(id INTEGER PRIMARY KEY CHECK(id=1),reset_at INTEGER NOT NULL,last_percent REAL NOT NULL,observed_at INTEGER NOT NULL);`);
+  // Несколько задач одного человека одновременно (параллельные диалоги bb, Telegram + bb):
+  // раньше user_id был UNIQUE, и вторая задача получала «Учёт предыдущей задачи ещё не завершён».
+  if (/user_id INTEGER UNIQUE/.test(db.prepare("SELECT sql FROM sqlite_master WHERE name='gpt_percent_jobs'").get()?.sql ?? ""))
+    db.exec(`BEGIN IMMEDIATE;
+      CREATE TABLE gpt_percent_jobs_new(job_id TEXT PRIMARY KEY,user_id INTEGER NOT NULL,weight REAL NOT NULL DEFAULT 0);
+      INSERT INTO gpt_percent_jobs_new SELECT job_id,user_id,weight FROM gpt_percent_jobs;
+      DROP TABLE gpt_percent_jobs;
+      ALTER TABLE gpt_percent_jobs_new RENAME TO gpt_percent_jobs;
+      COMMIT;`);
   if (!db.prepare("PRAGMA table_info(gpt_percent_sample)").all().some((c) => c.name === "window_start"))
     db.exec("ALTER TABLE gpt_percent_sample ADD COLUMN window_start INTEGER");
   // Preserve an interrupted pre-parallel task and its observation across upgrades.
@@ -187,8 +196,6 @@ export function createPercentLedger(db, owner, now = Date.now, limitFor = () => 
         );
     },
     begin(uid, jobId, w) {
-      if (activeJobs().some((j) => j.user_id === uid))
-        throw new Error("Учёт предыдущей задачи ещё не завершён");
       observe(w);
       assertBudget(uid);
       db.prepare("INSERT INTO gpt_percent_jobs(job_id,user_id) VALUES(?,?)").run(jobId, uid);
