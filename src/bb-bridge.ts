@@ -30,6 +30,7 @@ import { bbAcquire, bbHolds, bbRelease, bbStop } from "./bb-locks.js";
 import { engineAllowed, engineClosedText } from "./engine-access.js";
 import { adoptBbDialog, parseAdopt } from "./bb-adopt.js";
 import { claudeModelLabel, claudeModels, claudePreferences, saveClaudePreferences } from "./claude-settings.js";
+import { saveAttachment } from "./bot/attachments.js";
 import { config } from "./config.js";
 import {
   credentialFor,
@@ -168,12 +169,40 @@ class BridgeError extends Error {
   }
 }
 
+/** Тело хода: текст и вложения из bb (base64) — до 10 файлов по 20 МБ. */
+const MAX_BODY = 64 * 1024 * 1024;
+const MAX_ATTACHMENT = 20 * 1024 * 1024;
+export interface BbAttachment { name: string; bytes: Buffer }
+
+/**
+ * Вложения хода из bb. bb хранит их в домашней папке контейнера, куда Claude бота
+ * (свой системный пользователь) заглянуть не может: Али прислал скриншот, а Claude
+ * ответил «файл закрыт на уровне системы». Агент в контейнере читает файл сам и
+ * присылает байты; бот кладёт их в «вложения» папки диалога, как из Telegram.
+ */
+export function parseAttachments(raw: unknown): BbAttachment[] {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw) || raw.length > 10) throw new BridgeError(400, "Не больше 10 вложений за раз");
+  return raw.map((item) => {
+    const { name, data } = (item ?? {}) as { name?: unknown; data?: unknown };
+    if (typeof name !== "string" || !name || name.length > 200 || typeof data !== "string") throw new BridgeError(400, "Некорректное вложение");
+    const bytes = Buffer.from(data, "base64");
+    if (bytes.length > MAX_ATTACHMENT) throw new BridgeError(413, `Вложение «${name}» больше 20 МБ`);
+    return { name, bytes };
+  });
+}
+
+function isImage(bytes: Buffer): boolean {
+  return (bytes[0] === 0x89 && bytes.toString("latin1", 1, 4) === "PNG") || (bytes[0] === 0xff && bytes[1] === 0xd8) ||
+    bytes.toString("latin1", 0, 4) === "GIF8" || (bytes.toString("latin1", 0, 4) === "RIFF" && bytes.toString("latin1", 8, 12) === "WEBP");
+}
+
 async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
     size += (chunk as Buffer).length;
-    if (size > 512_000) throw new BridgeError(413, "Слишком длинное сообщение");
+    if (size > MAX_BODY) throw new BridgeError(413, "Слишком большое сообщение: вложения — до 20 МБ каждое, до 10 за раз.");
     chunks.push(chunk as Buffer);
   }
   if (!size) return {};
@@ -205,6 +234,7 @@ export interface BridgeDeps {
   create?: typeof createDialog;
   adopt?: typeof adoptBbDialog;
   saveFile?: (userId: number) => BbFileSaver;
+  saveAttachment?: typeof saveAttachment;
 }
 /** Один перенос на тред bb за раз: повторный запрос ждёт первый, а не создаёт второй диалог. */
 const adopting = new Map<string, Promise<string>>();
@@ -238,7 +268,7 @@ function settingsFor(userId: number) {
   };
 }
 
-async function runTurn(deps: BridgeDeps, userId: number, sessionId: string, text: string, res: ServerResponse): Promise<void> {
+async function runTurn(deps: BridgeDeps, userId: number, sessionId: string, text: string, res: ServerResponse, attachments: BbAttachment[] = []): Promise<void> {
   const record = dialogRecord(userId, sessionId);
   if (!record) throw new BridgeError(404, "Диалог не найден. Возможно, его удалили в Telegram.");
   const credential = credentialFor(userId);
@@ -298,7 +328,14 @@ async function runTurn(deps: BridgeDeps, userId: number, sessionId: string, text
       onRateLimit: (limit) => recordRateLimit(userId, limit),
     };
     conversation = deps.createConversation ? deps.createConversation(options) : new Conversation(options);
-    await conversation.send(text);
+    const images: string[] = [];
+    const notes: string[] = [];
+    for (const file of attachments) {
+      const saved = (deps.saveAttachment ?? saveAttachment)(userId, cwd, file.name, file.bytes);
+      if (isImage(file.bytes)) { images.push(saved.path); notes.push(`Пользователь приложил изображение: ${saved.path}`); }
+      else notes.push(`Пользователь приложил файл «${file.name}»: ${saved.path} — прочитай его оттуда.`);
+    }
+    await conversation.send(notes.length ? `${text}\n\n${notes.join("\n")}` : text, images);
     await waitIdle(conversation);
     // Индикатор контекста в bb: без этого он навсегда застывал на цифре старого
     // провайдера (у Али 87% три дня).
@@ -378,7 +415,8 @@ export function createBbBridgeHandler(deps: BridgeDeps) {
         res.end(JSON.stringify({ stopped }));
         return;
       }
-      const text = typeof body.text === "string" ? body.text.trim() : "";
+      const attachments = parseAttachments(body.attachments);
+      const text = (typeof body.text === "string" ? body.text.trim() : "") || (attachments.length ? "Посмотри вложения." : "");
       if (!text) throw new BridgeError(400, "Пустое сообщение");
       // Модель и глубина, выбранные в меню bb, — общие с Telegram: выбрал там — так и в боте.
       const prefs = claudePreferences(userId);
@@ -389,7 +427,7 @@ export function createBbBridgeHandler(deps: BridgeDeps) {
         try { saveClaudePreferences(userId, patch); } catch (error) { console.error("[bb-bridge] настройки из bb:", error instanceof Error ? error.message : error); }
       }
       handedOut.delete(`${userId}:${sessionId}`);
-      await runTurn(deps, userId, sessionId, text, res);
+      await runTurn(deps, userId, sessionId, text, res, attachments);
     } catch (error) {
       if (res.headersSent) {
         res.end();

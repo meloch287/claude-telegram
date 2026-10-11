@@ -30,7 +30,7 @@ export function createClaudeBridgeHandler({ identify, socket = SOCKET }) {
     // Человек закрыл bb или отменил ход — обрываем и ход в боте.
     res.once("close", () => { if (!res.writableFinished) upstream.destroy(); });
     let size = 0;
-    req.on("data", (chunk) => { size += chunk.length; if (size > 512000) { upstream.destroy(); fail(413, "Слишком длинное сообщение"); } });
+    req.on("data", (chunk) => { size += chunk.length; if (size > 64 * 1024 * 1024) { upstream.destroy(); fail(413, "Слишком большое сообщение: вложения — до 20 МБ каждое"); } });
     req.pipe(upstream);
   };
 }

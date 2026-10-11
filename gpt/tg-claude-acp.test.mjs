@@ -45,6 +45,7 @@ test("ACP agent speaks to bb and forwards turns to the bot bridge", async () => 
     const init = await rpc("initialize", { protocolVersion: 1 });
     assert.equal(init.result.protocolVersion, 1);
     assert.equal(init.result.agentCapabilities.loadSession, true);
+    assert.equal(init.result.agentCapabilities.promptCapabilities.image, true, "bb шлёт картинки байтами, а не путём, который Claude бота не видит");
     assert.equal((await rpc("session/new", { cwd: "/w", mcpServers: [] })).result.sessionId, SID);
     // Без списка моделей от моста — пустое состояние, история уже в bb.
     assert.deepEqual((await rpc("session/load", { sessionId: SID, cwd: "/w", mcpServers: [] })).result, {});
@@ -67,6 +68,20 @@ test("ACP agent speaks to bb and forwards turns to the bot bridge", async () => 
     const busy = await rpc("session/prompt", { sessionId: "33333333-2222-4333-8444-555555555555", prompt: [{ type: "text", text: "ещё" }] });
     assert.equal(busy.result.stopReason, "end_turn");
     assert.match(inbox.find((m) => m.method === "session/update").params.update.content.text, /работает в Telegram/);
+    // Вложения bb лежат в /home/agent контейнера — агент читает их сам и отдаёт мосту байтами (случай Али)
+    writeFileSync(join(dir, "скрин.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2]));
+    calls.length = 0;
+    await rpc("session/prompt", { sessionId: SID, prompt: [
+      { type: "text", text: "Что на скрине?" },
+      { type: "resource_link", uri: "file://" + join(dir, "скрин.png"), name: "скрин.png" },
+      { type: "image", data: Buffer.from("GIF89a").toString("base64"), mimeType: "image/gif" },
+      { type: "resource_link", uri: "file:///нет/такого.txt", name: "такого.txt" },
+    ] });
+    const sent = calls.find((c) => c.url.endsWith("/turn")).body;
+    assert.deepEqual(sent.attachments.map((a) => [a.name, Buffer.from(a.data, "base64").length]), [["скрин.png", 6], ["изображение-2.gif", 6]]);
+    assert.match(sent.text, /^Что на скрине\?/);
+    assert.match(sent.text, /«такого\.txt» не передалось/);
+    assert.doesNotMatch(sent.text, /file:\/\//, "путь контейнера Claude не нужен — он его не откроет");
     assert.equal((await rpc("session/unknown", {})).error.code, -32601);
   } finally {
     agent.kill(); server.close(); rmSync(dir, { recursive: true, force: true });

@@ -35,7 +35,7 @@ function fakeConversation(options) {
   let busy = false;
   return {
     get busy() { return busy; }, get closed() { return false; }, sessionId: null,
-    async send(text) { seen = { text, resume: options.resumeSessionId, cwd: options.cwd }; busy = true;
+    async send(text, images = []) { seen = { text, images, resume: options.resumeSessionId, cwd: options.cwd }; busy = true;
       holdsDuring = bbHolds(uid, sid);
       await options.output.status("<b>Работаю</b>\n\n• Читаю README");
       await options.output.sendRich("Привет из бота");
@@ -46,7 +46,8 @@ function fakeConversation(options) {
     lastContext() { return { percentage: 12, total: 120000, max: 1000000 }; },
   };
 }
-const server = createServer(createBbBridgeHandler({ api: {}, createConversation: fakeConversation, prepare: () => "/tmp/dialog", create: () => ({ id: "22222222-3333-4444-8555-666666666666", project: "default", title: "Новый диалог", started: false }) }));
+const savedFiles = [];
+const server = createServer(createBbBridgeHandler({ api: {}, createConversation: fakeConversation, saveAttachment: (uid, cwd, name, bytes) => { savedFiles.push([uid, cwd, name, bytes.length]); return { path: cwd + "/вложения/x-" + name, name }; }, prepare: () => "/tmp/dialog", create: () => ({ id: "22222222-3333-4444-8555-666666666666", project: "default", title: "Новый диалог", started: false }) }));
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
 const port = server.address().port;
 const call = (path, body) => new Promise((resolve) => {
@@ -61,6 +62,9 @@ results.empty = (await call("/v1/4242/" + sid + "/turn", { text: " " })).status;
 results.check = JSON.parse((await call("/v1/4242/" + sid + "/check")).body);
 const turn = await call("/v1/4242/" + sid + "/turn", { text: "Привет" });
 results.turn = { status: turn.status, events: turn.body.trim().split("\n").map((l) => JSON.parse(l)), seen, holdsDuring, holdsAfter: bbHolds(uid, sid) };
+const withFiles = await call("/v1/4242/" + sid + "/turn", { text: "", attachments: [{ name: "скрин.png", data: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 0]).toString("base64") }, { name: "план.pdf", data: Buffer.from("%PDF-1").toString("base64") }] });
+results.files = { status: withFiles.status, seen, savedFiles };
+results.tooMany = (await call("/v1/4242/" + sid + "/turn", { text: "x", attachments: Array.from({ length: 11 }, () => ({ name: "a", data: "" })) })).status;
 bbAcquire(uid, sid, async () => {});
 results.checkAfter = JSON.parse((await call("/v1/4242/" + sid + "/check")).body);
 results.busy = (await call("/v1/4242/" + sid + "/turn", { text: "ещё" })).status;
@@ -98,6 +102,11 @@ test("bridge routes, streaming turn, locks and new dialogs", () => {
     assert.equal(r.turn.holdsDuring, true, "пока идёт ход, Telegram диалог не поднимет");
     assert.equal(r.turn.holdsAfter, false);
     assert.equal(r.busy, 409);
+    assert.equal(r.files.status, 200);
+    assert.deepEqual(r.files.savedFiles.map((f) => f.slice(2)), [["скрин.png", 6], ["план.pdf", 6]], "вложения — в папку диалога, куда Claude бота может заглянуть");
+    assert.deepEqual(r.files.seen.images, ["/tmp/dialog/вложения/x-скрин.png"], "картинка уходит Claude как изображение");
+    assert.match(r.files.seen.text, /^Посмотри вложения\.\n\nПользователь приложил изображение: \/tmp\/dialog\/вложения\/x-скрин\.png\nПользователь приложил файл «план\.pdf»: \/tmp\/dialog\/вложения\/x-план\.pdf/);
+    assert.equal(r.tooMany, 400);
     assert.equal(r.created.status, 200);
     assert.equal(r.created.ok, true);
   } finally {

@@ -6,7 +6,8 @@
 // уходит в бота (шлюз 172.30.0.1:8790/claude-bb → ai-bot), где его ведёт тот же
 // движок, что и в Telegram. Поэтому диалог один и тот же в обоих местах.
 // Сессия ACP = Claude-диалог бота (его id).
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
+import { basename } from "node:path";
 import { createInterface } from "node:readline";
 
 const config = JSON.parse(readFileSync(process.env.TG_CLAUDE_CONFIG, "utf8"));
@@ -65,19 +66,40 @@ async function call(path, body = {}, signal) {
   return response;
 }
 
-function promptText(blocks) {
-  const parts = [];
+/**
+ * Вложения bb лежат в домашней папке контейнера — Claude бота (другой пользователь
+ * на сервере) их не видит. Агент читает их здесь и отдаёт мосту байтами.
+ */
+const MAX_ATTACHMENT = 20 * 1024 * 1024;
+const EXT = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp" };
+function readPrompt(blocks, read = (path) => { if (statSync(path).size > MAX_ATTACHMENT) throw Error("больше 20 МБ"); return readFileSync(path); }) {
+  const parts = [], attachments = [];
+  const take = (name, load) => {
+    try { attachments.push({ name, data: load().toString("base64") }); }
+    catch (error) { parts.push(`(Вложение «${name}» не передалось: ${error.message})`); }
+  };
   for (const block of blocks ?? []) {
-    if (block?.type === "text" && block.text) parts.push(block.text);
-    else if (block?.type === "resource" && block.resource?.text) parts.push(`Вложение ${block.resource.uri ?? ""}:\n${block.resource.text}`);
-    else if (block?.type === "resource_link" && block.uri) parts.push(`Файл: ${block.uri}`);
+    if (block?.type === "text" && block.text) {
+      const disk = /^\[image attachment on disk: (.+)\]$/.exec(block.text.trim());
+      if (disk) take(basename(disk[1]), () => read(disk[1]));
+      else parts.push(block.text);
+    } else if (block?.type === "image" && block.data) {
+      take(`изображение-${attachments.length + 1}.${EXT[block.mimeType] ?? "png"}`, () => Buffer.from(block.data, "base64"));
+    } else if (block?.type === "resource" && block.resource?.text) {
+      parts.push(`Вложение ${block.resource.uri ?? ""}:\n${block.resource.text}`);
+    } else if (block?.type === "resource" && block.resource?.blob) {
+      take(basename(String(block.resource.uri ?? "файл")), () => Buffer.from(block.resource.blob, "base64"));
+    } else if (block?.type === "resource_link" && block.uri) {
+      if (block.uri.startsWith("file://")) take(block.name || basename(decodeURIComponent(block.uri.slice(7))), () => read(decodeURIComponent(block.uri.slice(7))));
+      else parts.push(`Ссылка: ${block.uri}`);
+    }
   }
-  return parts.join("\n\n").trim();
+  return { text: parts.join("\n\n").trim(), attachments };
 }
 
 async function prompt(sessionId, blocks) {
-  const text = promptText(blocks);
-  if (!text) return { stopReason: "end_turn" };
+  const { text, attachments } = readPrompt(blocks);
+  if (!text && !attachments.length) return { stopReason: "end_turn" };
   const abort = new AbortController();
   running.set(sessionId, abort);
   const seen = new Set();
@@ -85,7 +107,7 @@ async function prompt(sessionId, blocks) {
   let wrote = false;
   try {
     const sel = chosen.get(sessionId);
-    const response = await call(`${sessionId}/turn`, { text, ...(sel ? { model: sel.model, effort: sel.effort } : {}) }, abort.signal);
+    const response = await call(`${sessionId}/turn`, { text, ...(attachments.length ? { attachments } : {}), ...(sel ? { model: sel.model, effort: sel.effort } : {}) }, abort.signal);
     const decoder = new TextDecoder();
     let buffer = "";
     let stopReason = "end_turn";
@@ -132,7 +154,7 @@ async function handle(message) {
   const { method, params = {} } = message;
   switch (method) {
     case "initialize":
-      return { protocolVersion: 1, agentCapabilities: { loadSession: true, promptCapabilities: { image: false, embeddedContext: true } }, authMethods: [] };
+      return { protocolVersion: 1, agentCapabilities: { loadSession: true, promptCapabilities: { image: true, embeddedContext: true } }, authMethods: [] };
     case "authenticate":
       return {};
     case "session/new": {
