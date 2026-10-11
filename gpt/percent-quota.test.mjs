@@ -3,90 +3,96 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import * as percent from "./percent-quota.mjs";
 const owner = 1057399602;
+const DAY = 86400000;
 function fixture() {
   const db = new DatabaseSync(":memory:");
   let now = 1791000000000;
-  const reset = now + 86400000;
-  const ledger = percent.createPercentLedger(db, owner, () => now);
+  const reset = now + DAY;
+  const meter = []; // [uid, at, ticks] — как gpt_meter_events
+  const ticks = (uid, since) => meter.filter(([u, at]) => (uid === null || u === uid) && at >= since).reduce((n, [, , t]) => n + t, 0);
+  const ledger = percent.createPercentLedger(db, owner, () => now, () => 10, ticks);
   let value = 3,
     end = reset,
-    stale = false,
-    reads = 0;
-  const monitor = {
-    get: async ({ force } = {}) => {
-      assert.equal(force, true);
-      reads++;
-      return {
-        stale,
-        buckets: [
-          {
-            id: "codex",
-            primary: { usedPercent: value, resetsAt: end, windowDurationMins: 10080 },
-          },
-        ],
-      };
-    },
-  };
-  const controller = percent.createPercentController(
-    ledger,
-    monitor,
-    () => {},
-    () => now,
-  );
+    stale = false;
+  const snapshot = () => ({ stale, buckets: [{ id: "codex", primary: { usedPercent: value, resetsAt: end, windowDurationMins: 10080 } }] });
+  const monitor = { get: async () => snapshot() };
+  const controller = percent.createPercentController(ledger, monitor, () => {}, () => now);
   return {
-    db,
-    ledger,
-    controller,
-    reset,
-    get reads() {
-      return reads;
-    },
+    db, ledger, controller, reset,
+    use: (uid, t, at = now) => meter.push([uid, at, t]),
+    sync: () => ledger.sync(snapshot().buckets[0].primary),
     value: (v) => (value = v),
     stale: (v) => (stale = v),
     time: (v) => (now = v),
+    get now() { return now; },
     resetAt: (v) => (end = v),
   };
 }
-test("default is ten account percentage points; owner exempt; repeated samples charge once", async () => {
+
+test("доля = процент подписки × токены человека / токены всех; сумма равна проценту; владелец без лимита", async () => {
   const f = fixture();
   assert.equal(f.ledger.quota(202).limit, 10);
   assert.equal(f.ledger.quota(owner).limit, null);
   await f.controller.begin(202, "a");
-  f.value(8);
-  await Promise.all([f.controller.before(202, "a"), f.controller.before(202, "a")]);
-  assert.equal(f.ledger.quota(202).used, 5);
-  f.value(14);
-  await assert.rejects(f.controller.before(202, "a"), /недельный/);
-  assert.equal(f.ledger.quota(202).used, 11);
-  await f.controller.finish("a");
-  await assert.rejects(f.controller.begin(202, "b"), /недельный/);
-  await f.controller.begin(owner, "owner");
-  f.value(50);
-  await f.controller.before(owner, "owner");
-  await f.controller.finish("owner");
-  assert.equal(f.ledger.quota(202).used, 11);
-});
-test("idle account changes are excluded, users isolated, reset rolls with OpenAI", async () => {
-  const f = fixture();
-  await f.controller.begin(202, "a");
+  f.use(202, 300);
+  f.use(303, 100);
   f.value(7);
   await f.controller.finish("a");
-  f.value(30);
-  await f.controller.begin(303, "b");
-  f.value(32);
-  await f.controller.finish("b");
-  assert.equal(f.ledger.quota(202).used, 4);
-  assert.equal(f.ledger.quota(303).used, 2);
-  f.time(f.reset + 1);
-  f.resetAt(f.reset + 7 * 86400000);
-  f.value(0);
-  await f.controller.begin(202, "c");
-  assert.equal(f.ledger.quota(202).used, 0);
-  f.value(1);
+  assert.equal(f.ledger.quota(202).used, 5.25);
+  assert.equal(f.ledger.quota(303).used, 1.75);
+  // OpenAI досчитал после задачи — раньше это терялось как «простой»
+  f.value(23);
+  f.sync();
+  assert.equal(f.ledger.quota(202).used, 17.25);
+  assert.equal(f.ledger.quota(303).used, 5.75);
+  assert.equal(f.ledger.quota(202).exceeded, true);
+  await assert.rejects(f.controller.begin(202, "b"), /недельный/);
+  await f.controller.begin(303, "c");
   await f.controller.finish("c");
-  assert.equal(f.ledger.quota(202).used, 1);
 });
-test("missing or decreasing observations fail closed; interruption recovery charges previous user", async () => {
+
+test("перенос даты сброса без обнуления не теряет прошлый расход; настоящий сброс начинает окно заново", async () => {
+  const f = fixture();
+  f.use(202, 100, f.now - 3 * DAY);
+  f.value(10);
+  f.sync();
+  assert.equal(f.ledger.quota(202).used, 10);
+  // OpenAI перенёс сброс на сутки вперёд, процент тот же — доля Али не пропадает
+  f.resetAt(f.reset + DAY);
+  f.sync();
+  assert.equal(f.ledger.quota(202).used, 10);
+  // досрочный сброс: процент упал до нуля
+  f.time(f.now + 3600000);
+  f.resetAt(f.now + 7 * DAY);
+  f.value(0);
+  f.sync();
+  assert.equal(f.ledger.quota(202).used, 0);
+  f.time(f.now + 60000);
+  f.use(303, 50);
+  f.value(4);
+  f.sync();
+  assert.equal(f.ledger.quota(303).used, 4);
+  assert.equal(f.ledger.quota(202).used, 0, "старый расход в новое окно не переносится");
+  // пока окно не начато, OpenAI отдаёт «сейчас + 7 дней» — начало окна от этого не едет
+  const before = f.ledger.quota(303).used;
+  f.resetAt(f.now + 7 * DAY + 600000);
+  f.sync();
+  assert.equal(f.ledger.quota(303).used, before);
+});
+
+test("истёкшее окно без нового замера — ноль; нет замера — ноль", async () => {
+  const f = fixture();
+  assert.equal(f.ledger.quota(202).used, 0);
+  f.use(202, 10);
+  f.value(30);
+  f.sync();
+  assert.equal(f.ledger.quota(202).used, 30);
+  f.time(f.reset + 120000); // за пределами минутного допуска на дрожание даты сброса
+  assert.equal(f.ledger.quota(202).used, 0);
+  assert.ok(f.ledger.quota(202).resetsAt > f.reset);
+});
+
+test("нет данных OpenAI или процент пошёл назад во время задачи — задача не стартует/останавливается", async () => {
   const f = fixture();
   f.stale(true);
   await assert.rejects(f.controller.begin(202, "a"), /OpenAI/);
@@ -95,42 +101,7 @@ test("missing or decreasing observations fail closed; interruption recovery char
   f.value(2);
   await assert.rejects(f.controller.before(202, "a"), /OpenAI/);
   f.value(8);
-  f.stale(true);
-  await assert.rejects(f.controller.finish("a"), /OpenAI/);
-  assert.equal(f.ledger.active().job_id, "a");
-  f.stale(false);
-  const restarted = percent.createPercentController(
-    percent.createPercentLedger(f.db, owner),
-    {
-      get: async () => ({
-        stale: false,
-        buckets: [
-          {
-            id: "codex",
-            primary: { usedPercent: 8, resetsAt: f.reset, windowDurationMins: 10080 },
-          },
-        ],
-      }),
-    },
-    () => {},
-    () => 1791000000000,
-  );
-  await restarted.begin(303, "b");
-  assert.equal(f.ledger.quota(202).used, 5);
-  assert.equal(f.ledger.quota(303).used, 0);
-  await assert.rejects(restarted.before(202, "a"), /задач/);
-});
-
-test("task spanning reset charges new window only and expired snapshots cannot reopen old week", async () => {
-  const f = fixture();
-  await f.controller.begin(202, "boundary");
-  f.value(12);
-  await f.controller.before(202, "boundary");
-  f.time(f.reset + 1);
-  await assert.rejects(f.controller.before(202, "boundary"), /OpenAI/);
-  f.resetAt(f.reset + 7 * 86400000);
-  f.value(2);
-  await f.controller.before(202, "boundary");
-  assert.equal(f.ledger.quota(202).used, 2);
-  assert.equal(f.ledger.quota(202).exceeded, false);
+  await f.controller.before(202, "a");
+  await f.controller.finish("a");
+  assert.equal(f.ledger.active(), undefined);
 });
