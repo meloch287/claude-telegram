@@ -81,6 +81,18 @@ export function brandBridgeProviders(list) {
 }
 
 /**
+ * Ответы bb, где есть список провайдеров. Поле ввода берёт провайдеров не из
+ * /system/providers, а из /system/execution-options — там у Claude бота не было
+ * логотипа, и рисовался запасной значок ACP (портфель «Toolbox»).
+ */
+export const BRANDED_PATHS = new Set(["/api/v1/system/providers", "/api/v1/system/execution-options"]);
+export function brandBridgeResponse(pathname, data) {
+  if (pathname === "/api/v1/system/execution-options" && data && typeof data === "object" && Array.isArray(data.providers))
+    return { ...data, providers: brandBridgeProviders(data.providers) };
+  return brandBridgeProviders(data);
+}
+
+/**
  * Режим разрешений для Claude бота. bb пускает к ACP-агенту только accept-edits и
  * full, а интерфейс шлёт режим, запомненный от «Claude Code» (например auto), —
  * и сообщение отклоняется. Для Claude бота этот режим ничего не значит (разрешения
@@ -279,13 +291,13 @@ export function createWebGateway({ auth, runtime, allowed, usage, avatar=async()
             "x-frame-options": "SAMEORIGIN",
           };
           delete headers["set-cookie"];
-          if (req.method === "GET" && routeUrl.pathname === "/api/v1/system/providers" && response.statusCode === 200 && (response.headers["content-type"] || "").includes("application/json")) {
+          if (req.method === "GET" && BRANDED_PATHS.has(routeUrl.pathname) && response.statusCode === 200 && (response.headers["content-type"] || "").includes("application/json")) {
             const chunks = [];
             let size = 0;
             response.on("data", (chunk) => { size += chunk.length; if (size > 2 * 1024 * 1024) { response.destroy(); res.destroy(); } else chunks.push(chunk); });
             response.on("end", () => {
               let body = Buffer.concat(chunks).toString();
-              try { body = JSON.stringify(brandBridgeProviders(JSON.parse(body))); } catch { /* не JSON — отдаём как есть */ }
+              try { body = JSON.stringify(brandBridgeResponse(routeUrl.pathname, JSON.parse(body))); } catch { /* не JSON — отдаём как есть */ }
               delete headers["content-length"];
               delete headers["content-encoding"];
               delete headers.etag;

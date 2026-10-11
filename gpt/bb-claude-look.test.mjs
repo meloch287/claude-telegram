@@ -7,7 +7,7 @@ import { createServer } from "node:http";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { brandBridgeProviders, BRIDGE_LOGO_PATH } from "./web-gateway.mjs";
+import { brandBridgeProviders, brandBridgeResponse, BRANDED_PATHS, BRIDGE_LOGO_PATH } from "./web-gateway.mjs";
 
 test("провайдер acp-tgclaude получает логотип Claude", () => {
   const [codex, bridge] = brandBridgeProviders([
@@ -21,6 +21,17 @@ test("провайдер acp-tgclaude получает логотип Claude", (
   assert.equal(bridge.strings.installUrl, "x");
   assert.deepEqual(bridge.reasoningLevels, [{ id: "high" }]);
   assert.equal(brandBridgeProviders("нет"), "нет");
+});
+
+test("поле ввода (execution-options) тоже с логотипом Claude, а не портфелем", () => {
+  // ровно то, что видела Лиза: в выборе модели «💼 Opus 5.5»
+  assert.ok(BRANDED_PATHS.has("/api/v1/system/execution-options"));
+  const out = brandBridgeResponse("/api/v1/system/execution-options", { providers: [{ id: "acp-tgclaude", logoUrl: null, icon: { glyph: "Toolbox" } }], models: [{ id: "opus" }], permissionCeiling: "full" });
+  assert.ok(out.providers[0].logoUrl.startsWith(BRIDGE_LOGO_PATH));
+  assert.equal(out.providers[0].icon, undefined);
+  assert.deepEqual(out.models, [{ id: "opus" }]);
+  assert.equal(out.permissionCeiling, "full");
+  assert.equal(brandBridgeResponse("/api/v1/system/execution-options", { modelLoadError: "x" }).modelLoadError, "x");
 });
 
 test("агент: модели бота в меню, выбор — только с ходом", async () => {
