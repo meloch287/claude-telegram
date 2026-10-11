@@ -63,10 +63,17 @@ export function plainText(html: string): string {
 /** Сохранить файл в рабочую зону bb; путь внутри контейнера или null (bb у человека нет). */
 export type BbFileSaver = (name: string, bytes: Uint8Array) => Promise<string | null>;
 
-/** Ссылка на файл рабочей зоны, которую bb открывает в просмотре со скачиванием. */
-export function bbFileLink(name: string, containerPath: string): string {
-  const href = containerPath.split("/").map((part) => encodeURIComponent(part).replace(/\(/g, "%28").replace(/\)/g, "%29")).join("/");
-  return `📎 [${name.replace(/[[\]]/g, "")}](${href})`;
+/**
+ * Ссылка на файл рабочей зоны (bb открывает её в просмотре) и рядом «Скачать» — шлюз
+ * отдаёт файл вложением: у html и картинок в просмотре bb кнопки скачивания нет.
+ */
+export function bbFileLink(name: string, containerPath: string, domain = process.env.BB_WEB_DOMAIN): string {
+  const esc = (v: string) => encodeURIComponent(v).replace(/\(/g, "%28").replace(/\)/g, "%29");
+  const href = containerPath.split("/").map(esc).join("/");
+  const link = `📎 [${name.replace(/[[\]]/g, "")}](${href})`;
+  const owner = /^\/app\/workspaces\/(\d+)\//.exec(containerPath);
+  if (!owner || !domain) return link;
+  return `${link} · [⬇️ Скачать](https://u${owner[1]}.${domain}/__web/download?path=${esc(containerPath.slice(owner[0].length))})`;
 }
 
 /**

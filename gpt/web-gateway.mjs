@@ -1,5 +1,6 @@
 import { createServer, request } from "node:http";
 import { readFileSync } from "node:fs";
+import { execFile } from "node:child_process";
 import { WEB_COOKIE } from "./web-auth.mjs";
 import { profileHtml } from "./web-profile.mjs";
 import { serveRussianAsset, russianIndex, publicAppAsset } from "./web-assets.mjs";
@@ -138,7 +139,33 @@ export async function bridgeTurnBody(req, pathname, target) {
   return changed ? Buffer.from(JSON.stringify(body)) : raw;
 }
 
-export function createWebGateway({ auth, runtime, allowed, usage, avatar=async()=>null, beforeMutation = async () => {} }) {
+/**
+ * Скачать файл из своей рабочей зоны bb. Просмотр bb открывает html и картинки, но
+ * кнопки «скачать» у них нет — а людям нужен сам файл. Читает deliver-file.py: только
+ * обычный файл внутри зоны, без ссылок и «..», до 49 МиБ.
+ */
+export function workspaceRelative(uid, raw) {
+  if (typeof raw !== "string" || !raw) return null;
+  const prefix = `/app/workspaces/${uid}/`;
+  const rel = raw.startsWith(prefix) ? raw.slice(prefix.length) : raw;
+  if (rel.startsWith("/") || rel.includes("\0") || rel.split("/").some((p) => p === "" || p === "." || p === "..")) return null;
+  return rel;
+}
+export function attachmentHeaders(name, size) {
+  const ascii = name.replace(/[^\x20-\x7e]|["\\]/g, "_");
+  return {
+    "content-type": "application/octet-stream",
+    "content-disposition": `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`,
+    "content-length": String(size),
+    "cache-control": "no-store",
+  };
+}
+const readWorkspaceFile = (uid, rel) =>
+  new Promise((resolve, reject) =>
+    execFile("python3", [new URL("./deliver-file.py", import.meta.url).pathname, `/opt/ai-bot/tenants/${uid}/workspace`, rel], { encoding: "buffer", maxBuffer: 50 * 1024 * 1024, timeout: 60_000 }, (error, stdout) => (error ? reject(error) : resolve(stdout))),
+  );
+
+export function createWebGateway({ auth, runtime, allowed, usage, avatar=async()=>null, beforeMutation = async () => {}, readFile = readWorkspaceFile }) {
   const sockets = new Map();
   function track(uid, socket) {
     const group = sockets.get(uid) || new Set();
@@ -243,6 +270,14 @@ export function createWebGateway({ auth, runtime, allowed, usage, avatar=async()
         if (!auth.revokeDevice(uid, routeUrl.pathname.split("/").at(-1))) return reply(res, 404, "Устройство не найдено");
         for (const socket of sockets.get(uid) || []) socket.destroy();
         return reply(res, 200, null);
+      }
+      if (routeUrl.pathname === "/__web/download" && req.method === "GET") {
+        const rel = workspaceRelative(uid, routeUrl.searchParams.get("path"));
+        if (!rel) return reply(res, 400, "Неверный путь к файлу");
+        let bytes;
+        try { bytes = await readFile(uid, rel); } catch { return reply(res, 404, "Файл не найден"); }
+        res.writeHead(200, attachmentHeaders(rel.split("/").pop(), bytes.length));
+        return res.end(bytes);
       }
       if (routeUrl.pathname.startsWith("/__web/")) return reply(res, 404, "Не найдено");
       if ((req.method === "POST" && /^\/api\/v1\/hosts(?:\/join-codes)?\/?$/.test(routeUrl.pathname)) || /^\/api\/v1\/hosts\/[^/]+\/(?:enrollment-command|reconnect-commands)\/?$/.test(routeUrl.pathname))

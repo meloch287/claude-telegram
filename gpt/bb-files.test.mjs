@@ -11,7 +11,8 @@ const child = String.raw`
 const dist = new URL(process.env.DIST, "file://").href;
 const { BbOutput, bbFileLink, workspaceFileSaver } = await import(dist + "/bb-bridge.js");
 const r = {};
-r.link = bbFileLink("plan (2).html", "/app/workspaces/7/Файлы Claude/plan (2).html");
+r.link = bbFileLink("plan (2).html", "/app/workspaces/7/Файлы Claude/plan (2).html", "");
+r.withDownload = bbFileLink("plan (2).html", "/app/workspaces/7/Файлы Claude/plan (2).html", "bb.example.test");
 const events = [];
 const hooks = { onAsk: async () => 0, onQuestion: async () => 0, onTimeout: async () => {} };
 const saved = [];
@@ -39,6 +40,7 @@ test("файл из хода Claude — в рабочую зону bb и ссы�
     assert.equal(run.status, 0, run.stderr);
     const r = JSON.parse(run.stdout.trim().split("\n").pop());
     assert.equal(r.link, "📎 [plan (2).html](/app/workspaces/7/%D0%A4%D0%B0%D0%B9%D0%BB%D1%8B%20Claude/plan%20%282%29.html)", "скобки и пробелы не ломают markdown-ссылку");
+    assert.equal(r.withDownload, r.link + " · [⬇️ Скачать](https://u7.bb.example.test/__web/download?path=%D0%A4%D0%B0%D0%B9%D0%BB%D1%8B%20Claude%2Fplan%20%282%29.html)", "рядом с файлом — «Скачать»");
     assert.deepEqual(r.saved, [["plan.html", "<h1>План</h1>"], ["a.py", "print(1)"]]);
     assert.deepEqual(r.events.map((e) => e.type), ["text", "text", "note"]);
     assert.match(r.events[0].text, /^📎 \[plan\.html\]\(\/app\/workspaces\/7\//);
